@@ -1,0 +1,6 @@
+trace"Starting .preload"
+
+function onunload()
+   trace"Stopping .preload"
+end
+

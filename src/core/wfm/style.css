@@ -1,0 +1,243 @@
+body{color:#B4B4B4;margin:0;padding:0;font-family:verdana,sans;font-size:10pt;height:100%;}
+html, #resources{height:100%;}
+h1{margin-bottom:0.7em;font-size:24px;}
+#fstab table{border-collapse:collapse;width:100%;}
+#fstab table,#fstab th,#fstab td{border:1px solid #969696;}
+#fstab th,#fstab td{
+padding-left:5px;padding-right:5px;padding-top:0;padding-bottom:0;
+margin-top:0;
+margin-bottom:0;
+}
+#fstab td pre{margin:0px;}
+
+#fstab td {overflow: hidden;}
+
+img {border:none;}
+
+img.dir {padding-left:5px;}
+
+a,tr {
+  color:#4F6B72;
+}
+
+a:link{text-decoration:none;}
+a:visited{text-decoration:none;}
+a:active{text-decoration:none;}
+a:hover{text-decoration:none;}
+
+#fstab td a:link{text-decoration:none;color:black;}
+#fstab td a:visited{text-decoration:none;color:black;}
+#fstab td a:active{text-decoration:none;color:black;}
+#fstab td a:hover{text-decoration:none;color:black;}
+
+
+#help a, #menulinks a {display: inline-block; width:48px; height:48px;}
+
+#help #menulinks a{
+  margin: 0;
+  padding: 0;
+}
+
+
+#RefreshB { background:url("menu-but.jpg") -0px 0px no-repeat;} 
+#NewFolderB { background:url("menu-but.jpg") -48px 0px no-repeat;}
+#UploadB { background:url("menu-but.jpg") -96px 0px no-repeat;}
+#NewWindowB { background:url("menu-but.jpg") -144px 0px no-repeat;}
+#SearchB { background:url("menu-but.jpg") -192px 0px no-repeat;}
+#FolderB { background:url("menu-but.jpg") -240px 0px no-repeat;}
+#WebDAVB { background:url("menu-but.jpg") -288px 0px no-repeat;}
+#AlbumB { background:url("menu-but.jpg") -336px 0px no-repeat;}
+#HelpB { background:url("menu-but.jpg") -384px 0 no-repeat;}
+#LogoutB { background:url("menu-but.jpg") -432px 0px no-repeat;}
+
+#RefreshB:hover { background:url("menu-but.jpg") -480px 0px no-repeat;} 
+#NewFolderB:hover { background:url("menu-but.jpg") -528px 0px no-repeat;}
+#UploadB:hover { background:url("menu-but.jpg") -576px 0px no-repeat;}
+#NewWindowB:hover { background:url("menu-but.jpg") -624px 0px no-repeat;}
+#SearchB:hover { background:url("menu-but.jpg") -672px 0px no-repeat;}
+#FolderB:hover { background:url("menu-but.jpg") -720px 0px no-repeat;}
+#WebDAVB:hover { background:url("menu-but.jpg") -768px 0px no-repeat;}
+#AlbumB:hover { background:url("menu-but.jpg") -816px 0px no-repeat;}
+#HelpB:hover { background:url("menu-but.jpg") -864px 0 no-repeat;}
+#LogoutB:hover { background:url("menu-but.jpg") -912px 0px no-repeat;}
+
+
+
+a.mp3 span{float:right; padding-right:10px;height:16px;width:16px;background: url(../wfm-mp3/play.png)  no-repeat}
+a.mp3 span:hover{background: url(../wfm-mp3/play2.png)  no-repeat}
+
+span.lock {padding-right:20px;height:16px;width:16px;cursor:help;background: url(../wfm/lock.png)  no-repeat}
+
+#fstab th {
+  background: #969696 url(bg.png) no-repeat;
+  color:white;
+  cursor:pointer;
+  font-weight: bold;
+  height:1.8em;
+}
+
+
+#fstab th.tablesorter-headerAsc {
+  background: #969696 url(asc.png) no-repeat;
+}
+
+#fstab th.tablesorter-headerDesc {
+  background: #969696 url(desc.png) no-repeat;
+}
+
+#fstab tr.odd  {
+  padding-left:5px;padding-right:5px;padding-top:0;padding-bottom:0;
+  background: #FFFFFF;
+}
+
+#fstab tr.even  {background: #efefef;}
+
+#fstab tr.over {background: #ABABAB;}
+
+#menu {
+   background:#33393D;
+   padding: 5px 1em 1em 1em;
+}
+
+#curdir {
+  margin-left:3em;
+  margin-bottom:3em;
+  padding: 5px 1em 5px 1em;
+  font-weight:bold;
+  white-space: nowrap;
+  color:white;
+}
+
+a:link, a:visited {
+  color:#E1E1E1;
+  background:transparent;
+}
+a:hover {
+  color:white;
+  background:transparent;
+}
+
+#help {
+  float:right;
+}
+
+#waiticon{position:absolute;z-index:100;width:48px;height:48px;display:none;background:rgba(255,255,255,.8) url(circle.gif) 8px 8px no-repeat;border-radius: 22px;}
+
+.tooltip{
+  color:white;
+  background:#33393D;
+  padding: 10px;
+}
+
+.tooltip a:link, .tooltip a:visited{color:yellow;}
+
+
+.rtlm{
+border: 1px solid black;
+background: #F0F0F0;
+box-shadow: 10px 10px 5px #444;
+display:none;
+border-radius: 5px;
+position:absolute;
+}
+
+#ctxmenu {
+  padding: 1px;
+  margin: 0px;
+  background: #fff;
+  border: 1px solid #999;
+  box-shadow: 10px 10px 5px #444;
+  position:absolute;
+}
+
+#ctxmenu ul {
+  list-style-type: none;
+  margin: 0px;
+  padding: 0px;
+}
+
+#ctxmenu li {
+  margin: 0px;
+  color: #000;
+  display: block;
+  cursor: default;
+  padding: 3px;
+  border: 1px solid #fff;
+  background: transparent;
+}
+
+#ctxmenu li:hover {
+  border: 1px solid #0a246a;
+  background: #b6bdd2;
+}
+
+
+.rtltmb, .rtlbgr{ /* RTL "Top Menu Border" and "Black Gradient" */
+background: rgb(76,76,76); /* Old browsers */
+background: -moz-linear-gradient(top, rgba(76,76,76,1) 0%, rgba(89,89,89,1) 12%, rgba(102,102,102,1) 25%, rgba(71,71,71,1) 39%, rgba(44,44,44,1) 50%, rgba(0,0,0,1) 51%, rgba(17,17,17,1) 60%, rgba(43,43,43,1) 76%, rgba(28,28,28,1) 91%, rgba(19,19,19,1) 100%); /* FF3.6+ */
+background: -webkit-gradient(linear, left top, left bottom, color-stop(0%,rgba(76,76,76,1)), color-stop(12%,rgba(89,89,89,1)), color-stop(25%,rgba(102,102,102,1)), color-stop(39%,rgba(71,71,71,1)), color-stop(50%,rgba(44,44,44,1)), color-stop(51%,rgba(0,0,0,1)), color-stop(60%,rgba(17,17,17,1)), color-stop(76%,rgba(43,43,43,1)), color-stop(91%,rgba(28,28,28,1)), color-stop(100%,rgba(19,19,19,1))); /* Chrome,Safari4+ */
+background: -webkit-linear-gradient(top, rgba(76,76,76,1) 0%,rgba(89,89,89,1) 12%,rgba(102,102,102,1) 25%,rgba(71,71,71,1) 39%,rgba(44,44,44,1) 50%,rgba(0,0,0,1) 51%,rgba(17,17,17,1) 60%,rgba(43,43,43,1) 76%,rgba(28,28,28,1) 91%,rgba(19,19,19,1) 100%); /* Chrome10+,Safari5.1+ */
+background: -o-linear-gradient(top, rgba(76,76,76,1) 0%,rgba(89,89,89,1) 12%,rgba(102,102,102,1) 25%,rgba(71,71,71,1) 39%,rgba(44,44,44,1) 50%,rgba(0,0,0,1) 51%,rgba(17,17,17,1) 60%,rgba(43,43,43,1) 76%,rgba(28,28,28,1) 91%,rgba(19,19,19,1) 100%); /* Opera11.10+ */
+background: -ms-linear-gradient(top, rgba(76,76,76,1) 0%,rgba(89,89,89,1) 12%,rgba(102,102,102,1) 25%,rgba(71,71,71,1) 39%,rgba(44,44,44,1) 50%,rgba(0,0,0,1) 51%,rgba(17,17,17,1) 60%,rgba(43,43,43,1) 76%,rgba(28,28,28,1) 91%,rgba(19,19,19,1) 100%); /* IE10+ */
+filter: progid:DXImageTransform.Microsoft.gradient( startColorstr='#4c4c4c', endColorstr='#131313',GradientType=0 ); /* IE6-9 */
+background: linear-gradient(top, rgba(76,76,76,1) 0%,rgba(89,89,89,1) 12%,rgba(102,102,102,1) 25%,rgba(71,71,71,1) 39%,rgba(44,44,44,1) 50%,rgba(0,0,0,1) 51%,rgba(17,17,17,1) 60%,rgba(43,43,43,1) 76%,rgba(28,28,28,1) 91%,rgba(19,19,19,1) 100%); /* W3C */
+
+color:white;
+font-family:"Verdana","Tahoma","Arial Black";
+font-weight:bold;
+display: block;
+}
+
+.rtltmb span{
+width:20px;
+height:20px;
+display:block;
+float:right;
+cursor:pointer;
+background:transparent url(close-icon.png) 0 0 no-repeat;
+}
+
+.rtltmb span:hover{ background-position: 0 -20px; }
+
+
+.rtltmb{
+padding:2px 10px 2px 10px;
+height:20px;
+font-size:16px;
+}
+
+
+.jqmOverlay { background-color: #888; }
+
+
+#dropbox {width:160px; height:160px;border:0;position:absolute;top: 40%;left: 50%;margin-top: -80px;margin-left: -80px;display:none;z-index:9999;}
+
+#overlaymask {
+  position:absolute;
+  top:0;
+  left:0;
+  z-index:1000;
+  background-color:#888;
+  display:none;
+}
+
+.ctxmcur {
+  cursor:url(ctxmenu.png) 10 0, pointer;
+}
+
+tr.softblue td{background:#1C9CED}
+
+#qview{
+  border: 1px solid black;
+  border-radius: 5px;
+  box-shadow: 10px 10px 5px #444;
+  background:#33393D;
+  background:white url(circle.gif) 0 0 no-repeat;
+  background-position:center;
+  min-width:32px;
+  min-height:32px;
+
+}
+#qview table{padding:3px;background:white}
+#qview td{color:black;}
+#qview p{font-weight:bold;color:black;padding:10px;background:white}

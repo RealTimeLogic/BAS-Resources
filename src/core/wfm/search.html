@@ -1,0 +1,141 @@
+﻿<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+"http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="utf-8" lang="utf-8">
+<head>
+<meta http-equiv="Content-Type" content="text/html;charset=utf-8" />
+<title>Search</title>
+<style type="text/css">
+body {
+background:#33393D;
+color:white;
+overflow-x:hidden;
+padding-right:40px;
+}
+body,div,table,tr,td{margin:0;padding:0}
+#SearchData{max-width:200px}
+#SearchTxt{height:22px;overflow:hidden;width:100%;}
+iframe {width:99%;height:250px;background:white}
+</style>
+<script type="text/javascript" src="../jquery.js"></script>
+<script type="text/javascript">
+
+var searchList; //Set by SearchList.html
+
+$(function() {
+   var doDirs=true;
+   var doFiles=true;
+   var searchTxtElem=$("#SearchTxt");
+   var isSearching=false;
+   var stack;
+   var ajaxCnt;
+   var searchCnt;
+   var searchTxt;
+   var contSearcingId;
+
+   function clickElem() {
+      var pn=$(this).text();
+      var pos = pn.lastIndexOf('/');
+      if(pos  == pn.length-1)  //If dir
+         parent.window.location.href=pn;
+      else
+         parent.window.location.href=pn.substr(0,pos+1);
+   };
+
+   function addTxt(pn) {
+      var elem=$("<div>"+pn+"</div>");
+      elem.click(clickElem);
+      searchList.append(elem);
+   }
+
+   function stopSearching() {
+      $("#SearchBut").attr("value", "Start");
+      isSearching=false;
+      clearInterval(contSearcingId);
+   }
+   parent.window.stopSearching=stopSearching;
+
+   function contSearcing() {
+      while(stack.length != 0 && ajaxCnt < 2) {
+         search(stack.pop());
+      }
+      if(stack.length == 0 && ajaxCnt == 0)
+         stopSearching();
+   }
+
+   function search(path) {
+      ajaxCnt++;
+      searchTxtElem.html(searchCnt+" : "+path);
+      $.getJSON(path+"?cmd=lj", function(resp) {
+         if(isSearching) {
+            for(var i=0 ; i < resp.length; searchCnt++,i++) {
+               var n = resp[i].n;
+               var pn = path+n;
+               if(resp[i].s < 0) {
+                  pn += "/";
+                  if(ajaxCnt > 2)
+                     stack.push(pn);
+                  else
+                     search(pn);
+                  if(doDirs && n.indexOf(searchTxt) >= 0)
+                     addTxt(pn);
+               }
+               else if(doFiles && n.indexOf(searchTxt) >= 0)
+                  addTxt(pn);
+            }
+            contSearcing();
+         }
+         if(ajaxCnt > 0)
+            ajaxCnt--;
+      });
+   }
+
+   $("#SearchBut").click(function() {
+      stack=[];
+      ajaxCnt=0;
+      if(isSearching) 
+         stopSearching();
+      else {
+         searchTxt = $.trim($("#SearchData").val());
+         if(searchTxt.length == 0 || (!doDirs && !doFiles)) {
+            searchList.html('<b style="color:red">You must specify a search criteria and have at least one of "Files" or "Dirs" selected.</b>');
+            return;
+         }
+         searchList.html("");
+         $(this).attr("value", "Stop");
+         isSearching=true;
+         searchCnt=0;
+         //Timer needed for AJAX with no response i.e. errors.
+         contSearcingId=setInterval(contSearcing,300);
+         search(parent.window.location.pathname);
+      }
+   });
+   $("#DoDirs").click(function() {
+      doDirs = $(this).is(':checked');
+   });
+   $("#DoFiles").click(function() {
+      doFiles = $(this).is(':checked');
+   });
+   $("#SearchTxt").html("Search from: "+parent.window.location.pathname);
+});
+</script>
+</head>
+<body>
+<table>
+<tr>
+  <td><b>Search:</b></td>
+  <td><input type="text" id="SearchData" /></td>
+  <td style="width:10px;"></td>
+  <td><input type="button" value="Start" id="SearchBut" /></td>
+  <td style="width:10px;"></td>
+  <td>Files</td>
+  <td><input type='checkbox' id="DoFiles" checked="checked"/></td>
+  <td>Dirs</td>
+  <td><input type='checkbox' id="DoDirs" checked="checked"/></td>
+</tr>
+</table>
+<div id="SearchTxt"></div>
+<iframe src="SearchList.html" />
+</body>
+</html>
+
+

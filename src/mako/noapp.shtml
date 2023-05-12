@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Mako Server</title>
+<style>
+    body {
+        width: 35em;
+        margin: 0 auto;
+        font-family: Tahoma, Verdana, Arial, sans-serif;
+    }
+</style>
+</head>
+<body>
+<h1>Welcome to Mako Server!</h1>
+<p>If you see this page, the Mako App Server is successfully installed and
+working, however, you have not loaded any applications.</p>
+
+<p>For online documentation, please refer to the following:</p>
+<ul>
+<li><a href="https://makoserver.net/documentation/getting-started/">Getting Started Guide</a></li>
+<li><a href="https://tutorial.realtimelogic.com/">Online Interative Lua Tutorials</a></li>
+<li><a href="https://realtimelogic.com/ba/doc/?url=Mako.html">Programmer's Reference Manual</a></li>
+<li><a href="https://realtimelogic.com/contactus/license/?all=">License Page</a></li>
+<li><a href="https://github.com/RealTimeLogic/BAS/discussions">Support</a></li>
+<li><a href="https://realtimelogic.com/contactus/">Contact Real Time Logic for commercial support</a></li>
+</ul>
+
+<p><em>Thank you for using the Mako Server.</em></p>
+</body>
+</html>

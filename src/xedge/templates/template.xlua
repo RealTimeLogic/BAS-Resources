@@ -1,0 +1,6 @@
+trace"Starting xlua"
+
+function onunload()
+   trace"Stopping xlua"
+end
+

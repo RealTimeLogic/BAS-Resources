@@ -1,0 +1,230 @@
+local iovm = ba.openio("vm")
+local fmt=string.format
+local function print(msg) tracep(false,5,msg) end
+
+local _,op=ba.openio"disk":resourcetype()
+local dos2unix
+if op == "windows" or op == "ce" then
+   dos2unix = function(path)
+      if path:find"^(%w)(:)" then
+         path=path:gsub("^(%w)(:)", "%1",1)
+      end
+      return path:gsub("\\", "/")
+   end
+else
+   dos2unix = function(x) return x end
+end
+
+mako.dos2unix=dos2unix
+if mako.cfgfname then
+   local x=dos2unix(mako.cfgfname)
+   mako.cfgfname=x
+   x=x:match"(.-)/[^/]+$"
+   x = x or "."
+   mako.cfgdir=x
+end
+
+local conf=require"loadconf"
+local cfg={port=conf.port,intf=conf.host}
+
+if mako.execpath then
+   mako.execpath=dos2unix(mako.execpath)
+end
+
+
+local function printListenPort(con,port)
+   if con then
+      local d=fmt("%server listening on IPv%d port %d",
+                  cfg.shark and "SharkSSL s" or "S",
+                  cfg.ipv6 and 6 or 4, port)
+      if cfg.intf then
+         d=fmt("%s, interface %s",d,cfg.intf)
+      end
+      print(d)
+   end
+end
+
+local function findListenSocket(prefPort, startPort, endPort)
+   local bind=ba.socket.bind
+   local port=prefPort
+   local s,e=bind(port, cfg)
+   if not s then
+      port = startPort
+      while port <= endPort do
+         s,e=bind(port, cfg)
+         if s then break end
+         port=port+1
+      end
+   end
+   if s then
+      s:close()
+      return port
+   end
+   error(fmt("Cannot open server listen port using any of %d, %d - %d: %s",
+             prefPort, startPort, endPort,e))
+end
+
+cfg.intf=conf.host
+local port=findListenSocket(conf.port or 80,9357,9370, cfg)
+cfg.intf=conf.sslhost
+local sport=findListenSocket(conf.sslport or 443,9443,9460, cfg)
+ba.serverport=port
+ba.serversslport=sport
+
+
+cfg.ipv6=true
+cfg.intf=conf.host
+if port ~= 0 then
+   ba.lcon6=ba.create.servcon(port,cfg)
+   printListenPort(ba.lcon6, port)
+   cfg.ipv6=false
+   ba.lcon=ba.create.servcon(port,cfg)
+   printListenPort(ba.lcon6 or ba.lcon, port, {})
+   mako.port=port
+end
+
+local err -- Used by code below
+
+local function findAndLoadCert(loadCert,certf,keyf)
+   local xio,cert
+   local function mkname(path,name)
+      return fmt("%s/%s",path,name):gsub("//","/")
+   end
+   local function find(path)
+      if path then
+         local name=mkname(path,certf)
+         if xio:stat(name) then return path end
+      end
+   end
+   xio=ba.openio"disk"
+   local path = find("") or find(mako.cfgdir) or find(mako.execpath)
+   if not path then
+      xio=ba.openio"home"
+      path = find("")
+   end
+   if path then
+      certf = mkname(path,certf)
+      if xio:stat(certf) then
+         cert = loadCert(xio, certf, keyf and mkname(path,keyf))
+         if not cert and keyf then certf = keyf end -- For error info below
+      end
+   end
+   if not cert and not err then
+      err=fmt("%s not found",certf)
+   end
+end
+
+-- Make shark object and set certificates as per config 'conf' file
+local function mkshark(conf, usebuiltin, keys, certs)
+   local store
+   if conf.certstore then
+      store = ba.create.certstore()
+      local function loadCert(xio,certf)
+         local ok
+         ok,err = store:addcert(xio,certf)
+         print(fmt('Loading store "%s"%s',certf, ok and "" or " failed!"))
+         return ok
+      end
+      if type(conf.certstore) == 'table' then
+         for ix,certf in ipairs(conf.certstore) do
+            findAndLoadCert(loadCert,certf)
+            if err then break end
+         end
+      else
+         findAndLoadCert(loadCert,conf.certstore)
+      end
+      if err then store = nil end
+   end
+   local shark=ba.create.sharkssl(store,{server=true})
+   if not err and ((conf.keyfile and conf.certfile) or (keys and certs)) then
+      local function loadCert(xio,certf,keyf)
+         local cert
+         if not xio:stat(keyf) then return end
+         cert,err=ba.create.sharkcert(xio,certf,keyf,"sharkssl")
+         if cert and shark:addcert(cert) then
+            print(fmt('Loading certificate "%s"',certf))
+         else
+            cert=nil
+         end
+         return cert
+      end
+      if conf.keyfile then
+         if type(conf.certfile) == 'table' then
+            for ix,certf in ipairs(conf.certfile) do
+               findAndLoadCert(loadCert,certf, conf.keyfile[ix])
+               if err then break end
+            end
+         else
+            findAndLoadCert(loadCert,conf.certfile,conf.keyfile)
+         end
+      end
+      if keys then
+         local hio=ba.openio"home"         
+         for i,k in ipairs(keys) do
+            loadCert(hio, certs[i], k)
+         end
+      end
+   elseif usebuiltin then
+      err="No certs found"
+      local certfmt=".certificate/%s.%s"
+      for fn in iovm:files".certificate" do
+         local name,ext = fn:match"([^%.]+)%.(.+)"
+         if ext == "key" then
+            local cert
+            cert,err=ba.create.sharkcert(
+               iovm, fmt(certfmt,name,"pem"), fmt(certfmt,name,"key", "sharkssl"))
+            if not cert then break end
+            print(fmt("Loading certificate %s",name))
+            shark:addcert(cert)
+         end
+      end
+   else
+      err="No Cert"
+   end
+   if err then return nil,err end
+   return shark
+end
+
+local shark,err = mkshark(conf, true)
+
+if sport ~= 0 then
+   if not err then
+      local info
+      local function rsa(con)
+         if con and conf.favorRSA == true then
+            con:favorRSA(true)
+            if not info then
+               print("Favor RSA certificate")
+               info=true
+            end
+         end
+         return con
+      end
+      cfg.shark=shark
+      cfg.intf=conf.sslhost
+      cfg.ipv6=true
+      ba.slcon6=rsa(ba.create.servcon(sport,cfg))
+      printListenPort(ba.slcon6,sport)
+      cfg.ipv6=false
+      ba.slcon=rsa(ba.create.servcon(sport,cfg))
+      printListenPort(ba.slcon6 or ba.slcon, sport)
+      mako.sslport=sport
+   else
+      print(fmt("Cannot open certificate or private key: %s.", err))
+      print"SSL not enabled."
+   end
+end
+
+function mako.loadcerts(k,c)
+   if k or c then
+      assert(type(k) == 'table' and type(c) == 'table' and
+             type(k[1]) == 'string' and type(c[1]) == 'string')
+   end
+   local shark,err=mkshark(require"loadconf".load(), false, k, c)
+   if shark then
+      local cfg = {shark=shark}
+      if ba.slcon then ba.slcon = ba.create.servcon(ba.slcon,cfg) end
+      if ba.slcon6 then ba.slcon6 = ba.create.servcon(ba.slcon6,cfg) end
+   end
+   return shark,err
+end

@@ -1,0 +1,46 @@
+<script>
+function initDialog()
+{
+   var msg;
+   var url=unescape(cleanHref(window.location.href));
+   $.getJSON(url+"?cmd=sesuri", function(resp) {
+      if(resp.tmo == 0) return;
+      var ix=url.indexOf("/",8);
+      url=url.substr(0,ix)+resp.uri;
+      var mins = Math.floor(resp.tmo/60);
+      var hours = Math.floor(mins/60);
+      mins = mins % 60;
+      mins = mins < 10 ? "0"+mins : ""+mins;
+      hours = hours < 10 ? "0"+hours : ""+hours;
+      msg=ua.search(/windows/i) > 0 ?
+         "Right click on My Computer, select Disconnect<br/>Network Drive," :
+         "disconnect the network drive<br/>";
+      $("#DavPass").html("You will automatically be logged out after "+hours+":"+mins+" hour(s) of inactivity,<br/>which means you need to "+msg+" and repeat the above procedure to activate a new drive.");
+      $("#DavURL").attr("value",url).attr("size",url.length+"").select().focus();
+});
+   var ua=window.navigator.userAgent;
+   if(ua.search(/windows/i) > 0) {
+      msg='<ol><li>Copy the above URL (CTRL-C).</li><li>Right click on My Computer and select Map Network Drive.</li><li>In the Folder "entry field", paste (CTRL-V) the URL, and click Finish.</li><li id="DavPass">Enter your username and password in the authentication box that appears.</li></ol>';
+      if(window.location.protocol == "https:")
+         msg += "<p><b>Note:</b> You are using a secure connection. Not all Microsoft WebDAV clients support<br/>secure connections. If you cannot connect, try changing https:// to http://<br/>or use a third-party WebDAV client that supports secure connections.</p>";
+   }
+   else if(ua.search(/OS X/i) > 0) {
+      msg="<p>Mount the WebDAV server as follows:</p><ol><li>Copy the above URL (Command-C).</li><li>Open Finder.</li><li>Choose Go > Connect to Server (Command-K).</li><li>In the Server Address field, paste the URL (Command-V).</li><li>Click Connect.</li><li id='DavPass'>Enter your username and password in the authentication box that appears.</li></ol></div>"
+   }
+   else {
+      msg="<p>Copy and paste the above URL into your WebDAV client of choice.</p>";
+   }
+   $('<input type="text" id="DavURL" style="width:100%" value="'+url+'"/>'+msg).appendTo("#DavInfo");
+
+   $.getJSON(url+"?cmd=helpuri", function(resp) { 
+      if(resp.uri) {
+         var uri = resp.uri+"#WebDAV";
+         $("#DavInfo").append("<p style='font-size:120%'><b>First time user:</b> read the <a target='_blank' href='"+uri+"'>help/introduction</a>.</p>")
+      }
+   });
+
+   $("#DavURL").select().focus();
+};
+</script>
+<div class="rtltmb"><span></span>WebDAV Session URL</div>
+<div id="DavInfo" class="tooltip"></div>

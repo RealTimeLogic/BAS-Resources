@@ -1,0 +1,5 @@
+# -*- mode: gitignore; -*-
+*~
+# remove apps setup for current machine
+xedge.conf
+
