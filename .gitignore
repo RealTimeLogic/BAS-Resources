@@ -1,2 +1,5 @@
 # -*- mode: gitignore; -*-
 *~
+build/XedgeBuild
+build/XedgeZip.c
+build/Xedge.zip
