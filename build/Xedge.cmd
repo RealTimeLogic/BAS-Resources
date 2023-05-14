@@ -19,7 +19,7 @@ if /i "%userResponse%"=="y" (
     xcopy ..\..\src\opcua\* .lua /eq || exit /b
 )
 
-set /p "userResponse=Do you want to use the large cacert.shark or do you want to create a new with minimal certs large/small (l/s)? "
+set /p "userResponse=Do you want to use the large cacert.shark or do you want to create a new with minimal certs: large/small (l/s)? "
 if /i "%userResponse%"=="s" (
    cd .certificate || exit /b
    del cacert.shark || exit /b
