@@ -1,6 +1,7 @@
 #!/bin/bash
 
-export PATH=$PATH:$PWD../tools/linux
+export PATH=$PWD/../tools/linux:$PATH
+chmod +x ../tools/linux/*
 executables="zip curl SharkSSLParseCAList bin2c"
 for i in $executables; do
     if ! command -v $i &> /dev/null; then

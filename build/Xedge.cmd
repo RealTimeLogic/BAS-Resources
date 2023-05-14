@@ -1,4 +1,11 @@
 @echo off
+
+where /q SharkSSLParseCAList.exe
+if ERRORLEVEL 1 (
+   echo Adding ..\tools\windows to path.
+   set "PATH=%CD%\..\tools\windows;%PATH%"
+)
+
 set "executables=zip.exe curl.exe SharkSSLParseCAList.exe bin2c.exe"
 for %%i in (%executables%) do (
     where /q %%i
@@ -52,5 +59,6 @@ if exist "..\..\..\lua-protobuf" (
 zip -D -q -u -r -9 ../Xedge.zip .
 cd ..
 bin2c -z getLspZipReader Xedge.zip XedgeZip.c
-echo Copy XedgeZip.c to your build directory
+echo Done!
+echo Copy the produced XedgeZip.c resource file to your build directory
 

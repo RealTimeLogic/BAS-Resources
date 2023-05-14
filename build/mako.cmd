@@ -1,4 +1,12 @@
 @echo off
+
+where /q zip.exe
+if ERRORLEVEL 1 (
+   echo Adding ..\tools\windows to path.
+   set "PATH=%CD%\..\tools\windows;%PATH%"
+)
+
+
 set "executables=zip.exe"
 for %%i in (%executables%) do (
     where /q %%i
