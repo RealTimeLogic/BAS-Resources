@@ -21,7 +21,7 @@ mkdir MakoBuild || exit /b 2
 cd MakoBuild || exit /b 3
 xcopy ..\..\src\core . /eq || exit /b 4
 xcopy ..\..\src\mako . /eq || exit /b 5
-xcopy ..\..\src\opcua\* .lua /eq || exit /b 6
+xcopy ..\..\src\opcua .lua\opcua\ /eq || exit /b 6
 
 if exist "..\..\..\lua-protobuf" (
    echo Including lua-protobuf and Sparkplug lib

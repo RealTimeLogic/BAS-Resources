@@ -23,7 +23,7 @@ xcopy ..\..\src\xedge . /eq || exit /b 5
 xcopy ..\..\src\mako\.lua\acme .lua\acme  /eq || exit /b 6
 set /p "userResponse=Do you want to include OPC-UA (y/n)? "
 if /i "%userResponse%"=="y" (
-    xcopy ..\..\src\opcua\* .lua /eq || exit /b 7
+   xcopy ..\..\src\opcua .lua\opcua\ /eq || exit /b 7
 )
 
 set /p "userResponse=Do you want to use the large cacert.shark or do you want to create a new with minimal certs: large/small (l/s)? "

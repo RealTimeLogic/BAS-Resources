@@ -19,7 +19,7 @@ shopt -s dotglob
 
 cp -R ../../src/core/* . || exit 1
 cp -R ../../src/mako/* . || exit 1
-cp -R ../../src/opcua/* . || exit 1
+cp -R ../../src/opcua .lua/ || exit 1
 
 if [ -d "../../../lua-protobuf" ]; then
     echo "Including lua-protobuf and Sparkplug lib"
