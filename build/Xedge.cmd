@@ -11,25 +11,25 @@ for %%i in (%executables%) do (
     where /q %%i
     if ERRORLEVEL 1 (
         echo %%i not found in the path.
-        exit /b
+        exit /b 1
     )
 )
 if exist "xedge.zip" (del xedge.zip)
 if exist "XedgeBuild" (rmdir /s /q XedgeBuild)
-mkdir XedgeBuild || exit /b
-cd XedgeBuild || exit /b
-xcopy ..\..\src\core . /eq || exit /b
-xcopy ..\..\src\xedge . /eq || exit /b
-xcopy ..\..\src\mako\.lua\acme .lua\acme  /eq || exit /b
+mkdir XedgeBuild || exit /b 2
+cd XedgeBuild || exit /b 3
+xcopy ..\..\src\core . /eq || exit /b 4
+xcopy ..\..\src\xedge . /eq || exit /b 5
+xcopy ..\..\src\mako\.lua\acme .lua\acme  /eq || exit /b 6
 set /p "userResponse=Do you want to include OPC-UA (y/n)? "
 if /i "%userResponse%"=="y" (
-    xcopy ..\..\src\opcua\* .lua /eq || exit /b
+    xcopy ..\..\src\opcua\* .lua /eq || exit /b 7
 )
 
 set /p "userResponse=Do you want to use the large cacert.shark or do you want to create a new with minimal certs: large/small (l/s)? "
 if /i "%userResponse%"=="s" (
-   cd .certificate || exit /b
-   del cacert.shark || exit /b
+   cd .certificate || exit /b 8
+   del cacert.shark || exit /b 9
    rem List from asking AI for the most common root certs
    curl https://letsencrypt.org/certs/isrgrootx1.pem > cacert.pem
    curl https://letsencrypt.org/certs/isrg-root-x2.pem >> cacert.pem
@@ -45,12 +45,14 @@ if /i "%userResponse%"=="s" (
 )
 
 del README.md
+del .preload
+del .gitignore
 
 if exist "..\..\..\lua-protobuf" (
    echo Including lua-protobuf and Sparkplug lib
-   copy ..\..\..\lua-protobuf\protoc.lua .lua > nul || exit /b
-   copy ..\..\..\lua-protobuf\serpent.lua .lua > nul || exit /b
-   copy ..\..\src\sparkplug\* .lua > nul || exit /b
+   copy ..\..\..\lua-protobuf\protoc.lua .lua > nul || exit /b 10
+   copy ..\..\..\lua-protobuf\serpent.lua .lua > nul || exit /b 11
+   copy ..\..\src\sparkplug\* .lua > nul || exit /b 12
 ) else (
    echo ..\..\..\lua-protobuf not found; Not Including lua-protobuf and Sparkplug
 )
@@ -58,7 +60,8 @@ if exist "..\..\..\lua-protobuf" (
 
 zip -D -q -u -r -9 ../Xedge.zip .
 cd ..
-bin2c -z getLspZipReader Xedge.zip XedgeZip.c
-echo Done!
-echo Copy the produced XedgeZip.c resource file to your build directory
-
+IF NOT DEFINED NO_BIN2C (
+   bin2c -z getLspZipReader Xedge.zip XedgeZip.c
+   echo Done!
+   echo Copy the produced XedgeZip.c resource file to your build directory
+)

@@ -46,6 +46,9 @@ if [ "$userResponse" = "s" ]; then
 fi
 
 rm README.md
+rm .preload
+rm .gitignore
+
 
 if [ -d "../../../lua-protobuf" ]; then
     echo "Including lua-protobuf and Sparkplug lib"

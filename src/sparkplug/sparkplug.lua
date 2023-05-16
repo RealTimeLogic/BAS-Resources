@@ -73,7 +73,7 @@ local DataTypes <const> = { -- SP 14.2
    File = 18,
    Template = 19,
 
-   PropertySet     = 20,
+   PropertySet	   = 20,
    PropertySetList = 21,
 
    Int8Array = 22,
@@ -144,9 +144,9 @@ function PL:copy() -- Copy Sparkplug Lua table
    local t={}
    for k,v in pairs(self) do
       if "table" == type(v) then
-         t[k]=PL.copy(v)
+	 t[k]=PL.copy(v)
       else
-         t[k]=v
+	 t[k]=v
       end
    end
    return t
@@ -275,10 +275,10 @@ end
 local function create(addr, onstatus, ondata, groupId, nodeName, nbirth, op, ndeath)
    ndeath = ndeath or payload()
    assert("function"==type(onstatus) and
-          "string"==type(groupId) and
-          "string"==type(nodeName) and
-          "table"==type(nbirth) and
-          "table"==type(ndeath), "Wrong args.")
+	  "string"==type(groupId) and
+	  "string"==type(nodeName) and
+	  "table"==type(nbirth) and
+	  "table"==type(ndeath), "Wrong args.")
    -- _nextSeq: SP 15.1.1 seq
    local self={_nextSeq=0,_nbirth=nbirth,_ndeath=ndeath,_ondata=ondata}
    spEncode(self,nbirth,"nbirth") -- Validate

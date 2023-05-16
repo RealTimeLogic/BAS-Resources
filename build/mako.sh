@@ -25,9 +25,16 @@ if [ -d "../../../lua-protobuf" ]; then
     echo "Including lua-protobuf and Sparkplug lib"
     cp ../../../lua-protobuf/protoc.lua .lua/ || exit 1
     cp ../../../lua-protobuf/serpent.lua .lua/ || exit 1
-    cp ../../src/sparkplug/* .lua || exit /b
+    cp ../../src/sparkplug/* .lua || exit 1
 else
     echo "../../../lua-protobuf not found; Not Including lua-protobuf and Sparkplug"
+fi
+
+if [ -d "../../../LPeg" ]; then
+    echo "Including LPeg"
+    cp ../../../LPeg/re.lua .lua/ || exit 1
+else
+    echo "../../../LPeg not found; Not Including LPeg"
 fi
 
 zip -D -q -u -r -9 ../mako.zip .
