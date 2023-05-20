@@ -25,7 +25,7 @@ cp -R ../../src/mako/.lua/acme/* .lua/acme || exit 1
 
 read -p "Do you want to include OPC-UA (y/n)? " userResponse
 if [ "$userResponse" = "y" ]; then
-    cp -R ../../src/opcua/* .lua || exit 1
+    cp -R ../../src/opcua .lua/ || exit 1
 fi
 
 read -p "Do you want to use the large cacert.shark or do you want to create a new with minimal certs: large/small (l/s)? " userResponse
@@ -61,6 +61,9 @@ fi
 
 zip -D -q -u -r -9 ../Xedge.zip .
 cd ..
-bin2c -z getLspZipReader Xedge.zip XedgeZip.c
-echo "Copy XedgeZip.c to your build directory"
+if [ -z "$NO_BIN2C" ]; then
+    bin2c -z getLspZipReader Xedge.zip XedgeZip.c
+    echo "Copy XedgeZip.c to your build directory"
+fi
+
 
