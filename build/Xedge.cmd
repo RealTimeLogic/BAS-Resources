@@ -47,6 +47,7 @@ if /i "%userResponse%"=="s" (
 del README.md
 del .preload
 del .gitignore
+del .lua\Xedge4Mako.lua
 
 if exist "..\..\..\lua-protobuf" (
    echo Including lua-protobuf and Sparkplug lib

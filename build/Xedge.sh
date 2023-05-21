@@ -48,6 +48,7 @@ fi
 rm README.md
 rm .preload
 rm .gitignore
+rm .lua/Xedge4Mako.lua
 
 
 if [ -d "../../../lua-protobuf" ]; then
