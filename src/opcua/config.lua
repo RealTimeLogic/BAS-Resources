@@ -292,7 +292,7 @@ local function serverConfig(config)
     error("invalid listenAddress")
   end
 
-  if config.autenticate and type(config.autenticate) ~= "function" then
+  if config.authenticate and type(config.authenticate) ~= "function" then
     error("authorize not a function")
   end
 
