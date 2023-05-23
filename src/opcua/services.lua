@@ -274,7 +274,7 @@ function Svc:activateSession(req, channel)
     end
   end
 
-  local autenticate = self.config.autenticate or allowAll
+  local authenticate = self.config.authenticate or allowAll
   if dbgOn then traceD(fmt("Services:activateSession(ch:'%s') | Validating identity token", channel.channelId)) end
 
   local allowed = false
@@ -310,11 +310,11 @@ function Svc:activateSession(req, channel)
       if errOn then traceE(fmt("Services:activateSession(ch:'%s') | Not an anonymous token ", channel.channelId)) end
       error(BadIdentityTokenRejected)
     end
-    allowed = autenticate("anonymous")
+    allowed = authenticate("anonymous")
   elseif tokenTypeId == "i=324" then
     if infOn then traceI(fmt("Services:activateSession(ch:'%s') | Check User Name", channel.channelId)) end
     local password = decrypt(authPolicy, token.body.password)
-    allowed = autenticate("username", password, token.body.userName)
+    allowed = authenticate("username", password, token.body.userName)
   elseif tokenTypeId == "i=327" then
     if infOn then traceI(fmt("Services:activateSession(ch:'%s') | Check x509 certificate", channel.channelId)) end
     if tokenPolicy.securityPolicyUri and tokenPolicy.securityPolicyUri ~= ua.Types.SecurityPolicy.None or req.userTokenSignature.signature then
@@ -331,21 +331,21 @@ function Svc:activateSession(req, channel)
         error(BadUserSignatureInvalid)
       end
     end
-    allowed = autenticate("x509", token.body.certificateData)
+    allowed = authenticate("x509", token.body.certificateData)
   elseif tokenTypeId == "i=940" then -- IssuedToken
     local tokenData = decrypt(authPolicy, token.body.tokenData)
     if tokenPolicy.issuedTokenType == ua.Types.IssuedTokenType.Azure then
       if infOn then traceI(fmt("Services:activateSession(ch:'%s') | Check Azure token", channel.channelId)) end
-      allowed = autenticate("azure", tokenData, tokenPolicy.issuerEndpointUrl)
+      allowed = authenticate("azure", tokenData, tokenPolicy.issuerEndpointUrl)
     elseif tokenPolicy.issuedTokenType == ua.Types.IssuedTokenType.JWT then
       if infOn then traceI(fmt("Services:activateSession(ch:'%s') | Check JWT token", channel.channelId)) end
-      allowed = autenticate("jwt", tokenData, tokenPolicy.issuerEndpointUrl)
+      allowed = authenticate("jwt", tokenData, tokenPolicy.issuerEndpointUrl)
     elseif tokenPolicy.issuedTokenType == ua.Types.IssuedTokenType.OAuth2 then
       if infOn then traceI(fmt("Services:activateSession(ch:'%s') | Check OAuth2 token", channel.channelId)) end
-      allowed = autenticate("oauth2", tokenData, tokenPolicy.issuerEndpointUrl)
+      allowed = authenticate("oauth2", tokenData, tokenPolicy.issuerEndpointUrl)
     elseif tokenPolicy.issuedTokenType == ua.Types.IssuedTokenType.OPCUA then
       if infOn then traceI(fmt("Services:activateSession(ch:'%s') | Check OPCUA token", channel.channelId)) end
-      allowed = autenticate("opcua", tokenData, tokenPolicy.issuerEndpointUrl)
+      allowed = authenticate("opcua", tokenData, tokenPolicy.issuerEndpointUrl)
     else
       if errOn then traceE(fmt("Services:activateSession(ch:'%s') | Unknown issued token type '%s'", channel.channelId, tokenPolicy.issuedTokenType)) end
       error(BadIdentityTokenRejected)
@@ -378,7 +378,7 @@ function Svc:activateSession(req, channel)
     results = {Good}
   }
 
-  if infOn then traceI(fmt("Services:activateSession(ch:'%s') | Access premitted", channel.channelId)) end
+  if infOn then traceI(fmt("Services:activateSession(ch:'%s') | Access permitted", channel.channelId)) end
 
   return result;
 end
