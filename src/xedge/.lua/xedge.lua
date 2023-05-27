@@ -654,7 +654,7 @@ startAcmeDns=function(warn)
    end
 end
 
-local installAuth -- function = installOrSetAuth() or setdb()
+local installAuth -- function is: installOrSetAuth() or setdb()
 function installOrSetAuth()
    if not next(userdb) and not xedge.sso then return end
    local ju=ba.create.jsonuser()
@@ -895,7 +895,7 @@ local commands={
       if data.name then
 	 if #data.pwd > 0 then
 	    local pwd=xedge.ha1(data.name,data.pwd)
-	    userdb[data.name]={pwd={pwd},roles={},recycle=true}
+	    userdb[data.name]={pwd={pwd},roles={},maxusers=2}
 	 else
 	    userdb[data.name]=nil -- delete
 	 end

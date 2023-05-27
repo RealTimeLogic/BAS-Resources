@@ -53,13 +53,17 @@ local data=request:data()
 
 local action
 if request:method() == "POST" then
+   local function tooMany() emitLogin("Too many authenticated users") end
    if data.locallogin then
       if hasUserDb then
 	 local username=xedge.trim(data.username)
-	 local ha1=xedge.authuser:getpwd(username)
+	 local ha1,maxusers,recycle=xedge.authuser:getpwd(username)
 	 if ha1 and ha1 == xedge.ha1(username,xedge.trim(data.password)) then
-	    request:login(username)
-	    action=emitOK
+	    if request:login(username,maxusers,recycle) then
+               action=emitOK
+            else
+               action = tooMany
+            end
 	 else
 	    action = function() emitLogin"Invalid credentials" end
 	 end
@@ -69,8 +73,11 @@ if request:method() == "POST" then
    elseif sso then -- SSO resp and we have sso
       local header,payload = sso.login(request)
       if header then
-	 request:login(payload.preferred_username)
-	 action = function() emitOK(payload) end
+	 if request:login(payload.preferred_username,2,false) then
+            action = function() emitOK(payload) end
+         else
+            action = tooMany
+         end
       else
 	 action = function() emitLogin(payload) end -- Payload is now 'err'
       end
