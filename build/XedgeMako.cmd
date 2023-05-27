@@ -16,7 +16,6 @@ xcopy ..\..\src\xedge . /eq || exit /b 5
 
 del README.md
 del .config
-del .gitignore
 rmdir /s /q .certificate
 
 zip -D -q -u -r -9 ../Xedge.zip .

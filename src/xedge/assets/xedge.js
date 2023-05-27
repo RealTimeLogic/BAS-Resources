@@ -54,10 +54,10 @@ function jsonReq(settings,cb,emsg) {
 	if("Unauthorized"==err) {
 	    loader.login(()=>jsonReq(settings,cb,emsg));
 	}
-        else if(loader.isActive()) {
-            //Just reload everything if it fails at startup (TCP glitch)
-            location.reload();
-        }
+	else if(loader.isActive()) {
+	    //Just reload everything if it fails at startup (TCP glitch)
+	    location.reload();
+	}
 	else {
 	    emsg=emsg+(r ? r : err);
 	    alertErr(emsg);
@@ -740,7 +740,12 @@ function treeCtxMenu(e,node) {
 */
 function openSelFile() {
     const fn=fsBase+selpn;
-    function err(xhr, stat, e){ alertErr('Request failed: '+e+ " : "+stat); };
+    function err(xhr, stat, e){
+	if("Unauthorized"==e)
+	    loader.login(openSelFile);
+	else
+	    alertErr('Request failed: '+e+ " : "+stat);
+    };
     $.ajax({type:"HEAD",url:fn,
 	success: function(data, s, xhr) {
 	    const mt = xhr.getResponseHeader('Content-Type');
@@ -1375,7 +1380,7 @@ $( window ).on( "load",()=> {
 		l.html(spinner);
 		show();
 	    },
-            isActive:()=> hasLoader
+	    isActive:()=> hasLoader
 	};
 	afterLogin=()=>{
 	    o.remove();

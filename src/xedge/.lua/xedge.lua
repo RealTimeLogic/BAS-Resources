@@ -183,7 +183,7 @@ do -- elog
 	 if send2log then
 	    log("%s",data)
 	 else
-            op=op or {}
+	    op=op or {}
 	    op.body=data
 	    ba.thread.run(function() sendmail(op) end)
 	 end
@@ -200,8 +200,8 @@ do -- elog
 
    function xedge.elog(op,fmt,...)
       if "table" ~= type(op) then
-         fmt=op
-         op={}
+	 fmt=op
+	 op={}
       end
       local cfg=xedge.cfg.elog
       if cfg.enablelog and cfg.smtp and not tlConnected then
@@ -689,7 +689,7 @@ function installOrSetAuth()
    log"Installing authenticator"
    local dir=ba.create.dir("private",127)
    dir:setauth(auth)
-   xedge.rtld:insert(dir)
+   xedge.rtld:insertprolog(dir)
    xedge.prd=dir
    if xedge.tldir then xedge.tldir:setauth(auth) end
    xedge.appsd:setauth(auth)
@@ -848,6 +848,7 @@ end
 
 -- Used by command.lsp via xedge.command()
 local commands={
+
    acme=function(cmd,data)
 	   local f=acmeCmd[data.acmd]
       if not f then cmd:json{err="Unknown acmd"}  end
@@ -940,29 +941,29 @@ local commands={
       local ecfg=xedge.cfg.elog
       d.cmd=nil
       if next(d) then -- not empty
-         for k,v in pairs(d) do d[k]=trim(v) end
+	 for k,v in pairs(d) do d[k]=trim(v) end
 	 local old=t2s(smtp)
 	 local newsmtp=d
 	 local new=t2s(newsmtp)
 	 if old ~= new or not ecfg.smtp then
-            local settingsOK
-            if #d.server > 4 and #d.connsec > 0 and #d.password > 3 and
-               #d.email > 4 and tonumber(d.port) and #d.user > 2 then
-               log("Sending test email to %s",d.email)
-               rsp.ok,rsp.err=sendmail({body="Test email"}, newsmtp)
-               settingsOK=true
-            else
-               rsp.ok=true
-            end
+	    local settingsOK
+	    if #d.server > 4 and #d.connsec > 0 and #d.password > 3 and
+	       #d.email > 4 and tonumber(d.port) and #d.user > 2 then
+	       log("Sending test email to %s",d.email)
+	       rsp.ok,rsp.err=sendmail({body="Test email"}, newsmtp)
+	       settingsOK=true
+	    else
+	       rsp.ok=true
+	    end
 	    if rsp.ok then
 	       log(settingsOK and "SMTP settings OK" or "Disabling SMTP")
 	       xedge.cfg.smtp=ba.aesencode(k,jencode(d))
-               smtp=encodedStr2Tab(xedge.cfg.smtp)
-               if settingsOK then
-                  ecfg.smtp=true
-               else
-                  ecfg.smtp=false
-               end
+	       smtp=encodedStr2Tab(xedge.cfg.smtp)
+	       if settingsOK then
+		  ecfg.smtp=true
+	       else
+		  ecfg.smtp=false
+	       end
 	       xedge.saveCfg()
 	    end
 	 end
