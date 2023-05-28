@@ -846,6 +846,11 @@ function C:disconnect(reason)
    return retv
 end
 
+function C:close() pcall(function() self:disconnect() end) end
+C.__gc=C.close
+C.__close=C.close
+
+
 
 function C:setwill(w)
    checkWill(w, 3)
@@ -856,9 +861,6 @@ end
 function C:status()
    return self.sndQElems,self.connected,(self.disconnected and true or false)
 end
-
-C.__gc=C.disconnect
-C.__close=C.disconnect
 
 startMQTT=function(self,conbta,defer)
    local function conn() ba.socket.event(coSockConnect,self,conbta) end

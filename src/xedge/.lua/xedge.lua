@@ -347,13 +347,16 @@ local function runOnUnload(pn,env,appenv)
       local ok, err = pcall(func)
       if not ok then sendErr("Stopping '%s' failed: %s",pn,err or "?") end
    end
+   local level=0
    local function close(tab)
+      if level > 10 then return end
+      level=level+1
       for k,v in pairs(tab) do
-	 if "table" == v then
+	 if "table" == type(v) then
 	    if v.close then
 	       pcall(function() v:close() end)
 	    end
-	    if v ~= appenv and v ~= G then close(v) end
+	    if v ~= appenv and v ~= G and v ~= tab then close(v) end
 	 elseif "userdata" == type(v) and v.peername then
 	    pcall(function() v:close() end)
 	 end
@@ -363,6 +366,7 @@ local function runOnUnload(pn,env,appenv)
 	 tab[ix]=nil
 	 ix=next(tab)
       end
+      level=level-1
    end
    close(env)
    collectgarbage()
@@ -429,7 +433,7 @@ local function manageApp(name) -- start/stop/restart
       if io:stat".preload" then loadAndRunLua(io,".preload", app.env) end
       for path,fn in recDirIter(io,"") do
 	 if fn:find"%.xlua$" then
-	    manageXLuaFile(path.."/"..fn,app)
+	    manageXLuaFile(#path == 0 and fn or path.."/"..fn,app)
 	 else
 	    cnt = cnt+1
 	    if cnt > 100 then sendErr("Too many files in application '%s' (%s)",name,appc.url) break end
@@ -519,7 +523,7 @@ local function open(fn, mode)
       if fp:close() then
 	 if "w" == mode and pn:find"%.xlua$" then
 	    local app=apps[ion]
-	    if app then 
+	    if app then
 	       if appsCfg[ion].running then
 		  manageXLuaFile(pn,app)
 	       else

@@ -179,6 +179,10 @@ function C:disconnect()
    return ok,err
 end
 
+function C:close() pcall(function() self:disconnect() end) end
+C.__gc=C.close
+C.__close=C.close
+
 function C:run()
    local cpt,msg
    while true do
