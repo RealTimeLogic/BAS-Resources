@@ -581,6 +581,7 @@ local function recUnsuback(self,bta)
 end
 
 local function recPingresp(self,bta)
+   self.pingCounter=0
    return true
 end
 
