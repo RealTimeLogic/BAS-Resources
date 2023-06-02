@@ -397,12 +397,6 @@ function Svc:closeSession(req, channel)
   end
 
   self.sessions[channel.channelId] = nil
-
-  if #self.sessions == 0 and self.sessionTimer then
-    self.sessionTimer:cancel()
-    self.sessionTimer = nil
-  end
-
   if infOn then traceI(fmt("Services:closeSession(ch:%s) | Session '%s' closed", channel.channelId, session and session.sessionId)) end
   return {}
 end
@@ -1143,6 +1137,7 @@ function Svc:checkSession(req, channel)
   end
 
   session.sessionExpirationTime = t + session.sessionTimeoutSecs
+  if dbgOn then traceD(fmt("Svc:checkSession(ch:%s) | Session '%s; new expiration time '%s'", channel.channelId, session.sessionId, session.sessionExpirationTime)) end
 end
 
 function Svc:cleanupSessions()
@@ -1150,6 +1145,7 @@ function Svc:cleanupSessions()
   local infOn = self.trace.infOn
 
   if dbgOn then traceD("Services:cleanupSessions") end
+  local cnt = 0
   local t = os.time()
   for channelId, session in pairs(self.sessions) do
     local sessionTimeout = session.sessionExpirationTime - t
@@ -1157,7 +1153,15 @@ function Svc:cleanupSessions()
     if sessionTimeout < 0 then
       self.sessions[channelId] = nil
       if infOn then traceI(fmt("Services:cleanupSessions | Deleting expired session '%s' for channel", session.sessionId, session.channelId)) end
+    else
+      cnt = cnt + 1
     end
+  end
+  if dbgOn then traceD(fmt("Services:cleanupSessions | Number of alive sessions: %d.", cnt)) end
+  if cnt == 0 and self.sessionTimer then
+    if dbgOn then traceD(fmt("Services:cleanupSessions | Stopping sessions cleanup timer")) end
+    self.sessionTimer:cancel()
+    self.sessionTimer = nil
   end
 end
 
@@ -1174,6 +1178,14 @@ function Svc:startSessionCleanup()
   end)
   self.sessionTimer = timer
   timer:set(10000)
+end
+
+function Svc:shutdown()
+  local timer = self.sessionTimer
+  self.sessionTimer = nil
+  if timer then
+    timer:cancel()
+  end
 end
 
 

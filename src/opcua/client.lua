@@ -46,14 +46,16 @@ local function coExecRequest(self, request, callback)
       coSock:enable(m, e)
     end
   end
+
   self.requests[request.requestHeader.requestHandle] = callback or defCallback
 
   local suc, err = pcall(self.services.sendMessage, self.services, request)
   if not suc then
+    self.requests[request.requestHeader.requestHandle] = nil
     return self:processResponse(nil, err)
   end
 
-  if coSock then
+  if coSock and defCallback then
     return coSock:disable()
   end
 end
@@ -104,8 +106,8 @@ function C:connect(endpointUrl, connectCallback)
     if infOn then traceI(fmt("services | Connecting to endpoint '%s' in cosock mode", endpointUrl)) end
     local defCallback
     if connectCallback == nil then
-      defCallback = function(err)
-        coSock:enable(err)
+      defCallback = function(resp, err)
+        coSock:enable(resp, err)
       end
     end
 
@@ -119,7 +121,7 @@ function C:connect(endpointUrl, connectCallback)
     -- because of parsing URL is perofmed before first network call.
     local _,err = ua.parseUrl(endpointUrl)
     if err then
-      (connectCallback or defCallback)(err)
+      (connectCallback or defCallback)(nil, err)
       return err;
     end
 
@@ -173,13 +175,15 @@ function C:processResponse(msg, err)
   local response
   if msg then
     response = msg.body
-    if msg.type == MessageId.OPEN_SECURE_CHANNEL_RESPONSE then
-      if infOn then traceI("services | received OPEN_SECURE_CHANNEL_RESPONSE") end
-      self:processOpenSecureChannelResponse(response)
-    elseif msg.type == MessageId.CREATE_SESSION_RESPONSE then
-      self:processCreateSessionResponse(response)
-    elseif msg.type == MessageId.ACTIVATE_SESSION_RESPONSE then
-      self:processActivateSessionResponse(response)
+    if response.responseHeader.serviceResult == 0 then
+      if msg.type == MessageId.OPEN_SECURE_CHANNEL_RESPONSE then
+        if infOn then traceI("services | received OPEN_SECURE_CHANNEL_RESPONSE") end
+        self:processOpenSecureChannelResponse(response)
+      elseif msg.type == MessageId.CREATE_SESSION_RESPONSE then
+        self:processCreateSessionResponse(response)
+      elseif msg.type == MessageId.ACTIVATE_SESSION_RESPONSE then
+        self:processActivateSessionResponse(response)
+      end
     end
   end
 
@@ -406,6 +410,7 @@ end
 
 function C:activateSession(params, token, token2, callback)
   local infOn = self.config.logging.services.infOn
+  local errOn = self.config.logging.services.errOn
   if infOn then traceI("services | Activating session") end
   if self.services.enc == nil then return nil, BadNotConnected end
 
@@ -453,14 +458,15 @@ function C:activateSession(params, token, token2, callback)
     end
 
     local authPolicy
-    if tokenPolicy.securityPolicyUri and tokenPolicy.securityPolicyUri ~= ua.Types.SecurityPolicy.None then
+    if tokenPolicy.securityPolicyUri and tokenPolicy.securityPolicyUri ~= ua.Types.SecurityPolicy.None and self.session.serverCertificate then
       local encryption = securePolicy(self.config)
       authPolicy = encryption(ua.Types.SecurityPolicy.Basic128Rsa15)
       if tokenPolicy.tokenType == ua.Types.UserTokenType.Certificate then
         authPolicy:setLocalCertificate(token, token2)
       end
       if not self.session.serverCertificate then
-        error("Server didn't certificate sent for encrypting token.")
+        if errOn then traceE("services | Server didn't certificate sent for encrypting token") end
+        return nil, BadIdentityTokenInvalid
       end
       authPolicy:setRemoteCertificate(self.session.serverCertificate)
       activateParams.userTokenSignature = {

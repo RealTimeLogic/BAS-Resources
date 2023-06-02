@@ -18,6 +18,49 @@ server:initialize()
 server:run()
 ]]
 
+local function genCertificate(certType, hostname, applicationName, applicationUri)
+  local basic128rsa15Config = {
+    key="rsa",
+    bits=2048
+  }
+
+  local basic128rsa15Key = ba.create.key(basic128rsa15Config)
+  local basic128rsa15Dn = {
+    commonname = hostname,
+  }
+  local alternativeNames = hostname..";URI:"..applicationUri
+  local certtype = {"SSL_SERVER", "SSL_CLIENT"}
+  local keyusage = {
+    "DIGITAL_SIGNATURE",
+    "NON_REPUDIATION",
+    "KEY_ENCIPHERMENT",
+    "DATA_ENCIPHERMENT",
+    "KEY_AGREEMENT",
+  }
+
+  local hashid = "sha256"
+  local basic128rsa15Csr = ba.create.csr(basic128rsa15Key, basic128rsa15Dn, alternativeNames, certtype, keyusage, hashid)
+  local validFrom=ba.datetime("NOW")
+  validFrom = validFrom - {days=1}
+  validFrom = validFrom:date(true)
+
+  local validTo=ba.datetime("NOW")
+  validTo = validTo + {days=3650}
+  validTo = validTo:date(true)
+  local serial = 123456
+
+  local basic128rsa15Cert = ba.create.certificate(basic128rsa15Csr, basic128rsa15Key, validFrom, validTo, serial)
+  return basic128rsa15Cert, basic128rsa15Key
+end
+
+local function genClientCertificate(hostname, applicationName, applicationUri)
+  return genCertificate("SSL_CLIENT", hostname, applicationName, applicationUri)
+end
+
+local function genServerCertificate(hostname, applicationName, applicationUri)
+  return genCertificate("SSL_SERVER", hostname, applicationName, applicationUri)
+end
+
 local function initialize(config, hostname, applicationName, applicationUri, outputDirectory)
    local io,err = ba.openio("disk")
    if err then error(err) end
@@ -63,8 +106,7 @@ local function initialize(config, hostname, applicationName, applicationUri, out
       infOn = true,  -- Informations traces
       errOn = true,  -- Errors
     }
- }
-
+  }
 
    print(string.format("saving configuration file '%s'", configPath))
 
@@ -82,38 +124,12 @@ local function initialize(config, hostname, applicationName, applicationUri, out
       bits=2048
    }
 
-   print("generating private key:", basic128rsa15KeyPath)
-   local basic128rsa15Key = ba.create.key(basic128rsa15Config)
+   print("generating certificate and private key:", basic128rsa15KeyPath)
+   local basic128rsa15Cert, basic128rsa15Key = genCert(hostname, applicationName, applicationUri)
    err = writeFile(io, basic128rsa15KeyPath, basic128rsa15Key)
    if err then error(err) end
 
-   local basic128rsa15Dn = {
-      commonname = hostname,
-   }
-   local alternativeNames = hostname..";URI:"..applicationUri
-   local certtype = {"SSL_CLIENT", "SSL_SERVER"}
-   local keyusage = {
-     "DIGITAL_SIGNATURE",
-     "NON_REPUDIATION",
-     "KEY_ENCIPHERMENT",
-     "DATA_ENCIPHERMENT",
-     "KEY_AGREEMENT",
-   }
-
-   print("creating csr")
-   local hashid = "sha256"
-   local basic128rsa15Csr = ba.create.csr(basic128rsa15Key, basic128rsa15Dn, alternativeNames, certtype, keyusage, hashid)
-   local validFrom=ba.datetime("NOW")
-   validFrom = validFrom - {days=1}
-   validFrom = validFrom:date(true)
-
-   local validTo=ba.datetime("NOW")
-   validTo = validTo + {days=3650}
-   validTo = validTo:date(true)
-   local serial = 123456
-
    print("saving certificate", basic128rsa15CrtPath)
-   local basic128rsa15Cert = ba.create.certificate(basic128rsa15Csr, basic128rsa15Key, validFrom, validTo, serial)
    err = writeFile(io, basic128rsa15CrtPath, basic128rsa15Cert)
    if err then error(err) end
 
@@ -142,5 +158,7 @@ end
 
 return {
   initializeServer = initializeServer,
-  initializeClient = initializeClient
+  initializeClient = initializeClient,
+  genClientCertificate = genServerCertificate,
+  genServerCertificate = genClientCertificate,
 }
