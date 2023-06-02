@@ -53,7 +53,9 @@ local function coExecRequest(self, request, callback)
     return self:processResponse(nil, err)
   end
 
-  return coSock:disable()
+  if coSock then
+    return coSock:disable()
+  end
 end
 
 local function coProcessResp(self, resp, err)
