@@ -90,19 +90,19 @@ local function commonConfig(config)
   end
 
   if config.applicationName == nil then
-    config.applicationName = 'RealTimeLogic OPCUA'
+    config.applicationName = ua.Version.ApplicationName
   elseif type(config.applicationName) ~= "string" then
     error("invalid applicationName")
   end
 
   if config.applicationUri == nil then
-    config.applicationUri = "urn:realtimelogic:opcua-lua"
+    config.applicationUri = ua.Version.ApplicationUri
   elseif type(config.applicationUri) ~= "string" then
     error("invalid applicationUri")
   end
 
   if config.productUri == nil then
-    config.productUri = "urn:realtimelogic:opcua-lua"
+    config.productUri = ua.Version.ProductUri
   elseif type(config.productUri) ~= "string" then
     error("invalid productUri")
   end

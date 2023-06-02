@@ -52,7 +52,7 @@ local ua = {
       s,h,p,pt = string.match(endpointUrl, "^([%a.]+)://([%w.-]+):(%d+)$")
     end
     if s == nil then
-      s,h,p,pt = string.match(endpointUrl, "^([%a.]+)://([%w.-]+):(%d+)(/.+)$")
+      s,h,p,pt = string.match(endpointUrl, "^([%a.]+)://([%w.-]+):(%d+)(/.*)$")
     end
     if s == nil then
       return nil, 0x80830000 -- BadTcpEndpointUrlInvalid

@@ -23,6 +23,7 @@ function S:run()
 end
 
 function S:shutdown()
+  self.services:shutdown()
   self.serverSock:shutdown()
 end
 

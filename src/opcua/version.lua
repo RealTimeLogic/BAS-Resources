@@ -1,9 +1,9 @@
 return {
-  ApplicationUri = "urn:realtimelogic:OPC UA Server",
+  ApplicationUri = "urn:realtimelogic:opcua",
   ProductUri = "http://realtimelogic.com",
-  ProductName = "Real Time Logic OPC UA Server",
-  ApplicationName = "Real Time Logic OPC UA Server",
-  ManufacturerName = "Real Time Logic",
-  Version = "0.3.30",
-  BuildNumber = "30"
+  ProductName = "RealTimeLogic OPCUA",
+  ApplicationName = "RealTimeLogic OPCUA",
+  ManufacturerName = "RealTimeLogic",
+  Version = "0.3.31",
+  BuildNumber = "31"
 }
