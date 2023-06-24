@@ -3677,9 +3677,9 @@ function dec:contentFilter()
     elements = elements,
   }
 end
-function enc:filterOperand(v)
+function enc.filterOperand()
 end
-function dec:filterOperand()
+function dec.filterOperand()
   return {
   }
 end
@@ -4209,9 +4209,9 @@ function dec:historyReadResult()
     historyData = historyData,
   }
 end
-function enc:historyReadDetails(v)
+function enc.historyReadDetails()
 end
-function dec:historyReadDetails()
+function dec.historyReadDetails()
   return {
   }
 end
@@ -5237,9 +5237,9 @@ function dec:callResponse()
     diagnosticInfos = diagnosticInfos,
   }
 end
-function enc:monitoringFilter(v)
+function enc.monitoringFilter()
 end
-function dec:monitoringFilter()
+function dec.monitoringFilter()
   return {
   }
 end
@@ -5283,9 +5283,9 @@ function dec:aggregateFilter()
     aggregateConfiguration = aggregateConfiguration,
   }
 end
-function enc:monitoringFilterResult(v)
+function enc.monitoringFilterResult()
 end
-function dec:monitoringFilterResult()
+function dec.monitoringFilterResult()
   return {
   }
 end
@@ -6099,9 +6099,9 @@ function dec:notificationMessage()
     notificationData = notificationData,
   }
 end
-function enc:notificationData(v)
+function enc.notificationData()
 end
-function dec:notificationData()
+function dec.notificationData()
   return {
   }
 end

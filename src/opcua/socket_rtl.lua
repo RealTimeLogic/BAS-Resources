@@ -151,11 +151,13 @@ end
 
 function serverSock:shutdown()
   local sock = self.sock
-  if sock ~= nil then
-    local infOn = self.logging.infOn
-    if infOn then traceI("Closing server socket") end
-    sock:close()
+  if sock == nil then
+    return
   end
+
+  local infOn = self.logging.infOn
+  if infOn then traceI("Closing server socket") end
+  sock:close()
 
   while true do
     local _,active = sock:state()

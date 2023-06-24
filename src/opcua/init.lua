@@ -18,7 +18,7 @@ server:initialize()
 server:run()
 ]]
 
-local function genCertificate(certType, hostname, applicationName, applicationUri)
+local function genCertificate(certType, hostname, applicationUri)
   local basic128rsa15Config = {
     key="rsa",
     bits=2048
@@ -29,13 +29,14 @@ local function genCertificate(certType, hostname, applicationName, applicationUr
     commonname = hostname,
   }
   local alternativeNames = hostname..";URI:"..applicationUri
-  local certtype = {"SSL_SERVER", "SSL_CLIENT"}
+  local certtype = type(certType) == "string" and {certType} or certType
   local keyusage = {
     "DIGITAL_SIGNATURE",
     "NON_REPUDIATION",
     "KEY_ENCIPHERMENT",
     "DATA_ENCIPHERMENT",
     "KEY_AGREEMENT",
+    "KEY_CERT_SIGN"
   }
 
   local hashid = "sha256"
@@ -53,15 +54,15 @@ local function genCertificate(certType, hostname, applicationName, applicationUr
   return basic128rsa15Cert, basic128rsa15Key
 end
 
-local function genClientCertificate(hostname, applicationName, applicationUri)
-  return genCertificate("SSL_CLIENT", hostname, applicationName, applicationUri)
+local function genClientCertificate(hostname, applicationUri)
+  return genCertificate("SSL_CLIENT", hostname, applicationUri)
 end
 
-local function genServerCertificate(hostname, applicationName, applicationUri)
-  return genCertificate("SSL_SERVER", hostname, applicationName, applicationUri)
+local function genServerCertificate(hostname, applicationUri)
+  return genCertificate("SSL_SERVER", hostname, applicationUri)
 end
 
-local function initialize(config, hostname, applicationName, applicationUri, outputDirectory)
+local function initialize(config, certType, hostname, applicationName, applicationUri, outputDirectory)
    local io,err = ba.openio("disk")
    if err then error(err) end
 
@@ -108,36 +109,31 @@ local function initialize(config, hostname, applicationName, applicationUri, out
     }
   }
 
-   print(string.format("saving configuration file '%s'", configPath))
+  print(string.format("saving configuration file '%s'", configPath))
 
-   local resultConfig = "return "
-   local function appendConfig(str)
-     resultConfig = resultConfig..str
-   end
-   ua.Tools.printTable(nil, config, appendConfig)
-   if err then error(err) end
-   err = writeFile(io, configPath, resultConfig)
-   if err then error(err) end
+  local resultConfig = "return "
+  local function appendConfig(str)
+    resultConfig = resultConfig..str
+  end
+  ua.Tools.printTable(nil, config, appendConfig)
+  if err then error(err) end
+  err = writeFile(io, configPath, resultConfig)
+  if err then error(err) end
 
-   local basic128rsa15Config = {
-      key="rsa",
-      bits=2048
-   }
+  print("generating certificate and private key:", basic128rsa15KeyPath)
+  local basic128rsa15Cert, basic128rsa15Key = genCertificate(certType, hostname, applicationUri)
+  err = writeFile(io, basic128rsa15KeyPath, basic128rsa15Key)
+  if err then error(err) end
 
-   print("generating certificate and private key:", basic128rsa15KeyPath)
-   local basic128rsa15Cert, basic128rsa15Key = genCert(hostname, applicationName, applicationUri)
-   err = writeFile(io, basic128rsa15KeyPath, basic128rsa15Key)
-   if err then error(err) end
+  print("saving certificate", basic128rsa15CrtPath)
+  err = writeFile(io, basic128rsa15CrtPath, basic128rsa15Cert)
+  if err then error(err) end
 
-   print("saving certificate", basic128rsa15CrtPath)
-   err = writeFile(io, basic128rsa15CrtPath, basic128rsa15Cert)
-   if err then error(err) end
-
-   print(string.format("saving main script '%s'", mainPath))
-   local serverScript = string.format(serverScriptPattern, configPath)
-   if err then error(err) end
-   err = writeFile(io, mainPath, serverScript)
-   if err then error(err) end
+  print(string.format("saving main script '%s'", mainPath))
+  local serverScript = string.format(serverScriptPattern, configPath)
+  if err then error(err) end
+  err = writeFile(io, mainPath, serverScript)
+  if err then error(err) end
 end
 
 local function initializeServer(hostname, applicationName, applicationUri, outputDirectory)
@@ -147,18 +143,18 @@ local function initializeServer(hostname, applicationName, applicationUri, outpu
     endpointUrl = "opc.tcp://"..hostname..":4841"
   }
 
-  initialize(config, hostname, applicationName, applicationUri, outputDirectory)
+  initialize(config, "SSL_SERVER", hostname, applicationName, applicationUri, outputDirectory)
 end
 
 local function initializeClient(hostname, applicationName, applicationUri, outputDirectory)
   local config = {}
-  initialize(config, hostname, applicationName, applicationUri, outputDirectory)
+  initialize(config, "SSL_CLIENT", hostname, applicationName, applicationUri, outputDirectory)
 end
 
 
 return {
   initializeServer = initializeServer,
   initializeClient = initializeClient,
-  genClientCertificate = genServerCertificate,
-  genServerCertificate = genClientCertificate,
+  genClientCertificate = genClientCertificate,
+  genServerCertificate = genServerCertificate,
 }

@@ -42,6 +42,7 @@ local BadServiceUnsupported = s.BadServiceUnsupported
 local BadInternalError = s.BadInternalError
 local BadUserAccessDenied = s.BadUserAccessDenied
 local BadIdentityTokenRejected = s.BadIdentityTokenRejected
+local BadIdentityTokenInvalid = s.BadIdentityTokenInvalid
 local BadApplicationSignatureInvalid = s.BadApplicationSignatureInvalid
 local BadUserSignatureInvalid = s.BadUserSignatureInvalid
 local BadTooManySessions = s.BadTooManySessions
@@ -63,12 +64,12 @@ function Svc.hello(--[[endpointUrl]])
 --  self.EndpointUrl = endpointUrl
 end
 
-function Svc:openSecureChannel(req, channel)
+function Svc:openSecureChannel(_, channel)
   local infOn = self.trace.infOn
   if infOn then traceI(fmt("Services:openSecureChannel(ch:%s)", channel.channelId)) end
 end
 
-function Svc:closeSecureChannel(req, channel)
+function Svc:closeSecureChannel(_, channel)
   local dbgOn = self.trace.dbgOn
   if dbgOn then traceD(fmt("Services:closeSecureChannel(ch:%s)", channel.channelId)) end
 
@@ -191,7 +192,7 @@ function Svc:createSession(req, channel)
   if policy.uri ~= ua.Types.SecurityPolicy.None then
     resp.serverSignature = {
       algorithm = policy.aSignatureUri,
-      signature = policy:asymmetricSign(req.clientCertificate, req.clientNonce)
+      signature = policy:asymmetricSign(req.clientCertificate..req.clientNonce)
     }
   else
     resp.serverSignature = {}
@@ -210,12 +211,16 @@ local function decrypt(policy, data)
     return data
   end
   local m,err = ba.crypto.decrypt(data, policy.key, {nopadding=false})
+  if err then
+    error(BadIdentityTokenInvalid)
+  end
   local d = Q.new(#m)
   d:pushBack(m)
   local decoder = Binary.Decoder.new(d)
   local l = decoder:uint32()
   local token = decoder:str(l - 32)
-  local nonce = decoder:str(32)
+  -- local nonce = decoder:str(32) // TODO: check nonce
+
   return token
 end
 
@@ -250,9 +255,9 @@ function Svc:activateSession(req, channel)
   local session = self.sessions[channel.channelId]
   if not session then
     if infOn then traceI(fmt("Services:activateSession(ch:'%s') | Channel has no session. Try to find by auth token '%s'", channel.channelId, req.requestHeader.authenticationToken)) end
-    for channelId, s in pairs(self.sessions) do
-      if s.authenticationToken == req.requestHeader.authenticationToken then
-        session = s
+    for _, ses in pairs(self.sessions) do
+      if ses.authenticationToken == req.requestHeader.authenticationToken then
+        session = ses
         break
       end
     end
@@ -383,10 +388,9 @@ function Svc:activateSession(req, channel)
   return result;
 end
 
-function Svc:closeSession(req, channel)
+function Svc:closeSession(_, channel)
   local errOn = self.trace.errOn
   local infOn = self.trace.infOn
-  local dbgOn = self.trace.dbgOn
 
   if infOn then traceI(fmt("Services:closeSession(ch:%s)", channel.channelId)) end
 
@@ -749,11 +753,12 @@ end
 
 
 function Svc:write(req, channel)
+  local infOn = self.trace.infOn
+  if infOn then traceI(fmt("Services:Write")) end
   self:checkSession(req, channel)
   channel = channel or {}
 
-  local dbgOn = self.trace.dbgOn
-  local infOn = self.trace.infOn
+  if infOn then traceI(fmt("Services:Write(ch:%s)", channel.channelId)) end
   if req.nodesToWrite == nil or req.nodesToWrite[1] == nil then
     if infOn then traceI(fmt("Services:Write(ch:%s) | Empty response received", channel.channelId)) end
     error(BadNothingToDo)
@@ -1048,10 +1053,14 @@ function Svc:addNode(node)
 end
 
 function Svc:addNodes(req, channel)
+  local dbgOn = self.trace.dbgOn
+  local errOn = self.trace.errOn
+  local infOn = self.trace.infOn
+  if dbgOn then traceD("Services:addNode |") end
+
   self:checkSession(req, channel)
   channel = channel or {}
 
-  local infOn = self.trace.infOn
   if req.nodesToAdd == nil or req.nodesToAdd[1] == nil then
     if infOn then traceD(fmt("Services:addNodes(ch:%s) | Nothing to do", channel.channelId)) end
     error(BadNothingToDo)
@@ -1068,7 +1077,6 @@ function Svc:addNodes(req, channel)
       if errOn then traceD(fmt("Services:addNodes(ch:%s) | Error addin error %s", channel.channelId, result)) end
       tins(results, {statusCode=result, addedNodeId="i=0"})
     end
-
   end
 
   return {results=results}
@@ -1112,7 +1120,6 @@ function Svc:checkSession(req, channel)
 
   if dbgOn then traceD(fmt("Svc:checkSession(ch:%s) | Request handle '%s'", channel.channelId, req.requestHeader.requestHandle)) end
 
-  local infOn = self.trace.infOn
   local session = self.sessions[channel.channelId]
   if not session then
     if errOn then traceE(fmt("Svc:checkSession(ch:%s) | No session. ", channel.channelId)) end
@@ -1129,14 +1136,14 @@ function Svc:checkSession(req, channel)
     error(BadSessionNotActivated)
   end
 
-  local t = os.time()
-  if t > session.sessionExpirationTime then
+  local time = os.time()
+  if time > session.sessionExpirationTime then
     self.sessions[channel.channelId] = nil
     if errOn then traceE(fmt("Svc:checkSession(ch:%s) | Session '%s' expired. ", channel.channelId, session.sessionId)) end
     error(BadSessionClosed)
   end
 
-  session.sessionExpirationTime = t + session.sessionTimeoutSecs
+  session.sessionExpirationTime = time + session.sessionTimeoutSecs
   if dbgOn then traceD(fmt("Svc:checkSession(ch:%s) | Session '%s; new expiration time '%s'", channel.channelId, session.sessionId, session.sessionExpirationTime)) end
 end
 
@@ -1146,9 +1153,9 @@ function Svc:cleanupSessions()
 
   if dbgOn then traceD("Services:cleanupSessions") end
   local cnt = 0
-  local t = os.time()
+  local time = os.time()
   for channelId, session in pairs(self.sessions) do
-    local sessionTimeout = session.sessionExpirationTime - t
+    local sessionTimeout = session.sessionExpirationTime - time
     if dbgOn then traceD(fmt("Services:cleanupSessions | session '%s' timeout '%s' secs.", session.sessionId, sessionTimeout)) end
     if sessionTimeout < 0 then
       self.sessions[channelId] = nil

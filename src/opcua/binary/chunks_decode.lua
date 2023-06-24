@@ -11,6 +11,7 @@ local fmt = string.format
 
 local HeaderSize = 8
 local BadTcpMessageTypeInvalid = 0x807E0000
+local BadTcpMessageTooLarge = 0x80800000
 local BadNotSupported = 0x803D0000
 local BadCommunicationError = 0x80050000
 local BadInternalError = 0x80020000
@@ -164,7 +165,7 @@ local function new(config, security, sock)
           error(BadInternalError)
         end
 
-        local data = sock:receive()
+        local data = sock:receive(size - #q)
         if self.logging.dbgOn  then
           traceD(fmt("socket | ------------ RECEIVED %d BYTES----------------", #data))
           tools.hexPrint(data, function(msg) traceD("socket | "..msg) end)
@@ -202,7 +203,7 @@ local function new(config, security, sock)
       self:recvSize(HeaderSize)
       local hdr = self.decoder:messageHeader()
       if hdr.messageSize > capacity then
-        error(BadTcpMessageTypeInvalid)
+        error(BadTcpMessageTooLarge)
       end
 
       local bodySize = hdr.messageSize - HeaderSize

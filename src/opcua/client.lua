@@ -8,6 +8,7 @@ local tools = ua.Tools
 
 local traceI = ua.trace.inf
 local traceD = ua.trace.dbg
+local traceE = ua.trace.err
 local fmt = string.format
 
 local BadNotConnected = ua.StatusCode.BadNotConnected
@@ -393,7 +394,7 @@ end
 
 local function encrypt(policy, password, nonce)
   if not policy then
-    return data
+    return password
   end
 
   local len = #password + #nonce
@@ -405,6 +406,9 @@ local function encrypt(policy, password, nonce)
 
   local data = tostring(d)
   local m,err = ba.crypto.encrypt(data, policy.remote.pem, {nopadding=false})
+  if err then
+    error(err)
+  end
   return m
 end
 
@@ -414,7 +418,6 @@ function C:activateSession(params, token, token2, callback)
   if infOn then traceI("services | Activating session") end
   if self.services.enc == nil then return nil, BadNotConnected end
 
-  local tokenType
   local tokenPolicy
   -- Called with manual parameters
   if type(params) == "table" then
@@ -460,7 +463,7 @@ function C:activateSession(params, token, token2, callback)
     local authPolicy
     if tokenPolicy.securityPolicyUri and tokenPolicy.securityPolicyUri ~= ua.Types.SecurityPolicy.None and self.session.serverCertificate then
       local encryption = securePolicy(self.config)
-      authPolicy = encryption(ua.Types.SecurityPolicy.Basic128Rsa15)
+      authPolicy = encryption(tokenPolicy.securityPolicyUri)
       if tokenPolicy.tokenType == ua.Types.UserTokenType.Certificate then
         authPolicy:setLocalCertificate(token, token2)
       end

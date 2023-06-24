@@ -24,7 +24,7 @@ local function createCert(data, fsIo)
     end
   end
 
-  local b64 = data:match(".-BEGIN.-\n%s*(.-)\n%s*%-%-")
+  local b64 = data:match("[-]-BEGIN CERTIFICATE.-\n(.+)\n.-END.-CERTIFICATE[-]+")
   local der
   local pem
   if b64 then
@@ -63,12 +63,13 @@ local function createKey(data, fsIo)
     end
   end
 
-  local sz = ba.crypto.keysize(data)
+  local keyData = data:match("[-]-BEGIN.+PRIVATE KEY.-\n.+\n.-END.+PRIVATE KEY[-]+")
+  local sz = ba.crypto.keysize(keyData)
   if not sz then
     error("invalid_key")
   end
 
-  return data
+  return keyData
 end
 
 return {

@@ -203,7 +203,7 @@ local function identityTokens(config)
   end
 
   for idx,policy in ipairs(config.userIdentityTokens) do
-    for field,value in pairs(policy) do
+    for field,_ in pairs(policy) do
       if field ~= "policyId" and
         field ~= "tokenType" and
         field ~= "issuerEndpointUrl" and

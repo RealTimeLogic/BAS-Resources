@@ -1,6 +1,4 @@
 local tools = require("opcua.binary.tools")
-
-
 local gettime = require("socket").gettime
 local function traceLog(level, msg)
   print(gettime(), level, msg)
