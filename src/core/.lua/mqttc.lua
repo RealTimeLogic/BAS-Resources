@@ -807,6 +807,11 @@ end
 
 
 function C:subscribe(topic,onsuback,opt,prop)
+   if "table" == type(onsuback) then
+      prop=opt
+      opt=onsuback
+      onsuback=nil
+   end
    opt = opt or {}
    prop=copyTab(prop)
    if opt.onpub then
@@ -898,7 +903,16 @@ local function create(addr, onstatus, onpub, opt, prop)
       error(fmtArgErr(1,"string | function",addr),2)
    end
    argchk(2,"function",onstatus)
-   argchk(3,"function",onpub)
+   if "table" == type(onpub) then
+      prop=opt
+      opt=onsuback
+      onpub=nil
+   end
+   if onpub then
+      argchk(3,"function",onpub)
+   else
+      onpub=function(topic) trace("Received unhandled MQTT topic",topic) end
+   end
    opt=opt or {}
    prop=prop or {}
    argchk(4,"table",opt)
