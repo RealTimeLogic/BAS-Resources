@@ -4,6 +4,7 @@ const uglify = require('gulp-uglify');
 const { rimraf } = require('rimraf');
 const luamin = require('./plugins/gulp-luamin');
 const fs = require('fs');
+const zip = require('gulp-zip');
 
 gulp.task('clean', async function (cb) {
   await rimraf('MakoBuild');
@@ -45,6 +46,15 @@ gulp.task('copy-lua-protobuf', function (cb) {
   return cb();
 });
 
+gulp.task('copy-lua-lpeg', function (cb) {
+  if (fs.existsSync('../../LPeg/re.lua') ) {
+    return gulp
+      .src(['../../LPeg/re.lua', '../../lua-protobuf/serpent.lua'], { base: '../../LPeg' })
+      .pipe(gulp.dest('./MakoBuild/.lua/'))
+  }
+  return cb();
+});
+
 gulp.task('minify-css', function () {
   return gulp
     .src(['./MakoBuild/**/*.css', './MakoBuild/.**/*.css'], { base: './MakoBuild' })
@@ -66,4 +76,24 @@ gulp.task('luamin-folder', function () {
     .pipe(gulp.dest('./MakoBuild'));
 });
 
-gulp.task('build-mako', gulp.series('clean', 'copy-core', 'copy-mako', 'copy-opcua', 'copy-lua-protobuf', 'minify-css', 'minify-js', 'luamin-folder'));
+gulp.task('zip-mako', function (cb) {
+  rimraf('mako.zip');
+  return gulp
+    .src(['./MakoBuild/**/*', './MakoBuild/.lua/**/*', './MakoBuild/.certificate/*'], { base: './MakoBuild' })
+    .pipe(zip('mako.zip'))
+    .pipe(gulp.dest('./'));
+});
+
+gulp.task('build-mako', 
+  gulp.series(
+    'clean',
+    'copy-core',
+    'copy-mako',
+    'copy-opcua',
+    'copy-lua-protobuf',
+    'copy-lua-lpeg',
+    'minify-css',
+    'minify-js',
+    'luamin-folder',
+    'zip-mako',
+     ));

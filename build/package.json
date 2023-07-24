@@ -14,6 +14,7 @@
     "gulp": "^4.0.2",
     "gulp-clean-css": "^4.3.0",
     "gulp-uglify": "^3.0.2",
+    "gulp-zip": "^5.1.0",
     "luamin": "^1.0.4",
     "plugin-error": "^2.0.1",
     "rimraf": "^5.0.1",
