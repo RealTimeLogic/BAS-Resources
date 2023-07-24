@@ -11,35 +11,29 @@ gulp.task('clean', async function (cb) {
 
 gulp.task('copy-folders', function () {
   return gulp
-    .src(['../src/core/**/*'])
-    .pipe(gulp.dest('./Mako'));
-});
-
-gulp.task('copy-hidden-folders', function () {
-  return gulp
-    .src(['../src/core/.lua/**/*'])
-    .pipe(gulp.dest('./Mako/.lua'));
+    .src(['../src/core/**/*', '../src/core/.lua/**/*'], { base: '../src/core' })
+    .pipe(gulp.dest('./MakoBuild'));
 });
 
 gulp.task('minify-css', function () {
   return gulp
-    .src(['./Mako/**/*.css', './Mako/.**/*.css'])
+    .src(['./MakoBuild/**/*.css', './MakoBuild/.**/*.css'], { base: './MakoBuild' })
     .pipe(cleanCSS())
-    .pipe(gulp.dest('./Mako/'));
+    .pipe(gulp.dest('./MakoBuild'));
 });
 
 gulp.task('minify-js', function () {
   return gulp
-    .src(['./Mako/**/*.js', './Mako/.**/*.js'])
+    .src(['./MakoBuild/**/*.js', './MakoBuild/.**/*.js'], { base: './MakoBuild' })
     .pipe(uglify())
-    .pipe(gulp.dest('./Mako/'));
+    .pipe(gulp.dest('./MakoBuild'));
 });
 
 gulp.task('luamin-folder', function () {
   return gulp
-    .src(['./Mako/**/*.lua', './Mako/.**/*.lua'])
+    .src(['./MakoBuild/**/*.lua', './MakoBuild/.**/*.lua'], { base: './MakoBuild' })
     .pipe(luamin())
-    .pipe(gulp.dest('./Mako/'));
+    .pipe(gulp.dest('./MakoBuild'));
 });
 
-gulp.task('build-mako', gulp.series('clean', 'copy-folders', 'copy-hidden-folders', 'minify-css', 'minify-js', 'luamin-folder'));
+gulp.task('build-mako', gulp.series('clean', 'copy-folders', 'minify-css', 'minify-js', 'luamin-folder'));
