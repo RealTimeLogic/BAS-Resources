@@ -4,4 +4,4 @@ build/XedgeBuild
 build/MakoBuild
 *.c
 *.zip
-
+node_modules

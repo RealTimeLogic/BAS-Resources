@@ -1,0 +1,15 @@
+<script>
+
+var stopSearching;
+
+function initDialog()
+{
+   return function() {
+      try {stopSearching();} catch(e){}
+   }
+};
+</script>
+<div class="rtltmb"><span></span>Search</div>
+<div class="tooltip">
+<iframe style="border:0; padding:0; margin:0; width:100%;height:350px;" src="/rtl/wfm/search.html"></iframe>
+</div>

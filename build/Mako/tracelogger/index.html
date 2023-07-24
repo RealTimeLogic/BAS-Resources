@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+<meta charset="utf-8" />
+<style>
+
+:root {
+   --scrollbar: #252526;
+   --scrollbarthumb: #3c3c3c;
+}
+
+
+::-webkit-scrollbar {
+    width: 12px;
+    height: 12px;
+    background-color: var(--scrollbar);
+    cursor:pointer;
+}
+
+::-webkit-scrollbar-thumb {
+    background-color: var(--scrollbarthumb);
+    border-radius: 6px;
+    border: 4px solid var(--scrollbar);
+}
+
+::-webkit-scrollbar-corner {
+    background-color: var(--scrollbar);
+}
+
+* {
+    scrollbar-color: var(--scrollbarthumb) var(--scrollbar);
+    scrollbar-width: thin;
+}
+
+body {
+    margin: 0;
+    padding: 0;
+    position: relative;
+    font-family: Verdana, Arial, Helvetica, sans-serif;
+    min-height: 100vh;
+    background-color: #24262A;
+    color: #E1E4E9;
+    font-size: .7em;
+
+}
+
+a {color:#5adff5;text-decoration:underline;text-underline-position:under;}
+a:hover {color: #03d8fb;}
+
+:focus {outline:none;}
+
+#ctrl {
+    padding: 5px;
+    background: #333333;
+    color: white;
+    position: sticky;
+    top: 0;
+    right: 0;
+    left: 0;
+    border-bottom: 1px solid #666;
+    min-width: 615px;
+    overflow: hidden;
+    display: grid;
+    grid-auto-flow: column;
+    gap: 5px;
+    grid-template-rows: 1fr 1fr;
+    grid-template-columns: 1fr 1fr minmax(auto, 2fr);
+}
+
+#ctrl button {
+    width: 150px;
+}
+
+#ctrl .connect-button {
+    display: flex;
+    justify-content: flex-start;
+    align-items: center;
+    gap: 15px;
+}
+
+#tracecont {
+    margin: 20px 10px;
+}
+
+#console {
+    margin: 0 5px 0 5px;
+    font: 10pt "courier new", monospace;
+}
+
+span.err {
+    font-weight: bold;
+    color: red;
+}
+
+.led-red,
+.led-green {
+    width: 25px;
+    height: 25px;
+    border-radius: 50%;
+}
+
+
+.led-red {
+    background-color: #ff5858;
+    box-shadow: #000 0 -1px 7px 1px, inset rgb(255, 193, 193) 0 -1px 9px, rgb(77, 2, 2) 0 2px 12px;
+}
+
+.led-green {
+    background-color: #6cff6c;
+    box-shadow: #00000077 0 -1px 7px 1px, inset rgb(204, 255, 103) 0 -1px 9px, rgb(138, 255, 5) 0 2px 4px;
+}
+
+.vertical-center {
+    display: flex;
+    align-items: center;
+}
+
+button {
+    padding: 5px 12px;
+    line-height: 1em;
+    border-radius: 4px;
+    background-color: #69C575;
+    color: #FFFFFF;
+    font-weight: bold;
+    border: none;
+    cursor: pointer;
+    transition: all .3s ease;
+}
+button:hover {
+    background-color: #4ac55b;
+}
+
+button.red {
+    background-color: #F66459;
+}
+button.red:hover {
+    background-color: #f5483c;
+}
+
+label {
+    display: grid;
+    grid-template-columns: initial;
+    grid-template-rows: initial;
+    grid-auto-flow: column;
+    align-items: center;
+    justify-content: flex-start;
+    cursor: pointer;
+}
+
+input[type="text"]{
+    display: inline-block;
+    padding: 5px 12px;
+    background-color: #69c57500;
+    border-radius: 4px;
+    border: solid 2px #69C575;
+    outline: none;
+    color: #FFFFFF;
+    transition: all .3s ease;
+}
+
+button:disabled {background: #3f4e4f;}
+
+input[type="text"]:focus,
+input[type="text"]:active,{
+    border: solid 2px #7bfd8d;
+    background-color: #69c57544;
+}
+input[type="text"]::placeholder {
+    color: #a1a1a1;
+}
+
+input[type="checkbox"] {
+    display: inline-block;
+    background: transparent;
+    color: transparent;
+    position: relative;
+    z-index: 1;
+    width: 18px;
+    height: 18px;
+    margin-right: 12px;
+    accent-color: #69C575;
+    border: solid 3px #69C575;
+    border-radius: 5px;
+}
+
+input[type="checkbox"]:checked::after {
+    border-color: #69C575;
+    background-color: #69C575;
+    background-size: 15px;
+    background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 457.57"><path fill="white" d="M0,220.57c100.43-1.33,121-5.2,191.79,81.5,54.29-90,114.62-167.9,179.92-235.86C436-.72,436.5-.89,512,.24,383.54,143,278.71,295.74,194.87,457.57,150,361.45,87.33,280.53,0,220.57Z"/></svg>');
+    background-position: center;
+    background-repeat: no-repeat;
+}
+
+input[type=checkbox]::after {
+    content: "";
+    position: absolute;
+    z-index: 3;
+    display: flex;
+    justify-content: flex-start;
+    align-items: flex-start;
+    border: 3px solid transparent;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: all .4s ease;
+}
+
+select {
+    padding: 5px 12px;
+    background-color: transparent;
+    color: #FFFFFF;
+    cursor: pointer;
+    outline: none;
+    border-radius: 4px;
+    border: solid 2px #69C575;
+}
+select option {
+    color: #FFFFFF;
+    background-color: #333333;
+}
+.advanced {display:none;}
+</style>
+<title>TraceLogger</title>
+<script type="text/javascript" src="/rtl/jquery.js"></script>
+<script>
+const trUrl = "/rtl/tracelogger.service/"
+const docUrl = "https://realtimelogic.com/ba/doc/?url=auxlua.html#tracelogger";
+
+//Must match C code
+const TR_set = 1
+const TR_data = 2
+const TR_acquired = 3
+
+const TS_Http11State = 1
+const TS_Request = 2
+const TS_RequestHeaders = 3
+const TS_setResponseHeaders = 4
+const TS_setResponseBody = 5
+const TS_TraceButtonState = 6
+const TS_TraceLevel = 7
+
+function Utf8ArrayToStr(inp, offset, length) {
+    let outp = "";
+    let utf16;
+    if (offset == undefined) offset = 0;
+    if (length == undefined) length = (inp.length - offset);
+    let ix = offset;
+    while (ix < offset + length) {
+	let b1 = inp[ix++];
+	if (b1 < 128) utf16 = b1;
+	else {
+	    let b2 = inp[ix++] - 128;
+	    if (b2 < 0) return null;
+	    if (b1 < 0xE0)
+		utf16 = 64 * (b1 - 0xC0) + b2;
+	    else {
+		let b3 = inp[ix++] - 128;
+		if (b3 < 0) return null;
+		if (b1 < 0xF0) utf16 = 4096 * (b1 - 0xE0) + 64 * b2 + b3;
+		else {
+		    let b4 = inp[ix++] - 128;
+		    if (b4 < 0) return null;
+		    if (b1 < 0xF8) utf16 = 262144 * (b1 - 0xF0) + 4096 * b2 + 64 * b3 + b4;
+		    else return null;
+		}
+	    }
+	}
+	if (utf16 > 0xFFFF) {
+	    utf16 -= 0x10000;
+	    outp += String.fromCharCode(0xD800 + (utf16 >> 10));
+	    utf16 = 0xDC00 + (utf16 & 0x3FF);
+	}
+	outp += String.fromCharCode(utf16);
+    }
+    return outp;
+};
+
+
+function escapeHtml(unsafe) {
+    return unsafe
+	.replace(/&/g, "&amp;")
+	.replace(/</g, "&lt;")
+	.replace(/>/g, "&gt;")
+	.replace(/"/g, "&quot;")
+	.replace(/'/g, "&#039;");
+};
+
+let writeCon;
+let writeConErr;
+function log(msg) {writeCon(msg);}
+function logErr(msg) {writeConErr(msg);}
+
+let websock = null;
+let started=false;
+let busy=false;
+let connect;
+function startTL() {
+    started=true;
+    $("#ctrl").fadeIn();
+    if( !websock && !busy ) {
+	busy=true;
+	writeCon("Starting <a target='_blank' href='"+docUrl+"'>TraceLogger</a>....\n");
+	connect(false);
+    }
+}
+
+$(function () {
+
+    let serverSetTraceState;
+    let conElem = $("#console");
+    let conHasData = false;
+    let reconnect=true;
+
+    let hv=false; //ctrl header visible
+    $("#ctrl").hide();
+    let hvtimer=false
+    function showH() {
+	if(hvtimer) {
+	    clearTimeout(hvtimer);
+	    hvtimer=false;
+	}
+	else if(!hv && started) {
+	    $("#ctrl").fadeIn();
+	    hv=true;
+	}
+    };
+    function delayedHideH() {
+	if(websock && !hvtimer) {
+	    hvtimer=setTimeout(()=>{
+		$("#ctrl").fadeOut();
+		hvtimer=false;
+		hv=false;
+	    }, 3000);
+	}
+    };
+    $("body").on("mouseenter",showH).on("mouseleave",delayedHideH);
+
+    function clearCon() {
+	conHasData = false;
+	conElem.empty();
+	$("#EraseTrace").prop("disabled", true);
+    };
+
+    writeCon=function(txt) {
+	if (!conHasData) {
+	    conHasData = true;
+	    $("#EraseTrace").prop("disabled", false);
+	}
+	conElem.append(txt);
+	if (document.body.scrollHeight)
+	    window.scrollTo(0, document.body.scrollHeight);
+    };
+
+    writeConErr=function(txt) {
+	writeCon("<span class='err'>" + txt + "</span>");
+    }
+
+    function isChecked(self) {
+	return $(self).prop('checked');
+    };
+
+    function setChecked(elem, checked) {
+	return $("#" + elem).prop('checked', checked);
+    };
+
+    function setConnectedState(connected) {
+	if(connected) delayedHideH();
+	else showH();
+	let tc=$("#ToggleConnect");
+	if(connected) tc.removeClass("red");
+	else tc.addClass("red");
+	$("#led").removeClass().addClass(connected ? "led-green" : "led-red");
+	setConnectBut("Connect", false);
+	eh=null;
+    };
+
+
+    function setConnectBut(txt, disabled) {
+	$("#ToggleConnect").html(txt).prop("disabled", disabled);
+    };
+
+    function setDisconState() {
+	websock = null;
+	setConnectedState(false);
+	setConnectBut("Connect", false);
+    };
+
+    function startWS() {
+	let proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
+	let ws = new WebSocket(proto+location.host+trUrl);
+	ws.binaryType = "arraybuffer";
+	ws.onopen = function(ev)
+	{
+	    websock=ws;
+	    setConnectedState(true);
+	    setConnectBut("Close", false);
+	    writeCon("Connected!\n");
+	};
+	ws.onmessage = function (ev)
+	{
+	    let d = new Uint8Array(ev.data);
+	    switch(d[0]) {
+	    case TR_set:
+		setChecked("SetRequest",	d[1]?true:false);
+		setChecked("SetRequestHeaders", d[2]?true:false);
+		setChecked("SetResponseHeaders",d[3]?true:false);
+		setChecked("SetHttp11State",	d[4]?true:false);
+		setChecked("SetResponseBody",	d[5]?true:false);
+		$("#TraceLevel").val(d[6]);
+		break;
+	    case TR_data:
+		writeCon(escapeHtml(Utf8ArrayToStr(d,1,d.length-1)));
+		break;
+	    case TR_acquired:
+		writeConErr("Connection closed by another client.\n");
+		reconnect=false;
+		break
+	    }
+	};
+	ws.onclose = function(ev)
+	{ 
+	    if(websock) {
+		setDisconState();
+		if(reconnect) writeConErr("WebSocket connection closed with code: "+ev.code+".\n");
+	    }
+	    else if(reconnect) writeCon("Disconnected!\n");
+	    if(reconnect) setTimeout(connect, 3000);
+	};
+    };
+
+    connect=function(force) {
+	reconnect=true;
+	setConnectBut("Connecting...", true);
+	function ajaxRsp(jqXHR) {
+	    if( jqXHR.getResponseHeader('tracelogger') && 
+		(jqXHR.status == 204 || jqXHR.status == 503) )
+	    {
+		busy=false;
+		if(jqXHR.status == 204 || force) {
+		    startWS();
+		}
+		else {
+		    reconnect=false;
+		    setConnectBut("Connect", false);
+		    writeConErr("The TraceLogger is serving another client.\n"+
+				"Click the Connect button to force the other client to disconnect!\n");
+		}
+	    }
+	    else if(jqXHR.status == 401) {
+		setConnectBut("(disabled)",true);
+		if(window.top && window.top.authenticate)
+		    window.top.authenticate();
+		else
+		    writeConErr("You are not authenticated!\n");
+	    }
+	    else if(jqXHR.status == 0) {
+		writeConErr("Cannot connect\n");
+		setTimeout(connect, 3000);
+	    }
+	    else
+	    {
+		setConnectBut("Cannot Connect",true);
+		writeConErr("Service at "+trUrl+" is not a TraceLogger or the TraceLogger service is not running!\nSee the <a href='"+docUrl+"'>documentation</a> for details.\n");
+	    }
+	};
+	$.ajax({
+	    url:trUrl,
+	    success: function(data, textStatus, jqXHR){ ajaxRsp(jqXHR); },
+	    error: function (jqXHR){ ajaxRsp(jqXHR); }
+	});
+    };
+    clearCon();
+
+    function sendCmd(cmd, val) {
+	if(websock) {
+	    let d = new Uint8Array(2);
+	    d[0]=cmd;
+	    d[1]=val;
+	    websock.send(d);
+	};
+    };
+
+    $("#SetRequest").click(function(){sendCmd(TS_Request,isChecked(this));});
+    $("#SetRequestHeaders").click(function(){
+	sendCmd(TS_RequestHeaders,isChecked(this));
+	if(isChecked(this)) setChecked("SetRequest", true);
+    });
+    $("#SetResponseHeaders").click(function(){sendCmd(TS_setResponseHeaders,isChecked(this));});
+    $("#SetResponseBody").click(function(){
+	if(isChecked("#SetResponseHeaders")) {
+	    sendCmd(TS_setResponseHeaders,false);
+	    setChecked("SetResponseHeaders", false);
+	}
+	sendCmd(TS_setResponseBody,isChecked(this));
+    });
+    $("#SetHttp11State").click(function(){sendCmd(TS_Http11State,isChecked(this));});
+    $("#TraceLevel").click(function() {sendCmd(TS_TraceLevel,$(this).val());});
+    $("#EraseTrace").click(clearCon);
+    $("#ToggleConnect").click(function() {
+	if(websock) { websock.close(); websock=null; reconnect=false; setDisconState(); }
+	else connect(true);
+    });
+    if(location.search.includes('?advanced='))
+	$('#ctrl').find('.advanced').removeClass('advanced');
+    if( ! location.search.includes('?embedded=') ) startTL();
+});
+</script>
+</head>
+<body>
+  <div id="ctrl">
+    <label><input id="SetRequest" type="checkbox" /> Request</label>
+    <label><input id="SetRequestHeaders" type="checkbox" /> Request Headers</label>
+    <label><input id="SetResponseHeaders" type="checkbox" /> Response Headers</label>
+    <div class="vertical-center">
+      Trace Level&nbsp;&nbsp;
+      <select id="TraceLevel" name="TraceLevel">
+	<option value="0">&nbsp;0</option>
+	<option value="1">&nbsp;1</option>
+	<option value="2">&nbsp;2</option>
+	<option value="3">&nbsp;3</option>
+	<option value="4">&nbsp;4</option>
+	<option value="5">&nbsp;5</option>
+	<option value="6">&nbsp;6</option>
+	<option value="7">&nbsp;7</option>
+	<option value="8">&nbsp;8</option>
+	<option value="9">&nbsp;9</option>
+	<option value="10">&nbsp;10</option>
+	<option value="15">&nbsp;15</option>
+	<option value="20">&nbsp;20</option>
+      </select>
+    </div>
+    <label class="advanced"><input id="SetResponseBody" type="checkbox" /> Response Body</label>
+    <label class="advanced"><input id="SetHttp11State" type="checkbox" /> HTTP 1.1 State</label>
+    <div>
+      <button id="EraseTrace">Erase Trace</button>
+    </div>
+    <div class="connect-button">
+      <button id="ToggleConnect">Connect</button>
+      <div id="led" class="led-red"></div>
+    </div>
+  </div>
+  <div id="tracecont">
+    <pre id="console"><span class='err'>JavaScript not enabled!</span></pre>
+  </div>
+</body>
+</html>

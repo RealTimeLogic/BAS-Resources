@@ -1,0 +1,77 @@
+local a=require"xml2table"local b,c,d=string.gsub,table.concat,table.unpack;local e,f,g=string.format,string.match,string.char;local setmetatable=setmetatable;local xparser=xparser;local pairs,ipairs=pairs,ipairs;local type,pcall=type,pcall;local tonumber,tostring=tonumber,tostring;local pairs,rawget=pairs,rawget;local trace=trace;local function h(j)trace(debug and debug.traceback(j,2)or j)end;local k={}envelope_ns="http://schemas.xmlsoap.org/soap/envelope/"encodingStyle="http://schemas.xmlsoap.org/soap/encoding/"default_tns="http://www.barracuda-server.com#lsoap/"soap_error=function(l,m)return{src=m or"Response",detail=l,msg=l}end;http_error=function(l,n)return{reply="HTTP",status=n or 400,msg=l}end;do local o={["<"]="&lt;",[">"]="&gt;"}local p="([<>])"encode_text=function(j)return b(j,p,o)end;local o={["<"]="&lt;",[">"]="&gt;",["'"]="&apos;",["\""]="&quot;"}local p="([<>'\"])"encode_attribute=function(j)return b(j,p,o)end;local q={["<"]="&lt;",[">"]="&gt;"}local i;for i=1,31 do q[g(i)]="&#"..i..";"end;local r="([\001-\031<>])"encode_string=function(s)return b(s,r,q)end end;local t=tonumber;local u=function(i)return e("%d",tonumber(i))end;local v=function(s)return tonumber(s)~=0 end;local w=function(x)return x and 1 or 0 end;local y=tonumber;local z=function(A)return b(e("%.18f",tonumber(A)),"0+$","")end;local B=tonumber;local C=function(D)return e("%.18g",tonumber(D))end;local tostring=tostring;local E=encode_string;local F=setmetatable({string={"Str",tostring,tostring},boolean={"Bool",v,w},decimal={"Dec",y,z},integer={"Int",t,u},float={"Flt",B,C},double={"Dbl",B,C},duration={"Dur",tostring,E},dateTime={"DT",tostring,E},time={"T",tostring,E},date={"D",tostring,E},gYearMonth={"YM",tostring,E},gYear={"YY",tostring,E},gMonthDay={"MD",tostring,E},gDay={"DD",tostring,E},gMonth={"MM",tostring,E},hexBinary={"Hex",tostring,E},base64Binary={"B64",tostring,E},anyURI={"URI",tostring,E},QName={"QN",tostring,E},NOTATION={"NOTE",tostring,E}},{__index=function(G,H)return{H,tostring,E}end})do local I=[[
+<?xml version="1.0" encoding="UTF-8"?>
+<soap-env:Envelope
+  xmlns:soap-env="http://schemas.xmlsoap.org/soap/envelope/"
+  soap-env:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/"
+  >
+	<soap-env:Header>
+		<barracuda:fault xmlns:barracuda="http://www.barracuda-server.com#lsoap">
+			%HEADERDETAIL%
+		</barracuda:fault>
+	</soap-env:Header>
+	<soap-env:Body>
+		<soap-env:Fault>
+			<faultcode>soap-env:%FAULTCODE%</faultcode>
+			<faultstring>%FAULTSTRING%</faultstring>
+			%FAULTACTORELEMENT%
+			%DETAILELEMENT%
+		</soap-env:Fault>
+	</soap-env:Body>
+</soap-env:Envelope>
+]]local J={Request="Client",Response="Server"}build_error_response=function(K)local n=K.status or 500;local j=K.detail or K.msg or"unknown error"local L;if K.reply~="HTTP"then local M=K.detail or K.msg;M=M and"<detail>"..encode_text(M).."</detail>"local N=K.actor and"<faultactor>"..encode_text(K.actor).."</faultactor>"local G={["%HEADERDETAIL%"]=M or"",["%FAULTCODE%"]=K.code or J[K.source]or"Server",["%FAULTSTRING%"]=K.msg and encode_text(K.msg)or"",["%FAULTACTORELEMENT%"]=N or"",["%DETAILELEMENT%"]=K.pos=="Body"and M or""}L=b(I,"(%%%u+%%)",G)end;return n,j,L end end;do local O=function(P,Q)return nil,"Bad Handler ("..tostring(P)..") : "..Q end;local R=function(P,S,T)if T then if type(T)~="table"then return O(P,"'"..S.."' parameter is not a table")end;if#T==0 then if not T.name then return O(P,S.." parameter #"..tostring(i).." has no name")end else for i,U in ipairs(T)do if type(U)=="table"then if not U.name then return O(P,S.." parameter #"..tostring(i).." has no name")end end end end end;return true end;check_handlers=function(V)for H,W in pairs(V)do if type(W)=="table"then if not W.call then return O(H,"no 'call' function provided")elseif type(W.call)~="function"then return O(H,"'call' is not a function")end;local X,Q=R(H,"input",W.input)if X then X,Q=R(H,"output",W.output)end;if not X then return nil,Q end end end;return V end end;do local Y=[[
+<?xml version="1.0" encoding="utf-8"?>
+<wsdl:definitions
+  xmlns:wsdl="http://schemas.xmlsoap.org/wsdl/"
+  xmlns:soap="http://schemas.xmlsoap.org/wsdl/soap/"
+  xmlns:xs="http://www.w3.org/2001/XMLSchema"
+  xmlns:tns="%TNS%"
+  targetNamespace="%TNS%"
+  >
+]]local Z=[[
+  </wsdl:portType>
+  <wsdl:binding name="%NAME%SoapHttpBinding" type="tns:%NAME%Interface">
+    <soap:binding style="rpc" transport="http://schemas.xmlsoap.org/soap/http"/>
+]]local _=[[
+  </wsdl:binding>
+  <wsdl:service name="%NAME%RpcService">
+    <wsdl:port name="%NAME%Endpoint" binding="tns:%NAME%SoapHttpBinding">
+      <soap:address location="%LOCATION%.rpc"/>
+    </wsdl:port>
+ </wsdl:service>
+</wsdl:definitions>
+]]local a0=[[
+<wsdl:operation name="%OPNAME%">
+<wsdl:input message="tns:%OPNAME%Request" />
+<wsdl:output message="tns:%OPNAME%Response" />
+</wsdl:operation>
+]]local a1=[[
+<wsdl:operation name="%OPNAME%">
+<soap:operation soapAction="http://www.barracuda-server.com/lsoap/#%OPNAME%"/>
+<wsdl:input><soap:body use="literal" /></wsdl:input>
+<wsdl:output><soap:body use="literal" /></wsdl:output>
+</wsdl:operation>
+]]local a2=[[
+<wsdl:operation name="%OPNAME%">
+<soap:operation soapAction="http://www.barracuda-server.com/lsoap/#%OPNAME%"/>
+<wsdl:input><soap:body use="encoded" encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" /></wsdl:input>
+<wsdl:output><soap:body use="encoded" encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" /></wsdl:output>
+</wsdl:operation>
+]]local function a3(G,a4,T)local a5=a4[T.type]or"xs:string"G[#G+1]="<wsdl:part name='"..T.name.."' type='"..a5 .."'/>\n"end;local function a6(G,a4,S,T,a7)G[#G+1]="<wsdl:message name='"..S..a7 .."'>\n"if T then if#T==0 then a3(G,a4,T)else for H,W in ipairs(T)do a3(G,a4,W)end end end;G[#G+1]="</wsdl:message>\n"end;local a8=[[
+<xs:schema targetNamespace="%TNS%" xmlns:tns="%TNS%" >
+]]local function a9(aa)local ab=rawget(F,aa)if ab then return ab[1]end;local arrayTyp=f(aa,"^(.+)Array$")if arrayTyp then return F[arrayTyp][1].."Array"end;return aa end;local ac=[[
+<xs:complexType name="%TYPE%Array">
+<xs:sequence>
+<xs:element name="%TYPE%" type="xs:%TYPE%" minOccurs="0" maxOccurs="unbounded"/>
+</xs:sequence>
+</xs:complexType>
+]]local function ad(ae,a4,aa)local a5=a4[aa]if not a5 then local af=f(aa,"^(.+)Array$")if af then ae[#ae+1]=b(ac,"(%%%u+%%)",af)a5="tns:"..aa else a5="xs:"..aa end;a4[aa]=a5 end;return a5 end;local function ag(ae,a4,ah)local ai={}local G={false}for H,W in ipairs(ah)do local aa,S=W.type,W.name;if type(aa)~="table"then local a5=ad(ae,a4,aa)G[#G+1]="<xs:element name='"..S.."' type='"..a5 .."'/>\n"ai[#ai+1]=S..a9(aa)end end;ai=c(ai,"_")a4[ah]="tns:"..ai;G[1]="<xs:complexType name='"..ai.."'><xs:sequence>\n"G[#G+1]="</xs:sequence></xs:complexType>\n"ae[#ae+1]=c(G)end;local function aj(ae,a4,aa)if aa and not a4[aa]then if type(aa)=="table"then ag(ae,a4,aa)else ad(ae,a4,aa)end end end;local function ak(ae,a4,T)if T then if#T==0 then aj(ae,a4,T.type)else for H,W in ipairs(T)do aj(ae,a4,W.type)end end end end;function build_wsdl_t(al,S,am,an,ao)local ap={["%NAME%"]=S,["%LOCATION%"]=am,["%TNS%"]=an or default_tns..S}local G={b(Y,"(%%%u+%%)",ap)}local aq={}for H,W in pairs(al)do if type(W)=="table"then aq[H]=W end end;local ae,a4={},{}for H,W in pairs(aq)do ak(ae,a4,W.input)ak(ae,a4,W.output)end;if#ae>0 then G[#G+1]="<wsdl:types>"G[#G+1]=b(a8,"(%%%u+%%)",ap)for i,W in ipairs(ae)do G[#G+1]=W end;G[#G+1]="</xs:schema></wsdl:types>"end;ae=nil;for H,W in pairs(aq)do a6(G,a4,H,W.input,"Request")a6(G,a4,H,W.output,"Response")end;G[#G+1]="<wsdl:portType name='"..S.."Interface'>\n"for H,W in pairs(aq)do ap["%OPNAME%"]=H;G[#G+1]=b(a0,"(%%%u+%%)",ap)end;G[#G+1]=b(Z,"(%%%u+%%)",ap)local ar=ao=="encoded"and a2 or a1;for H,W in pairs(aq)do ap["%OPNAME%"]=H;G[#G+1]=b(ar,"(%%%u+%%)",ap)end;G[#G+1]=b(_,"(%%%u+%%)",ap)return G end;function build_wsdl(al,S,am,an,ao)return c(build_wsdl_t(al,S,am,an,ao))end end;do local as=function(at)local au=at.elements[1]if au.local_name~="Envelope"then return nil,{src="Request",doc=at,msg="Not a SOAP Envelope"}end;at.soap_envelope=au;local av=au.namespace_ref;if av and av~=envelope_ns then return nil,{src="Request",code="VersionMismatch",doc=at,msg="version namespace mismatch"}end;if au.encodingStyle~=nil then return nil,{src="Request",doc=at,msg="encodingStyle illegal in <Envelope>"}end;local aw=au.elements;if#aw==0 then return nil,{src="Request",doc=at,msg="No children of <Envelope>"}elseif#aw>2 then return{src="Request",doc=at,msg="Too many children of <Envelope>"}elseif#aw==2 then local ax=aw[1]if ax.local_name~="Header"then return nil,{src="Request",doc=at,node=ax,msg="bad <Envelope> child #1 (Expecting <Header>, found <"..ax.local_name..")"}elseif ax.namespace_ref~=au.namespace_ref then return nil,{src="Request",doc=at,node=ax,msg="Header namespace mismatch"}end;at.soap_header=ax end;local ay=aw[#aw]if ay.local_name~="Body"then return nil,{src="Request",doc=at,node=ay,msg="bad <Envelope> child #"..#at.." (Expecting <Body>, found <"..ay.local_name..")"}elseif ay.namespace_ref~=au.namespace_ref then return nil,{src="Request",doc=at,node=ay,msg="Body namespace mismatch"}end;at.soap_body=ay;return at end;local az=function(aA,aB)local at;local X,Q=aA:parse(aB)if X=="DONE"then at,Q=Q,nil elseif X==true then return"MORE"elseif X=="ABORT"then local aC=aA:get_context()Q={src="Request",doc=aC and aC.doc,node=aC and aC.node,detail=Q,msg=Q or"Invalid SOAP syntax"}elseif X==nil then Q=soap_error(Q or"XML Syntax error","Request")else local j="Internal parser error"h(j)Q=soap_error(j,"Response")end;aA:reset()if Q then return nil,Q end;return as(at)end;local aD={PI=function()return nil,"PI element not allowed in SOAP request"end,COMMENT=function()end}setmetatable(aD,{__index=a})new_parser=function(aE)local aF=xparser.create(aD,{soap_options=aE},"SKIPBLANK")local aG={parse=function(aH,...)return az(aF,...)end,destroy=function(aH,...)return aF:destroy()end}setmetatable(aG,{__index=aF})return aG end end;do local aI=[[
+<?xml version="1.0" encoding="UTF-8" ?>
+<soap-env:Envelope
+  xmlns:soap-env="http://schemas.xmlsoap.org/soap/envelope/"
+  soap-env:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/"
+  >
+  <soap-env:Body>
+]]local aJ=[[
+  </soap-env:Body>
+</soap-env:Envelope>
+]]local aK=function(at,aL,j)return{src="Server",pos="Body",doc=at,node=aL,msg=j,detail="function '"..aL.expanded_name.."' error : "..j}end;local function aM(G,S,aa,L)if L==nil then return nil,"reply '"..S.."' is nil"end;local af=f(aa,"^(.+)Array$")if af then if type(L)~="table"then return nil,"reply '"..S.."' is not table"end;local aN=F[arrayTyp][3]local aO,aP="<"..af..">","</"..af..">"for i=1,#L do G[#G+1]=aO..aN(L[i])..aP end else G[#G+1]=F[aa][3](L)end;return true end;local function aQ(G,S,aa,L)for i,W in ipairs(aa)do local aa,S=W.type,W.name;if type(aa)~="table"then G[#G+1]="<"..S..">"local X,Q=aM(G,S,aa,L[S])if not X then return nil,Q end;G[#G+1]="</"..S..">"end end;return true end;local function aR(G,T,L)G[#G+1]="<"..T.name..">"local aa=T.type;local X,Q=true;if not aa then G[#G+1]=tostring(X[1])elseif type(aa)=="table"then if type(L)~="table"then return nil,"reply '"..T.name.."' is not a table"end;X,Q=aQ(G,T.name,aa,L)else X,Q=aM(G,T.name,aa,L)end;G[#G+1]="</"..T.name..">"return X,Q end;local aS=function(at,aL)local P=aL.soap_func;local aT=aL.tag_name;local xml={"<",aT,">"}local L=aL.soap_reply;local aU=P.output;if aU then if#aU>0 then for i,W in ipairs(aU)do local X,Q=aR(xml,W,L[i+1])if not X then return nil,aK(at,aL,Q)end end else local X,Q=aR(xml,aU,L[2])if not X then return nil,aK(at,aL,Q)end end end;xml[#xml+1]="</"..aT..">\n"return c(xml),aL.soap_func.lifetime end;build_reply=function(at)local ay=at.soap_body;local L={aI}local aV;local aw=ay.elements;for i,aL in ipairs(aw)do local X,Q=aS(at,aL)if not X then return nil,Q end;L[#L+1]=X;if Q then aV=(not aV or Q<aV)and Q end end;L[#L+1]=aJ;return c(L),aV end end;do local aW=function(at,aL)return{src="Server",pos="Body",doc=at,node=aL,msg="function not found",detail="function '"..aL.expanded_name.."' not found"}end;local aX=function(at,aL,aY,S)return{src="Server",pos="Body",doc=at,node=aL,msg="parameter not found",detail="parameter '"..S.."' not found"}end;local aZ=function(at,aL,aY,S)return{src="Server",pos="Body",doc=at,node=aL,msg="bad parameter type",detail=S and"parameter '"..S.."' invalid type"}end;local a_=function(at,aL,aY,S)local j="internal error"local b0=S and"parameter '"..S.."' unrecognised"or"?"h(e("%s: %s",j,b0))return{src="Server",pos="Body",doc=at,node=aL,msg=j,detail=b0}end;local b1=function(T,aL)local aa,S=T.type,T.name;if not aa then return aL.text or""end;if type(aa)=="table"then return nil,"nested struct",S end;local af=f(aa,"^(.+)Array$")if af then local aH={}local aN=F[af][2]for H,W in ipairs(aL.elements)do local b2=aN(W.text)if not b2 then return nil,"bad type",S end;aH[#aH+1]=b2 end;return aH end;return F[aa][2](aL.text)end;local b3=function(T,aL)local aH={}for i,W in ipairs(T)do local b4=aL.elements[W.name]if not b4 then return nil,W.name end;local b5,Q,b6=b1(W,b4)if not b5 then return nil,Q,b6 end;aH[#aH+1]=b5;aH[W.name]=b5 end;return aH end;local b7=function(T,aL)local aa,S=T.type,T.name;local b4=aL.elements[S]if not b4 then return nil,"not found",S end;if not aa then return b4.text or""end;if type(aa)=="table"then return b3(aa,b4)end;local af=f(aa,"^(.+)Array$")if af then local aH={}local aN=F[af][2]for H,W in ipairs(b4)do local b2=aN(W.text)if not b2 then return nil,"bad type",W.name end;aH[#aH+1]=b2 end;return aH end;return F[aa][2](b4.text)end;bind_funcs=function(at,b8)local ay=at.soap_body;for i,aL in ipairs(ay.elements)do local P=b8[aL.expanded_name]if type(P)~="table"then return nil,aW(at,aL)end;aL.soap_func=P;local T=P.input;if T then if#T>0 then local aH={}for i,W in ipairs(T)do local X,Q,b6=b7(W,aL)if not X then if Q=="not found"then return nil,aX(at,aL,P,b6)end;if Q=="bad type"then return nil,aZ(at,aL,P,b6)end;return nil,a_(at,aL,P,b6)end;aH[#aH+1]=X end;aL.soap_parms=aH else local X,Q,b6=b7(T,aL)if not X then if Q=="not found"then return nil,aX(at,aL,P,b6)end;if Q=="bad type"then return nil,aZ(at,aL,P,b6)end;return nil,a_(at,aL,P,b6)end;aL.soap_parms={X}end end end;return at end end;do local b9=function(at,aL,Q)return{src="Server",pos="Body",doc=at,node=aL,msg="call failed with error '"..Q.."'",detail="'"..aL.tag_name.."' failed with error '"..Q.."'"}end;call_funcs=function(at)local ay=at.soap_body;for i,aL in ipairs(ay.elements)do local ba=aL.soap_parms;local X;if ba then X={pcall(aL.soap_func.call,d(ba))}else X={pcall(aL.soap_func.call)}end;if not X[1]then return nil,b9(at,aL,X[2])end;if aL.soap_func.output then if X[2]==nil and X[3]then return nil,b9(at,aL,tostring(X[3]))end end;aL.soap_reply=X end;return at end end;do execute_rpc_request=function(at,b8)local X,Q=bind_funcs(at,b8)if X then X,Q=call_funcs(at)end;if X then X,Q=build_reply(at)end;return X,Q end;handle_rpc_request=function(bb,al)local aA=new_parser()local at,X,Q;if type(bb)=="string"then at,X=aA:parse(bb)else xml=""local dat;dat,Q=bb()while dat do at,X=aA:parse(dat)if at~="MORE"then break end;dat,Q=bb()end end;aA:destroy()if not dat and Q then return 400,"Data read error:"..Q end;dat,bb=nil,nil;if at==nil then Q=X elseif at=="MORE"then Q=soap_error("Incomplete XML document","Request")elseif type(at)~="table"then Q=soap_error("broken state","Response")else X,Q=execute_rpc_request(at,al)if X then return 200,"OK",X,Q end end;return build_error_response(Q)end end;return k
