@@ -47,7 +47,7 @@ fp:close()
 local fmt=string.format
 local tinsert,tpack=table.insert,table.pack
 
-local DataTypes <const> = {
+local DataTypes  = {
    Unknown = 0,
    Int8 = 1,
    Int16 = 2,
@@ -87,7 +87,7 @@ local DataTypes <const> = {
    DateTimeArray = 34, 
 }
 
-local DataTypeNames <const> = {
+local DataTypeNames  = {
    "int_value", --Int8
    "int_value", --Int16
    "int_value", --Int32
@@ -110,7 +110,7 @@ local DataTypeNames <const> = {
 }
 
 -- Sparkplug's protobuf schema name space
-local PayloadNS <const> = ".org.eclipse.tahu.protobuf.Payload"
+local PayloadNS  = ".org.eclipse.tahu.protobuf.Payload"
 
 local DS={} -- Sparkplug DataSet
 DS.__index=DS

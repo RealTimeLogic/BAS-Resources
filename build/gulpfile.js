@@ -9,9 +9,9 @@ gulp.task('clean', async function (cb) {
   return cb();
 });
 
-gulp.task('copy-folders', function () {
+gulp.task('copy-core', function () {
   return gulp
-    .src(['../src/core/**/*', '../src/core/.lua/**/*'], { base: '../src/core' })
+    .src(['../src/core/**/*', '../src/core/.lua/**/*', '../src/core/.certificate/**/*'], { base: '../src/core' })
     .pipe(gulp.dest('./MakoBuild'));
 });
 
@@ -31,9 +31,9 @@ gulp.task('minify-js', function () {
 
 gulp.task('luamin-folder', function () {
   return gulp
-    .src(['./MakoBuild/**/*.lua', './MakoBuild/.**/*.lua'], { base: './MakoBuild' })
+    .src(['./MakoBuild/**/*.lua', './MakoBuild/.lua/**/*.lua'], { base: './MakoBuild' })
     .pipe(luamin())
     .pipe(gulp.dest('./MakoBuild'));
 });
 
-gulp.task('build-mako', gulp.series('clean', 'copy-folders', 'minify-css', 'minify-js', 'luamin-folder'));
+gulp.task('build-mako', gulp.series('clean', 'copy-core', 'minify-css', 'minify-js', 'luamin-folder'));
