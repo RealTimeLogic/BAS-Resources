@@ -686,7 +686,6 @@ end
 
 local function coMqttConnect(sock,self,conbta)
    local reconnect
-   self.sock=sock
    sock:write(conbta)
    local cpt,bta=mqttRec(self)
    if cpt then
