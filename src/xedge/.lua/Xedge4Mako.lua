@@ -23,13 +23,13 @@ local function deferred()
    if mako.tldir then
       local t=mako.tldir
       xedge.tldir=t
-      t:unlink()
       if t:configure().priority < 9 then t:configure{priority=9} end
    else
       local t=ba.create.tracelogger()
       t:configure{priority=9}
       xedge.tldir=t
    end
+   xedge.tldir:unlink()
 
    -- Load and start apps in config file
    local cfg,err=rw.json(cfgio,cfgname)
