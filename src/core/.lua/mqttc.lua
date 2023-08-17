@@ -191,11 +191,9 @@ local function encConnect(self, cleanStart)
    local opt = self.opt
    local prop=self.prop
    local w -- will
-
    if not prop.sessionexpiryinterval or prop.sessionexpiryinterval==0 then
       cleanStart=true
    end
-
    -- Calculate total packet len
     -- 10 = 2+4+1+1+2: protlen+'MQTT'+version+flags+keepalive
    local wPropLen
@@ -218,7 +216,6 @@ local function encConnect(self, cleanStart)
       typeChk("opt.password", "string",opt.password,4)
       ix=encString(nil,ix, opt.password)
    end
-
    -- Create and format packet
    local packetLen=ix
    local bta=btaCreate2(packetLen)
@@ -252,7 +249,6 @@ local function encConnect(self, cleanStart)
    if (ix-1) ~= ba.bytearray.size(bta) then
       error(fmt("ix~=bta size: %d ~= %d",ix-1,ba.bytearray.size(bta)))
    end
-    
    return bta
 end
 
@@ -394,7 +390,7 @@ local function mqttRec(self)
    return cpt,bta
 end
 
--- Remove from tail and send
+-- An unconnected cosocket, which removes from tail and sends msg
 local function sndCosock(sock,self)
    local sndQT=self.sndQT
    while true do
@@ -415,16 +411,9 @@ local function sndCosock(sock,self)
 end
 
 
--- Send 2 sock or queue on head
+-- Queue at head and enable 'sndCosock()', which may already be
+-- enabled and that is OK.
 local function sendMsg(self, bta)
-   if self.sndQHead == self.sndQTail and self.connected then
-      local ok,status=self.sock:write(bta)
-      if ok then return end
-      if "string" == type(status) then -- sock err
-	 self.lasterror={etype="sock",status=status}
-	 self.connected=false
-      end
-   end
    local sndQHead=self.sndQHead
    assert(nil == self.sndQT[sndQHead])
    self.sndQT[sndQHead]=bta
@@ -432,6 +421,7 @@ local function sendMsg(self, bta)
    self.sndQElems=self.sndQElems+1
    if self.connected then self.sndCosock:enable() end
 end
+
 
 local function sendPing(self)
    local pingCounter=self.pingCounter
