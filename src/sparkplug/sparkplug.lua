@@ -1,7 +1,4 @@
 -- Lua MQTT Sparkplug module
--- Sparkplug Specification: https://bit.ly/mqtt-sparkplug
--- We include references to the specification in the code below as
--- 'SP xx' where XX is a section in the Sparkplug Specification.
 
 -- The following code tries to locate Sparkplug's Protocol Buffers
 -- (Protobuf) schema. The code initially tries to load it from the
@@ -11,7 +8,6 @@
 -- the user the freedom to package the required files in the server's
 -- resource file or simply load the schema file "as is" as part of the
 -- sparkplug demo application.
-
 local io = ba.openio"vm"
 local function openSchema()
    local p=".lua/sparkplug_b.proto"
@@ -51,7 +47,7 @@ fp:close()
 local fmt=string.format
 local tinsert,tpack=table.insert,table.pack
 
-local DataTypes <const> = { -- SP 14.2
+local DataTypes <const> = {
    Unknown = 0,
    Int8 = 1,
    Int16 = 2,
@@ -115,9 +111,8 @@ local DataTypeNames <const> = {
 
 -- Sparkplug's protobuf schema name space
 local PayloadNS <const> = ".org.eclipse.tahu.protobuf.Payload"
-local bdSeqNum=0 -- SP 16.1
 
-local DS={} -- Sparkplug DataSet (SP 14.2 -> message DataSet)
+local DS={} -- Sparkplug DataSet
 DS.__index=DS
 
 
@@ -136,9 +131,12 @@ function DS:row(...) -- Add DataSet row
    tinsert(self.rows, {elements=elements})
 end
 
-local PL={} -- Sparkplug message Payload (SP 14.2)
+local PL={} -- Sparkplug message PayLoad (PL)
 PL.__index=PL
 
+local function payload() -- Create Payload Lua table
+   return setmetatable({metrics={}}, PL)
+end
 
 function PL:copy() -- Copy Sparkplug Lua table
    local t={}
@@ -184,39 +182,43 @@ function PL:dataset(name,set,alias,timestamp) -- Add DataSet
    return setmetatable({rows=ds.rows,set=set}, DS)
 end
 
--- Internal PL:BdSeqMetric. Set bdSeq metric for nbirth/ndeath (SP 16.1)
-local function plBdSeqMetric(self)
-   return PL.metric(self,"bdSeq",DataTypes.Int64,bdSeqNum)
-end
-
-local function payload() -- Create Payload Lua table
-   return setmetatable({metrics={}}, PL)
-end
-
-
 ------------------------------------------------------------------------
 -- The Sparkplug protocol stack extends: https://realtimelogic.com/ba/doc/?url=MQTT.html
 ------------------------------------------------------------------------
 
-local function gOnPub(topic) -- The 'global' on publish; should not be called.
+local function gOnPub(topic) -- The 'global' on publish should not be called.
    trace("Received unknown topic",topic)
 end
 
-local function spEncode(self, t, info, level) -- Convert Lua table 't' to protobuf
-   t.timestamp =  t.timestamp or ba.datetime"NOW":ticks()
+-- Add bdSeq metric to NBIRTH,NDEATH messages
+local function plBdSeqMetric(self, pl)
+   pl = pl or payload() -- pl is set and is nbirth if NBIRTH message. Not set for NDEATH.
+   PL.metric(pl,"bdSeq",DataTypes.Int64,self._bdSeqNum)
+   return pl
+end
+
+-- Add 'seq' to NBIRTH and NDATA
+local function addSeq(self, pl)
    local seq=self._nextSeq
-   t.seq=seq
+   pl.seq=seq
    seq=seq+1
    self._nextSeq = seq <= 255 and seq or 0
-   local pb,err=pb.encode(PayloadNS, t)
+   return pl
+end
+
+ -- Add timestamp and convert Lua table 'pl' to protobuf
+local function spEncode(self, pl, info, level)
+   pl.timestamp =  pl.timestamp or ba.datetime"NOW":ticks()
+   local pb,err=pb.encode(PayloadNS, pl)
    if not pb then error(fmt("Invalid %s table: %s",err),info or "PB", level or 3) end
    return pb
 end
 
-local function spWill(self,level) -- Create the NDEATH (MQTT Will) message
+local function spWill(self) -- Create the NDEATH (MQTT Will) message
    return {
       topic=self._fmtTopic"NDEATH",
-      payload=spEncode(self,plBdSeqMetric(self._ndeath:copy()),"ndeath",level)
+      payload=spEncode(self,plBdSeqMetric(self),"ndeath"),
+      qos=1
    }
 end
 
@@ -226,7 +228,7 @@ local function onsuback(topic, reason) -- Check the MQTT subscribe status
    end
 end
 
-local function onNCMD(self,topic,payload) -- Received a Sparkplug "NCMD" (SP 17.5)
+local function onNCMD(self,topic,payload) -- Received a Sparkplug "NCMD"
    local table,err=pb.decode(PayloadNS, payload)
    if table then
       self._ondata("NCMD",table,topic)
@@ -235,7 +237,7 @@ local function onNCMD(self,topic,payload) -- Received a Sparkplug "NCMD" (SP 17.
    end
 end
 
-local function onSTATE(self,topic,payload)  -- Received a Sparkplug "STATE" (SP 17.9)
+local function onSTATE(self,topic,payload)  -- Received a Sparkplug "STATE"
    self._ondata("STATE",payload,topic)
 end
 
@@ -249,8 +251,7 @@ function spOnstatus(self,onstatus,type,code,status) -- MQTT 'on connect/disconne
       self:nodebirth()
    elseif true == self._connected then
       self._nextSeq=0
-      bdSeqNum=bdSeqNum+1
-      if bdSeqNum > 255 then bdSeqNum=0 end
+      self._bdSeqNum=self._bdSeqNum+1
       mqtt:setwill(spWill(self))
       self._connected=false
    end
@@ -260,32 +261,31 @@ end
 local SP={} -- Sparkplug module
 SP.__index=SP
 
-function SP:nodebirth() -- Publish Node Birth, SP 17.1
-   self.mqtt:publish(self._fmtTopic"NBIRTH",spEncode(self,plBdSeqMetric(self._nbirth:copy())))
+function SP:nodebirth() -- Publish Node Birth
+   self.mqtt:publish(self._fmtTopic"NBIRTH",spEncode(self,plBdSeqMetric(self,addSeq(self,self._nbirth:copy()))))
 end
 
-function SP:ndata(table) -- Publish NDATA, SP 17.3
-   self.mqtt:publish(self._fmtTopic"NDATA",spEncode(self, table))
+function SP:ndata(pl) -- Publish NDATA
+   self.mqtt:publish(self._fmtTopic"NDATA",spEncode(self,addSeq(self,pl)))
 end
 
 function SP:disconnect(reason)
+   -- Nongraceful close makes MQTT broker send NDEATH (will message)
+   self.mqtt.sock:close()
    self.mqtt:disconnect(reason)
 end
 
-local function create(addr, onstatus, ondata, groupId, nodeName, nbirth, op, ndeath)
-   ndeath = ndeath or payload()
+local function create(addr, onstatus, ondata, groupId, nodeName, nbirth, op)
    assert("function"==type(onstatus) and
 	  "string"==type(groupId) and
 	  "string"==type(nodeName) and
-	  "table"==type(nbirth) and
-	  "table"==type(ndeath), "Wrong args.")
-   -- _nextSeq: SP 15.1.1 seq
-   local self={_nextSeq=0,_nbirth=nbirth,_ndeath=ndeath,_ondata=ondata}
-   spEncode(self,nbirth,"nbirth") -- Validate
+	  "table"==type(nbirth), "Wrong args.")
+   local self={_bdSeqNum=0,_nextSeq=0,_nbirth=nbirth,_ondata=ondata}
+   spEncode(self,nbirth:copy(),"nbirth") -- Validate
    local function fmtTopic(msgType) return fmt("%s/%s/%s/%s","spBv1.0",groupId,msgType,nodeName) end
    self._fmtTopic=fmtTopic
    local op = op or {}
-   op.will=spWill(self,3)
+   op.will=spWill(self)
    op.recbta=false
    local function onStat(...) return spOnstatus(self,onstatus,...) end
    self.mqtt=require"mqttc".create(addr,onStat,gOnPub,op,properties)
