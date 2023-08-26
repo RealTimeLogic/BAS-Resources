@@ -9,7 +9,7 @@ local tinsert,tsort=table.insert,table.sort
 local startMQTT -- forward decl
 
 local MQTT_CONNECT     = 0x01 << 4
-local MQTT_CONACK      = 0x02 << 4
+local MQTT_CONNACK     = 0x02 << 4
 local MQTT_PUBLISH     = 0x03 << 4
 local MQTT_PUBACK      = 0x04 << 4
 local MQTT_PUBREC      = 0x05 << 4
@@ -679,14 +679,14 @@ local function coMqttConnect(sock,self,conbta)
    sock:write(conbta)
    local cpt,bta=mqttRec(self)
    if cpt then
-      if (cpt&0xF0) == MQTT_CONACK then
-	 local ackProp = decodePropT(bta,decVBInt(bta,3))
+      if (cpt&0xF0) == MQTT_CONNACK then
+	 local ackProp = #bta > 2 and decodePropT(bta,decVBInt(bta,3))
 	 if ackProp then
 	    local session=(bta[1] & 1) == 1 and true or false
 	    local reason=bta[2]
 	    reconnect=self.onstatus("mqtt","connect",{
 	       sessionpresent=session,reasoncode=reason, properties=ackProp})
-	    if reason == 0 and reconnect then
+	    if reason < 128 and reconnect then
 	       local opt=self.opt
 	       if ackProp.serverkeepalive and
 		  ackProp.serverkeepalive ~= opt.keepalive then
@@ -716,6 +716,7 @@ local function coMqttConnect(sock,self,conbta)
    else
       reconnect=onErrStatus(self,"sock",bta)
    end
+   sock:close()
    if reconnect then
       startMQTT(self,conbta,false)
    end
