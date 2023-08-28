@@ -895,7 +895,7 @@ local function create(addr, onstatus, onpub, opt, prop)
    argchk(2,"function",onstatus)
    if "table" == type(onpub) then
       prop=opt
-      opt=onsuback
+      opt=onpub
       onpub=nil
    end
    if onpub then
