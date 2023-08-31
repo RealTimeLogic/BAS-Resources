@@ -235,15 +235,15 @@ local recMsgT={
 }
 
 local function coSmqRun(self)
-   local sock,data,err=self.sock
+   local sock,data,rem,err=self.sock
    while self.connected do
-      data,err=smqRec(sock,data)
-      if not data then break end
+      data,rem=smqRec(sock,data)
+      if not data then err=rem break end
       local func = recMsgT[data:byte(3)]
       if not func then err = "protocolerror" break end
       ok,err=func(self,data)
       if not ok then break end
-      data = err -- err is remainder, if any
+      data = rem -- remainder, if any
    end
    self.etid=nil
    self.disconnectCnt=self.disconnectCnt+1
@@ -372,6 +372,7 @@ local C={} -- SMQ Client
 C.__index=C
 
 local function createTopic(self,topic,top2tidT,ackCBT,msg,onack)
+   onack=onack or function() end
    local tid=top2tidT[topic]
    if tid then
       onack(true,topic,tid)
