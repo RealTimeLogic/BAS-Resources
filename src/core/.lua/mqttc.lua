@@ -679,9 +679,11 @@ local function coMqttConnect(sock,self,conbta)
    sock:write(conbta)
    local cpt,bta=mqttRec(self)
    if cpt then
+      local perr=true
       if (cpt&0xF0) == MQTT_CONNACK then
 	 local ackProp = #bta > 2 and decodePropT(bta,decVBInt(bta,3))
 	 if ackProp then
+	    perr=false
 	    local session=(bta[1] & 1) == 1 and true or false
 	    local reason=bta[2]
 	    reconnect=self.onstatus("mqtt","connect",{
@@ -710,7 +712,7 @@ local function coMqttConnect(sock,self,conbta)
 	    end
 	 end
       end
-      if reconnect == nil then
+      if perr then
 	 reconnect=onErrStatus(self,"mqtt","protocolerror")
       end
    else

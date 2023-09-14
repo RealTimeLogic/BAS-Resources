@@ -415,10 +415,9 @@ local function manageApp(name) -- start/stop/restart
    apps[name]=app
    if appc.running and not err then
       if appc.dirname then
-	 app.pages={}
 	 local dn=trim(appc.dirname)
 	 local dir=ba.create.resrdr(#dn > 1 and dn or nil,appc.priority or 0,io)
-	 app.dir=dir
+	 env.dir=dir
 	 dir:setfunc(function(_ENV,pn)
 	    if pn:find"%.x?lua$" then
 	       response:senderror(403, "XLua files cannot be opened using the browser.")
