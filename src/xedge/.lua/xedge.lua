@@ -12,6 +12,7 @@ local openid -- Single Sign On settings, a table used by the ms-sso module, set 
 local authRealm="Xedge"
 local ios=ba.io()
 local nodisk=false -- if no DiskIo
+local errorh -- func
 ios.vm=nil
 do -- Remove virtual disks from windows to prevent DAV lock if url=localhost
    local t={}
@@ -222,7 +223,7 @@ do -- elog
       return log(fmt,...)
    end
    local orgErrh
-   local function errorh(emsg, env)
+   errorh=function(emsg, env)
       local cfg=xedge.cfg.elog
       if cfg.enablelog and cfg.smtp and not tlConnected then
 	 local e
@@ -266,23 +267,16 @@ local function sendErr(...)
 end
 
 do
-   local eventList={}
-
-   local function sendEvent(...)
-      for func in pairs(eventList) do
-	 local ok,err = pcall(func,...)
-	 if not ok then sendErr("Network event callback failed: %s",err) end
-      end
+   local ev=require"EventEmitter".create()
+   ev.reporterr=function(event,cb,err) sendErr("Event CB err: %s %s %s",event,tostring(cb),err) end
+   ev:on("sntp",function() startAcmeDns(true) end)
+   function xedge.event(event,cb,remove)
+      assert("string" == type(event))
+      if remove then return ev:removeListener(event,cb) end
+      return ev:on(event,cb)
    end
-   function xedge.event(cb, remove)
-      eventList[cb] = not remove and true or nil
-   end
-   local function manageEvent(cmd)
-      if "sntp" == cmd then startAcmeDns(true) end
-   end
-
    --Must be called by C code
-   function _XedgeEvent(...) manageEvent(...) sendEvent(...) end
+   function _XedgeEvent(event,...) ev:emit(event,...) end
    xedgeEvent=_XedgeEvent
 end
 
@@ -336,7 +330,8 @@ local function loadAndRunLua(io,fn,env)
       ok, err = xpcall(f,errh)
       if ok then return true end
    end
-   sendErr("%s %s failed:\n\t%s",f and "Running" or "Compiling", io:realpath(fn), err or "?")
+   sendErr("%s %s failed:\n\t%s",f and "Running" or "Compiling",io:realpath(fn),err or "?")
+   errorh(err)
 end
 xedge.loadAndRunLua=loadAndRunLua
 
@@ -346,6 +341,7 @@ local function runOnUnload(pn,env,appenv)
    if type(func) == "function" then
       local ok, err = pcall(func)
       if not ok then sendErr("Stopping '%s' failed: %s",pn,err or "?") end
+      errorh(err)
    end
    local level=0
    local function close(tab)
@@ -357,7 +353,7 @@ local function runOnUnload(pn,env,appenv)
 	       pcall(function() v:close() end)
 	    end
 	    if v ~= appenv and v ~= G and v ~= tab then close(v) end
-	 elseif "userdata" == type(v) and v.peername then
+	 elseif "userdata" == type(v) then
 	    pcall(function() v:close() end)
 	 end
       end
@@ -386,7 +382,7 @@ local function stopApp(name)
    assert(app)
    if app.dir then app.dir:unlink() end
    for n,env in pairs(app.envs) do runOnUnload(n,env,app.env) end
-   runOnUnload(app.url,app.env)
+   runOnUnload(".preload",app.env,app.env)
    collectgarbage()
 end
 
@@ -718,6 +714,7 @@ local function init(cfg)
    end)
    if not ok then
       sendErr("configuration file corrupt (%s)!",err)
+      errorh(err)
       return false
    end
    return true
