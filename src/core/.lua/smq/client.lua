@@ -6,23 +6,23 @@ local tinsert,tconcat=table.insert,table.concat
 local sn2h=ba.socket.n2h
 local jenc,jdec=ba.json.encode,ba.json.decode
 
-local MsgInit  = 1
-local MsgConnect  = 2
-local MsgConnack  = 3
-local MsgSubscribe  = 4
-local MsgSubscribeAck  = 5
-local MsgCreate  = 6
-local MsgCreateAck  = 7
-local MsgPublish  = 8
-local MsgUnsubscribe  = 9
-local MsgDisconnect  = 11
-local MsgPing  = 12
-local MsgPong  = 13
-local MsgObserve  = 14
-local MsgUnobserve  = 15
-local MsgChange  = 16
-local MsgCreateSub  = 17
-local MsgCreateSubAck  = 18
+local MsgInit <const> = 1
+local MsgConnect <const> = 2
+local MsgConnack <const> = 3
+local MsgSubscribe <const> = 4
+local MsgSubscribeAck <const> = 5
+local MsgCreate <const> = 6
+local MsgCreateAck <const> = 7
+local MsgPublish <const> = 8
+local MsgUnsubscribe <const> = 9
+local MsgDisconnect <const> = 11
+local MsgPing <const> = 12
+local MsgPong <const> = 13
+local MsgObserve <const> = 14
+local MsgUnobserve <const> = 15
+local MsgChange <const> = 16
+local MsgCreateSub <const> = 17
+local MsgCreateSubAck <const> = 18
 
 local startSMQ -- forward decl
 

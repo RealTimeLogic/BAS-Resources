@@ -87,7 +87,7 @@ local DataTypes  = {
    DateTimeArray = 34, 
 }
 
-local DataTypeNames  = {
+local DataTypeNames <const> = {
    "int_value", --Int8
    "int_value", --Int16
    "int_value", --Int32
