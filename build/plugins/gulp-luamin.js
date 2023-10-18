@@ -4,12 +4,12 @@
 
 const through = require('through2');
 const PluginError = require('plugin-error');
-const luamin = require('luamin');
+const luamin = require('./luamin.js');
 const { Buffer } = require('buffer');
 
 module.exports = function () {
 	'use strict';
-
+	
 	return through.obj(function (file, encoding, callback) {
 		if (file.isNull()) {
 			this.push(file);
@@ -22,7 +22,8 @@ module.exports = function () {
 		}
 
 		try {
-			file.contents = new Buffer.from(luamin.minify(file.contents.toString()).toString());
+			const fileString = file.contents.toString();
+			file.contents = new Buffer.from(luamin.minify(fileString).toString());
 		} catch (err) {
 			this.emit('error', new PluginError('gulp-luaminify', err));
 		}
