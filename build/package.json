@@ -4,7 +4,8 @@
   "description": "This is npm version of creating mako server and XEdge32 into fresh zip builds",
   "scripts": {
     "build-mako": "gulp build-mako",
-    "luamin": "gulp luamin-folder"
+    "build-xedge": "gulp build-xedge",
+    "t": "gulp clean-xedge"
   },
   "author": "Andrii Cherytsia",
   "license": "MIT",
@@ -17,6 +18,5 @@
     "plugin-error": "^2.0.1",
     "rimraf": "^5.0.1",
     "through2": "^4.0.2"
-  },
-  "dependencies": {}
+  }
 }

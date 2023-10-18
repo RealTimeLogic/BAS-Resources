@@ -6,6 +6,13 @@ const luamin = require('./plugins/gulp-luamin');
 const fs = require('fs');
 const zip = require('gulp-zip');
 
+gulp.task('clean-xedge', async function (cb) {
+  await rimraf('./ZipBuild/Readme.md'); 
+  await rimraf('./ZipBuild/.preload'); 
+  await rimraf('./ZipBuild/.gitignore'); 
+  await rimraf('./ZipBuild/.lua/Xedge4Mako.lua');
+  return cb();
+});
 gulp.task('clean', async function (cb) {
   await rimraf('ZipBuild');
   return cb();
@@ -20,6 +27,18 @@ gulp.task('copy-core', function () {
 gulp.task('copy-mako', function () {
   return gulp
     .src(['../src/mako/**/*', '../src/mako/.lua/**/*', '../src/mako/.certificate/**/*', '../src/mako/.config'], { base: '../src/mako' })
+    .pipe(gulp.dest('./ZipBuild'));
+});
+
+gulp.task('copy-xedge', function () {
+  return gulp
+    .src(['../src/xedge/**/*', '../src/xedge/.lua/**/*', '../src/xedge/.certificate/**/*', '../src/xedge/.config'], { base: '../src/xedge' })
+    .pipe(gulp.dest('./ZipBuild'));
+});
+
+gulp.task('copy-acme', function () {
+  return gulp
+    .src(['../src/mako/.lua/acme/**/*'], { base: './ZipBuild/.lua/acme' })
     .pipe(gulp.dest('./ZipBuild'));
 });
 
@@ -53,18 +72,6 @@ gulp.task('copy-lua-lpeg', function (cb) {
       .pipe(gulp.dest('./ZipBuild/.lua/'))
   }
   return cb();
-});
-
-gulp.task('copy-xedge', function () {
-  return gulp
-    .src(['../src/xedge/**/*', '../src/xedge/.lua/**/*', '../src/xedge/.certificate/**/*', '../src/xedge/.config'], { base: '../src/xedge' })
-    .pipe(gulp.dest('./ZipBuild'));
-});
-
-gulp.task('copy-acme', function () {
-  return gulp
-    .src(['../src/mako/.lua/acme/**/*'], { base: '../src/mako/.lua/acme' })
-    .pipe(gulp.dest('./ZipBuild'));
 });
 
 
@@ -120,16 +127,18 @@ gulp.task('build-mako',
     'clean',
      ));
 
-gulp.task('build-xEdge', 
+gulp.task('build-xedge', 
   gulp.series(
     'clean',
     'copy-core',
     'copy-xedge',
+    'copy-acme',
     'copy-opcua',
     'copy-lua-protobuf',
     'minify-css',
     'minify-js',
     'luamin-folder',
-    'zip-mako',
+    'zip-Xedge',
+    'clean-xedge',
     'clean',
      ));
