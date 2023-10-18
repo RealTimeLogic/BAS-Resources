@@ -5,3 +5,4 @@ build/MakoBuild
 *.c
 *.zip
 node_modules
+.vscode
