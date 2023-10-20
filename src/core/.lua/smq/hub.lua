@@ -1104,7 +1104,7 @@ end
 local function create(op)
    op = op or {}
    local env={
-      keepalive =( 60*4 ) - 10,
+      keepalive = "number" == type(op.keepalive) and op.keepalive or ((60*4)-10),
       uidT={}, -- K =(Universally) Unique ID, V = peerT
       topic2tidT={}, -- K = topic name, V = tid
       tid2topicT={}, -- K = tid, V = topic name
