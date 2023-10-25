@@ -10,7 +10,10 @@ function log() {
     trLog(Array.from(arguments).join(' '));
 };
 
-function logErr() {
+function logR(nosound) {
+    trLogErr(Array.from(arguments).join(' '));
+};
+function logErr(nosound) {
     play("#sound-error");
     trLogErr(Array.from(arguments).join(' '));
 };
@@ -103,7 +106,7 @@ function diaHide() {
    olist: output list, where key is element ID and value is the element
    pe: Optional parent element
 */
-function mkForm(list,olist,pe) {
+function mkForm(list,olist,pe,insrt) {
     if(!pe) pe=$("<div>",{class:"form"});
     list.forEach(o => {
 	if(undefined != o.html) { // Non form element
@@ -113,6 +116,7 @@ function mkForm(list,olist,pe) {
 	    else
 		el.html(o.html);
 	    pe.append(el);
+	    if(insrt) olist[o.id]=el;
 	    return;
 	}
 	if("radio" == o.type) {
@@ -1202,6 +1206,7 @@ const emailFormObj = [
 /* Builds and displays the configuration option's context menu when the
    user clicks on the 3-dot icon.
 */
+let ideCfgCB=[]; //CB added by plugins
 function ideCfg(e) {
     const mlist = $('<ul>');
     if( ! nodisk ) {
@@ -1346,6 +1351,7 @@ function ideCfg(e) {
 	diaHide();
 	window.open('https://realtimelogic.com/ba/doc/?url=Xedge.html', '_blank')
     }));
+    ideCfgCB.forEach((cb) => cb(mlist,nodisk));
     diaShow(e).html(mlist);
 };
 
@@ -1404,6 +1410,10 @@ $( window ).on( "load",()=> {
 	//Continue initialization after possible login.
 	inittree();
 	startTL(); // tracelogger can now establish websocket connection.
+	sendCmd("lsPlugins",(rsp)=>{
+	    for(let i = 0; i < rsp.length; i++)
+		$.getScript("private/command.lsp?cmd=getPlugin&name="+encodeURIComponent(rsp[i]));
+	});
 	$("#IdeCfg").click(ideCfg);
     }, data);
     $( window ).on("beforeunload",function(e) {

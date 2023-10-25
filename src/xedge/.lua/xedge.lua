@@ -3,6 +3,7 @@ require"wfs" -- Install function ba.create.wfs
 local function trim(s) return s:gsub("^%s*(.-)%s*$", "%1") end
 local production=true -- Let's Encrypt
 local sfind,ssub,sbyte,sfmt=string.find,string.sub,string.byte,string.format
+local tinsert=table.insert
 local dtraceback=debug.traceback
 local jencode,jdecode=ba.json.encode,ba.json.decode
 local startAcmeDns -- func
@@ -12,7 +13,7 @@ local openid -- Single Sign On settings, a table used by the ms-sso module, set 
 local authRealm="Xedge"
 local ios=ba.io()
 local nodisk=false -- if no DiskIo
-local errorh -- func
+local errorh,loadPlugins -- funcs
 ios.vm=nil
 do -- Remove virtual disks from windows to prevent DAV lock if url=localhost
    local t={}
@@ -165,6 +166,23 @@ local function sendmail(m,s)
    return ok,err
 end
 
+-- Returns a list of all plugin names, if any
+local function lsPlugins(ext)
+   local rsp={}
+   local io=xedge.aio
+   local d=".lua/XedgePlugins"
+   if io:stat(d) then
+      for n in io:files(d) do
+	 if n:find("%."..ext.."$") then
+	    n=sfmt("%s/%s",d,n)
+	    tinsert(rsp,n)
+	 end
+      end
+   end
+   return rsp
+end
+
+
 local elogInit --Func below called once by xedge.init
 do -- elog
    local tlConnected=false
@@ -208,7 +226,7 @@ do -- elog
       if cfg.enablelog and cfg.smtp and not tlConnected then
 	 local msg=sfmt(fmt, ...)
 	 if op.ts then msg = os.date("%H:%M: ",os.time())..msg end
-	 table.insert(msglist,msg)
+	 tinsert(msglist,msg)
 	 msize=msize+#msg
 	 if op.flush then
 	    setTimer(op,30000)
@@ -791,6 +809,7 @@ function xedge.init(cfg,aio,rtld) -- cfg from Xedge config file
       nodisk=true
       function xedge.saveCfg() end
    end
+   loadPlugins()
 end
 
 --   isreg=function(cmd,data) adns.isreg(function() cmd:json{ok=true, isreg=adns.isreg} end) end,
@@ -840,7 +859,7 @@ end
 -- Table 2 String. Designed for comparing two tables as strings.
 local function t2s(t)
    local a={}
-   for k,v in pairs(t or {}) do table.insert(a,k) table.insert(a,v) end
+   for k,v in pairs(t or {}) do tinsert(a,k) tinsert(a,v) end
    table.sort(a)
    return table.concat(a)
 end
@@ -870,7 +889,7 @@ local commands={
       local ios=ba.io()
       ios.vm=nil
       local t={}
-      for name in pairs(ios) do table.insert(t, name) end
+      for name in pairs(ios) do tinsert(t, name) end
       cmd:json{ok=true,ios=t,nodisk=nodisk}
    end,
    getappsstat=function(cmd)
@@ -1015,6 +1034,17 @@ local commands={
 	 cmd:json{ok=true}
       end
    end,
+   lsPlugins=function(cmd) cmd:json(lsPlugins"js") end,
+   getPlugin=function(cmd,d)
+      local n=d.name
+      local f=n and n:find("%.js$") and xedge.file(xedge.aio,n)
+      if f then
+	 cmd:write(f)
+      else
+	 cmd:senderror(404)
+      end
+      cmd:abort()
+   end
 }
 
 -- Used by command.lsp
@@ -1022,11 +1052,23 @@ function xedge.command(cmd)
    local data = cmd:data()
    local f=commands[data.cmd]
    if f then f(cmd,data) end
-   cmd:json{err=sfmt("Unknown command '%s'",data.cmd or "?")}
+   local err=sfmt("Unknown command '%s'",data.cmd or "?")
+   sendErr("%s",err)
+   cmd:json{err=err}
 end
 
 function xedge.onunload()
    for name,cfg in pairs(appsCfg) do
       if(cfg.running) then stopApp(name) end
+   end
+end
+
+loadPlugins=function()
+   local xf=xedge.file
+   for _,n in ipairs(lsPlugins"lua") do
+      local ok
+      local f,e=load(xf(xedge.aio,n),n,"bt",_ENV)
+      if f then ok,e=pcall(f,commands) end
+      if not ok then sendErr("Plugin error: %s",e) end
    end
 end
