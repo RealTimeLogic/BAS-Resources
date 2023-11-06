@@ -144,8 +144,8 @@ end
 function ix:receive(pattern, prefix)
    local d,e,t
    local recData=self.recData
-   pattern = pattern or "*l"
-   if pattern == "*a" then
+   pattern = pattern or "l"
+   if pattern == "a" or pattern == "*a" then
       t={}
       if prefix then tinsert(t,prefix) end
       if recData then tinsert(t,ix_pruneRecData(self)) end
@@ -157,7 +157,7 @@ function ix:receive(pattern, prefix)
       if (pattern and #t > 1) or #t > 0 then return tconcat(t) end
       return nil, bas2SockErr(e)
    end
-   if pattern == "*l" then
+   if pattern == "l" or  pattern == "*l" then
       while true do
 	 if recData then
 	    local x,y = recData:find("\r?\n",self.recDataIx)

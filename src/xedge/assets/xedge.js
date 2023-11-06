@@ -1261,6 +1261,13 @@ function ideCfg(e) {
 		}
 		let elems={};
 		let editorId=createEditor(" Certificate",null,null,mkForm(certificateFormObj,elems));
+		if(! rsp.isreg ) {
+		    sendCmd("getmac",(rsp)=>{
+			if(rsp.ok) {
+			    elems.SetCertName.val(rsp.mac.slice(-6))
+			}
+		    });
+		}
 		elems.SetCertIp.val(rsp.sockname);
 		elems.SetCertWan.val(rsp.wan);
 		elems.SetCertPortal.val(rsp.portal);
@@ -1273,7 +1280,7 @@ function ideCfg(e) {
 		    email=elems.SetCertEmail.val().trim();
 		    name=elems.SetCertName.val().trim();
 		    if(/^\w+([\.-]?\w+)*@\w+([\.-]?\w+)*(\.\w{2,3})+$/.test(email) &&
-		       name.length > 2 && /^[a-zA-Z][a-zA-Z0-9]*$/.test(name))
+		       name.length > 2 && /^[a-zA-Z0-9]+$/.test(name))
 			return true;
 		    alertErr("Invalid settings");
 		    return false;

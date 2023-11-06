@@ -218,10 +218,6 @@ do -- elog
    end
 
    function xedge.elog(op,fmt,...)
-      if "table" ~= type(op) then
-	 fmt=op
-	 op={}
-      end
       local cfg=xedge.cfg.elog
       if cfg.enablelog and cfg.smtp and not tlConnected then
 	 local msg=sfmt(fmt, ...)
@@ -836,7 +832,7 @@ local acmeCmd={
    auto=function(cmd,data)
       xedge.cfg.revcon = xedge.cfg.revcon or false -- not nil
       local revcon = "true" == data.revcon and true or false
-      local op={revcon=revcon,rsa=true,acceptterms=true,production=production}
+      local op={revcon=revcon,acceptterms=true,production=production}
       if data.email and data.name then
 	 xedge.cfg.revcon=revcon
 	 xedge.saveCfg()
@@ -906,6 +902,7 @@ local commands={
       local fp <close> = xedge.aio:open".lua/intro.html"
       cmd:json{ok=true,intro=fp:read"*a"}
    end,
+   getmac=function(cmd) cmd:json{ok=false} end, -- Overload in plugin
    gettemplate=function(cmd,data)
       local fp <close> =xedge.aio:open("templates/template.".. (data.ext or ""))
       cmd:json{ok=true,data=fp and fp:read"*a" or "\n"}
