@@ -14,7 +14,7 @@ local authRealm="Xedge"
 local ios=ba.io()
 local nodisk=false -- if no DiskIo
 local errorh,loadPlugins -- funcs
-local key -- secret
+local pmkey,aeskey -- pre-master secret, key for xedge DB
 ios.vm=nil
 do -- Remove virtual disks from windows to prevent DAV lock if url=localhost
    local t={}
@@ -678,7 +678,7 @@ function installOrSetAuth()
 	 if ju:set(userdb) then return true end
 	 log"Invalid user database. Authenticator not installed"
 	 userdb={} -- reset
-	 xedge.cfg.userdb=userdb
+	 xedge.cfg.userdb=tab2EncodedStr(userdb)
       elseif not xedge.sso then
 	 xedge.prd:unlink()
 	 if xedge.tldir then xedge.tldir:setauth() end
@@ -714,12 +714,28 @@ installAuth=installOrSetAuth
 --Used by /rtl/login/
 function xedge.hasUserDb() return next(userdb) and true or false end
 
+local function sendCfgCorrupt(err)
+   sendErr("configuration file corrupt (%s)!",err)
+end
+
+local function encodedStr2Tab(str,field)
+   if "string" == type(str) then
+      local t=jdecode(ba.aesdecode(aeskey,str) or "")
+      if t then return t end
+      sendCfgCorrupt(field)
+   end
+   return {}
+end
+
+local function tab2EncodedStr(tab)
+   return ba.aesencode(aeskey,jencode(tab))
+end
 
 local function init(cfg)
    -- Load apps from the Xedge conf. file.
    local ok,err=pcall(function()
       if cfg.userdb then
-	 for name,data in pairs(cfg.userdb) do userdb[name]=data end
+	 for name,data in pairs(encodedStr2Tab(cfg.userdb,"userdb")) do userdb[name]=data end
       end
       for name,appc in pairs(cfg.apps) do
 	 appc.name=name
@@ -728,25 +744,16 @@ local function init(cfg)
       end
    end)
    if not ok then
-      sendErr("configuration file corrupt (%s)!",err)
+      sendCfgCorrupt(err)
       errorh(err)
       return false
    end
    return true
 end
 
-local function encodedStr2Tab(str)
-   return jdecode(ba.aesdecode(key,str or "") or "") or {}
-end
-
-local function tab2EncodedStr(tab)
-   return ba.aesencode(key,jencode(tab))
-end
-
-
 function openidDec() -- Decode encoded SSO JSON settings
    xedge.sso=nil
-   openid=encodedStr2Tab(xedge.cfg.openid)
+   openid=encodedStr2Tab(xedge.cfg.openid,"openid")
    pcall(function()
       xedge.sso=require"ms-sso".init(openid)
    end)
@@ -768,7 +775,7 @@ function xedge.init(cfg,aio,rtld) -- cfg from Xedge config file
    xedge.cfg.smtp=cfg.smtp
    xedge.cfg.openid=cfg.openid
    if "table" == type(cfg.elog) then  xedge.cfg.elog=cfg.elog end
-   smtp=encodedStr2Tab(xedge.cfg.smtp)
+   smtp=encodedStr2Tab(xedge.cfg.smtp,"smtp")
    openidDec()
    if xedge.tldir then rtld:insert(xedge.tldir,true) elogInit() end
    local lockDir -- Scan and look for writable DAV lock dir.
@@ -913,6 +920,7 @@ local commands={
 	 else
 	    userdb[data.name]=nil -- delete
 	 end
+	 xedge.cfg.userdb=tab2EncodedStr(userdb)
 	 xedge.saveCfg()
 	 installAuth()
 	 cmd:json{ok=true}
@@ -972,7 +980,7 @@ local commands={
 	    if rsp.ok then
 	       log(settingsOK and "SMTP settings OK" or "Disabling SMTP")
 	       xedge.cfg.smtp=tab2EncodedStr(d)
-	       smtp=encodedStr2Tab(xedge.cfg.smtp)
+	       smtp=encodedStr2Tab(xedge.cfg.smtp,"smtp")
 	       if settingsOK then
 		  ecfg.smtp=true
 	       else
@@ -1073,13 +1081,16 @@ do
    local tins=table.insert
    return function(k)
       if not k then
-	 key=ba.crypto.hash("sha512")("438fccj39dewe8vc")(true)
+	 pmkey=ba.crypto.hash("sha512")("438fccj39dewe8vc")(true)
       elseif true == k then
 	 local hf=ba.crypto.hash("sha512")
 	 for _,k in ipairs(klist) do hf(k) end
-	 key=hf(true)
+	 pmkey=hf(true)
       else
 	 tins(klist,k)
+      end
+      if pmkey then
+	 aeskey=ba.crypto.PBKDF2("sha256", "aes", pmkey, 5, 256)
       end
    end
 end
