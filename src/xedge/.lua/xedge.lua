@@ -1037,6 +1037,13 @@ local commands={
 	 cmd:json{ok=true}
       end
    end,
+   execLua=function(cmd,d)
+      local ok=false
+      local f,err = load(d.code or "","LuaShell","t",G)
+      if f then ok,err=xpcall(f,errh) end
+      if not ok then tracep(false,0,err) end
+      cmd:json{ok=ok}
+   end,
    lsPlugins=function(cmd) cmd:json(lsPlugins"js") end,
    getPlugin=function(cmd,d)
       local n=d.name

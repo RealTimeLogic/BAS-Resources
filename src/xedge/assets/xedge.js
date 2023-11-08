@@ -333,7 +333,8 @@ function closeEditor(editorId) {
     delete editors[editorId];
     if(lastEditorId == editorId) lastEditorId=false;
 };
-// Set editor was changed and add class to tab to display what it was changed
+
+// Set editor was changed: add class to tab to indicate it was changed.
 function setMod(editorId,mod=true) {
     editors[editorId]=mod;
     if (mod) $(`[data-target="${editorId}"]`).addClass('modified'); else $(`[data-target="${editorId}"]`).removeClass('modified');
@@ -347,7 +348,7 @@ function setMod(editorId,mod=true) {
    savecb: Optional save callback(data,cb), where data is what to save
 	   and cb is a callback that must be called when file is saved
 	   with the value cb(true) ok, or cb(false) failed.
-  newElem: Set if value is null. This must be a DOM element. Used when
+  newElem: Set if 'value' is null. This must be a DOM element. Used when
 	   building form data in an editor frame. See function
 	   appCfg() for how this can be used.
 */
@@ -365,17 +366,17 @@ function createEditor(pn,value,savecb,newElem) {
     lastEditorId=editorId;
     let tabBtn = $('<button>', {class: 'tabbtn','data-target': editorId,text: pn.match(/[^/]+$/)[0]});
     tabBtn.click((e)=>{
-			if(lastEditorId==editorId) lastEditorId=false; 
-			$(e.target).addClass('pined'); 
-			setActiveEditor(editorId);
-		});
+	if(lastEditorId==editorId) lastEditorId=false; 
+	$(e.target).addClass('pined'); 
+	setActiveEditor(editorId);
+    });
     let closeBtn=$('<span>',{class:'closebtn',text:'X'}).appendTo(tabBtn);
     closeBtn.click(()=>{
-			if(editors[editorId]) {
-				var shouldClose = confirm('The file has unsaved changes. Are you sure you want to close the tab?');
-				if (!shouldClose) return;
-			}
-			closeEditor(editorId);
+	if(editors[editorId]) {
+	    var shouldClose = confirm('The file has unsaved changes. Are you sure you want to close the tab?');
+	    if (!shouldClose) return;
+	}
+	closeEditor(editorId);
     });
     let editorContainer = $('<div>', {class: 'editorcontainer',id: editorId});
     let editorButtons = $('<div>', {class:'editor-buttons', id: editorId+'-buttonsdiv'});
@@ -387,18 +388,18 @@ function createEditor(pn,value,savecb,newElem) {
 		    addSaveBut=false;
 		    editorButtons.append($('<button>', { html: 'Save &amp; Run', type: 'submit'}).click(()=>saveData()));
 		}
-		else {
-		    if('lsp' == getFileExt(pn)) {
-			editorButtons.append($('<button>', { html: 'Open', type: 'submit'}).click( () => {
-			    sendCmd("pn2url", (rsp) => {if(rsp.ok) window.open(rsp.url,'lsp');}, {fn:pn});
-			}));
-		    }
+		else if('lsp' == getFileExt(pn)) {
+		    editorButtons.append($('<button>', { html: 'Open', type: 'submit'}).click( () => {
+			sendCmd("pn2url", (rsp) => {if(rsp.ok) window.open(rsp.url,'lsp');}, {fn:pn});
+		    }));
 		}
 	    }
 	    if(addSaveBut)
 		editorButtons.append($('<button>', { html: 'Save', type: 'submit'}).click(()=>saveData()));
 	}, {fn:pn});
     }
+    else if(savecb)
+	editorButtons.append($('<button>', { html: 'Run', type: 'submit'}).click(()=>saveData()));
     $('#tabheader').append(tabBtn);
     $('#editors').append(editorContainer).append(editorButtons)
     if(newElem) editorContainer.html(newElem);
@@ -1209,6 +1210,10 @@ const emailFormObj = [
 let ideCfgCB=[]; //CB added by plugins
 function ideCfg(e) {
     const mlist = $('<ul>');
+    mlist.append($('<li>').text("Lua Shell").on("click",()=>{
+	diaHide();
+	createEditor("LuaShell","",(data,cb)=>sendCmd("execLua", cb, {code:data}));
+    }));
     if( ! nodisk ) {
 	mlist.append($('<li>').text("Authentication").on("click",()=>{
 	    diaHide();
@@ -1314,46 +1319,45 @@ function ideCfg(e) {
 		}
 	    });
 	}));
+	mlist.append($('<li>').text("SMTP Server").on("click",()=>{
+	    let elems={};
+	    let editorId=createEditor(" SMTP Server",null,null,mkForm(emailFormObj,elems));
+	    sendCmd("smtp",(rsp)=>{
+		function x(s,v) {return s ? s : ""};
+		elems.EmailEmail.val(x(rsp.email));
+		elems.EmailServer.val(x(rsp.server));
+		elems.EmailServerPort.val(x(rsp.port));
+		elems.EmailUsername.val(x(rsp.user));
+		elems.EmailPassword.val(x(rsp.password));
+		if(rsp.connsec)
+		    $(`input[name="EmailConnsec"][value="${rsp.connsec}"]`).prop('checked', true);
+		elems.EmailSubject.val(x(rsp.subject));
+		elems.EmailMaxBuf.val(x(rsp.maxbuf));
+		elems.EmailMaxTime.val(x(rsp.maxtime));
+		elems.EmailEnableLog.prop("checked", rsp.enablelog);
+	    });
+	    elems.EmailSave.click(()=>{
+		let d={
+		    email:elems.EmailEmail.val().trim(),
+		    server:elems.EmailServer.val().trim(),
+		    port:elems.EmailServerPort.val().trim(),
+		    user:elems.EmailUsername.val().trim(),
+		    password:elems.EmailPassword.val().trim(),
+		    connsec:$('input[name="EmailConnsec"]:checked').val()
+		};
+		sendCmd("smtp",(rsp)=>{if(rsp) closeEditor(editorId);},d);
+	    });
+	    elems.EmailEnableLog.click(()=>{
+		let d={
+		    enablelog:elems.EmailEnableLog.prop("checked"),
+		    subject:elems.EmailSubject.val(),
+		    maxbuf:elems.EmailMaxBuf.val(),
+		    maxtime:elems.EmailMaxTime.val()
+		}
+		sendCmd("elog",()=>{}, d);
+	    });
+	}));
     }
-    mlist.append($('<li>').text("SMTP Server").on("click",()=>{
-	let elems={};
-	let editorId=createEditor(" SMTP Server",null,null,mkForm(emailFormObj,elems));
-	sendCmd("smtp",(rsp)=>{
-	    function x(s,v) {return s ? s : ""};
-	    elems.EmailEmail.val(x(rsp.email));
-	    elems.EmailServer.val(x(rsp.server));
-	    elems.EmailServerPort.val(x(rsp.port));
-	    elems.EmailUsername.val(x(rsp.user));
-	    elems.EmailPassword.val(x(rsp.password));
-	    if(rsp.connsec)
-		$(`input[name="EmailConnsec"][value="${rsp.connsec}"]`).prop('checked', true);
-	    elems.EmailSubject.val(x(rsp.subject));
-	    elems.EmailMaxBuf.val(x(rsp.maxbuf));
-	    elems.EmailMaxTime.val(x(rsp.maxtime));
-	    elems.EmailEnableLog.prop("checked", rsp.enablelog);
-	});
-	elems.EmailSave.click(()=>{
-	    let d={
-		email:elems.EmailEmail.val().trim(),
-		server:elems.EmailServer.val().trim(),
-		port:elems.EmailServerPort.val().trim(),
-		user:elems.EmailUsername.val().trim(),
-		password:elems.EmailPassword.val().trim(),
-		connsec:$('input[name="EmailConnsec"]:checked').val()
-	    };
-	    sendCmd("smtp",(rsp)=>{if(rsp) closeEditor(editorId);},d);
-	});
-	elems.EmailEnableLog.click(()=>{
-	    let d={
-		enablelog:elems.EmailEnableLog.prop("checked"),
-		subject:elems.EmailSubject.val(),
-		maxbuf:elems.EmailMaxBuf.val(),
-		maxtime:elems.EmailMaxTime.val()
-	    }
-	    sendCmd("elog",()=>{}, d);
-	});
-    }));
-
     mlist.append($('<li>').text("Xedge Documentation").on("click",()=>{
 	diaHide();
 	window.open('https://realtimelogic.com/ba/doc/?url=Xedge.html', '_blank')
