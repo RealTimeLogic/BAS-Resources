@@ -14,6 +14,7 @@ local authRealm="Xedge"
 local ios=ba.io()
 local nodisk=false -- if no DiskIo
 local errorh,loadPlugins -- funcs
+local key -- secret
 ios.vm=nil
 do -- Remove virtual disks from windows to prevent DAV lock if url=localhost
    local t={}
@@ -734,17 +735,14 @@ local function init(cfg)
    return true
 end
 
-local k
-if ba.encryptionkey then
-   k=ba.encryptionkey()
-   ba.encryptionkey=nil
-else
-   k="438fccj39dewe8vc"
+local function encodedStr2Tab(str)
+   return jdecode(ba.aesdecode(key,str or "") or "") or {}
 end
-k=ba.crypto.hash("sha256")(k)(true)
-function encodedStr2Tab(str)
-   return jdecode(ba.aesdecode(k,str or "") or "") or {}
+
+local function tab2EncodedStr(tab)
+   return ba.aesencode(key,jencode(tab))
 end
+
 
 function openidDec() -- Decode encoded SSO JSON settings
    xedge.sso=nil
@@ -973,7 +971,7 @@ local commands={
 	    end
 	    if rsp.ok then
 	       log(settingsOK and "SMTP settings OK" or "Disabling SMTP")
-	       xedge.cfg.smtp=ba.aesencode(k,jencode(d))
+	       xedge.cfg.smtp=tab2EncodedStr(d)
 	       smtp=encodedStr2Tab(xedge.cfg.smtp)
 	       if settingsOK then
 		  ecfg.smtp=true
@@ -999,13 +997,13 @@ local commands={
 	 if old ~= new or not openid then
 	    if d.tenant and d.client_id and d.client_secret then
 	       if #d.tenant > 20 and #d.client_id > 20 and #d.client_secret > 10 then
-		  xedge.cfg.openid=ba.aesencode(k,jencode(d))
+		  xedge.cfg.openid=tab2EncodedStr(d)
 		  xedge.saveCfg()
 		  openidDec()
 		  installAuth()
 	       elseif #d.client_secret==0 then
 		  d.client_secret=nil
-		  xedge.cfg.openid=ba.aesencode(k,jencode(d))
+		  xedge.cfg.openid=tab2EncodedStr(d)
 		  openidDec()
 		  xedge.saveCfg()
 		  installAuth()
@@ -1067,5 +1065,21 @@ loadPlugins=function()
       local f,e=load(xf(xedge.aio,n),n,"bt",_ENV)
       if f then ok,e=pcall(f,commands) end
       if not ok then sendErr("Plugin error: %s",e) end
+   end
+end
+
+do
+   local klist={}
+   local tins=table.insert
+   return function(k)
+      if not k then
+	 key=ba.crypto.hash("sha512")("438fccj39dewe8vc")(true)
+      elseif true == k then
+	 local hf=ba.crypto.hash("sha512")
+	 for _,k in ipairs(klist) do hf(k) end
+	 key=hf(true)
+      else
+	 tins(klist,k)
+      end
    end
 end
