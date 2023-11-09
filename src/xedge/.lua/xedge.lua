@@ -14,7 +14,7 @@ local authRealm="Xedge"
 local ios=ba.io()
 local nodisk=false -- if no DiskIo
 local errorh,loadPlugins -- funcs
-local pmkey,aeskey -- pre-master secret, key for xedge DB
+local pmkey,confKey -- pre-master secret, xedge.conf AES key
 ios.vm=nil
 do -- Remove virtual disks from windows to prevent DAV lock if url=localhost
    local t={}
@@ -46,7 +46,7 @@ local G=_G
 G.xedge=xedge
 local apps=xedge.apps
 local appsCfg=xedge.cfg.apps
-local userdb=xedge.cfg.userdb
+local userdb={}
 
 function xedge.file(io,name,data)
    local fp,ret,err
@@ -720,7 +720,7 @@ end
 
 local function encodedStr2Tab(str,field)
    if "string" == type(str) then
-      local t=jdecode(ba.aesdecode(aeskey,str) or "")
+      local t=jdecode(ba.aesdecode(confKey,str) or "")
       if t then return t end
       sendCfgCorrupt(field)
    end
@@ -728,7 +728,7 @@ local function encodedStr2Tab(str,field)
 end
 
 local function tab2EncodedStr(tab)
-   return ba.aesencode(aeskey,jencode(tab))
+   return ba.aesencode(confKey,jencode(tab))
 end
 
 local function init(cfg)
@@ -748,6 +748,7 @@ local function init(cfg)
       errorh(err)
       return false
    end
+   xedge.cfg=cfg
    return true
 end
 
@@ -1088,16 +1089,18 @@ do
    local tins=table.insert
    return function(k)
       if not k then
+	 -- Mako Server: use dummy key.
 	 pmkey=ba.crypto.hash("sha512")("438fccj39dewe8vc")(true)
-      elseif true == k then
+      elseif true == k then -- done feeding keys
 	 local hf=ba.crypto.hash("sha512")
 	 for _,k in ipairs(klist) do hf(k) end
 	 pmkey=hf(true)
       else
 	 tins(klist,k)
       end
-      if pmkey then
-	 aeskey=ba.crypto.PBKDF2("sha256", "aes", pmkey, 5, 256)
+       -- Base it on the first fixed key so xedge.conf can be transferred between devices.
+      if not confKey then
+	 confKey=ba.crypto.PBKDF2("sha256", "xedge.conf", k or pmkey, 5, 256)
       end
    end
 end
