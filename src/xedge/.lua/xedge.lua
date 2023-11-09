@@ -736,6 +736,7 @@ local function init(cfg)
    local ok,err=pcall(function()
       if cfg.userdb then
 	 for name,data in pairs(encodedStr2Tab(cfg.userdb,"userdb")) do userdb[name]=data end
+         xedge.cfg.userdb=cfg.userdb
       end
       for name,appc in pairs(cfg.apps) do
 	 appc.name=name
@@ -748,7 +749,6 @@ local function init(cfg)
       errorh(err)
       return false
    end
-   xedge.cfg=cfg
    return true
 end
 
