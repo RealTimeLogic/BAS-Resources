@@ -1,20 +1,19 @@
-
 -- SPEC: https://ietf-wg-acme.github.io/acme/draft-ietf-acme-acme.html
-
 local dURL = { -- ACME service's directory (discover) URL
    production="https://acme-v02.api.letsencrypt.org/directory",
    staging="https://acme-staging-v02.api.letsencrypt.org/directory"
 }
 
  -- getCert queue: list of {account=obj,rspCB=func,op=obj,getCertCO=coroutine}
-local jobQ={}
-local jobs=0
+local jobQ,jobs={},0
+local tpm -- Trusted Platform Module API
 local jwt=require"jwt"
 
 local schar,slower=string.char,string.lower
 local checkCert=true
 
 local ue=ba.urlencode
+local jencode,jdecode=ba.json.encode,ba.json.decode
 local function aue(x) return ue(ue(x)) end -- ACME url encode
 
 local function errlog(url, msg)
@@ -25,21 +24,58 @@ end
 local function respErr(err, rspCB)
    if type(err) == 'table' then
       local error = err.error or err
-      err = error.detail or ba.json.encode(err)
+      err = error.detail or jencode(err)
    end
    rspCB(nil,err)
    return nil,err
 end
 
--- returns privatekey, x, y
+local function useTPM(key,keyname)
+   if tpm then
+      local op=jdecode(key)
+      if op then
+	 if not tpm.haskey(keyname) then tpm.createkey(keyname,op) end
+	 return true
+      end
+   end
+   return false
+end
+
+local function jwtsign(key,payload,header)
+   return useTPM(key,"$account") and tpm.jwtsign("$account",payload,header) or jwt.sign(key,payload,header)
+end
+
+local function keyparams(key)
+   if useTPM(key,"$account") then
+      return tpm.keyparams"$account"
+   end
+   return ba.crypto.keyparams(key)
+end
+
+local function createkey(kname,op)
+   local op = op or {}
+   if tpm and "rsa" ~= op.key then
+      tpm.createkey(kname,op)
+      return jencode{keyname=kname,curve=op.curve}
+   end
+   return ba.create.key(op)
+end
+
+local function createcsr(key,kname,dn,certtype,keyusage)
+   return kname and useTPM(key,kname) and tpm.createcsr(kname,dn,certtype,keyusage) or ba.create.csr(key,dn,certtype,keyusage)
+end
+
+
+
+-- Extracts and returns the public x,y components from a private ECC key.
 local function decodeEccPemKey(key)
-   local x,y = ba.crypto.keyparams(key)
+   local x,y = keyparams(key)
    return ba.b64urlencode(x),ba.b64urlencode(y)
 end
 
 -- Table 't' to JSON and URL safe B64 enc.
 local function jsto64(t)
-   return ba.b64urlencode(ba.json.encode(t))
+   return ba.b64urlencode(jencode(t))
 end
 
 -- Returns: "ACME http func", dir listing, nonce
@@ -48,7 +84,7 @@ local function createAcmeHttp(op)
    local function ahttp(url, json, getraw) -- ACME HTTP func
       local ok,err
       if json then
-	 local data=ba.json.encode(json)
+	 local data=jencode(json)
 	 ok,err=http:request{
 	    trusted=checkCert,
 	    url=url,
@@ -75,7 +111,7 @@ local function createAcmeHttp(op)
 	 if ok then return rsp end
 	 return nil, err
       end
-      rsp = rsp and ba.json.decode(rsp)
+      rsp = rsp and jdecode(rsp)
       local h = http:header()
       local h={}
       for k,v in pairs(http:header()) do h[slower(k)]=v end
@@ -84,6 +120,7 @@ local function createAcmeHttp(op)
    local production = op.production == nil and true or op.production
    local ok, dir = ahttp(production and dURL.production or dURL.staging)
    if ok then
+      local nonce
       ok, rsp, nonce = ahttp(dir.newNonce) -- Get the first nonce
       if ok then return ahttp, dir, nonce end
       dir=rsp
@@ -94,7 +131,7 @@ end
 local function postAsGet(http, account, nonce, url, getraw)
    local header = {nonce=nonce, alg='ES256', url=aue(url), kid=account.id}
    local payload = "" -- POST-as-GET
-   return http(url, jwt.sign(account.key,payload,header), getraw)
+   return http(url, jwtsign(account.key,payload,header), getraw)
 end
 
 
@@ -165,7 +202,7 @@ local function getCertCOFunc(job)
    else
       newAccount=true
       tracep(false, 5,"Creating new ACME account")
-      account.key = account.key or ba.create.key()
+      account.key = account.key or createkey"$account"
       x,y=decodeEccPemKey(account.key)
       -- Prepare for new account request
       header={
@@ -185,7 +222,7 @@ local function getCertCOFunc(job)
 	 contact={'mailto:'..account.email},
       }
       -- Send account request
-      ok,rsp,nonce,h = http(dir.newAccount,jwt.sign(account.key,payload,header))
+      ok,rsp,nonce,h = http(dir.newAccount,jwtsign(account.key,payload,header))
       if not ok then return retErr(rsp) end
       account.id=h.location
    end
@@ -194,10 +231,10 @@ local function getCertCOFunc(job)
    header = {nonce=nonce, alg='ES256', url=dir.newOrder, kid=account.id}
    payload = {identifiers = {{ type='dns', value=job.domain }}}
    -- Send order request
-   ok,rsp,nonce,h = http(dir.newOrder, jwt.sign(account.key,payload,header))
+   ok,rsp,nonce,h = http(dir.newOrder, jwtsign(account.key,payload,header))
    if not ok then
       if newAccount==false then
-	 account.key,account.id=nil,nil
+	 account.id=nil
 	 return getCertCOFunc(job)
       end
       return retErr(rsp)
@@ -246,7 +283,7 @@ local function getCertCOFunc(job)
    header = {nonce=nonce, alg='ES256', url=aue(challengeUrl), kid=account.id}
    payload = ba.b64urlencode"{}"
    --  http -> ACME will now call our 'wellknown' dir or checks DNS rec.
-   ok, rsp, nonce, h = http(challengeUrl, jwt.sign(account.key,payload,header))
+   ok, rsp, nonce, h = http(challengeUrl, jwtsign(account.key,payload,header))
    if not ok then return retErr(rsp) end
    local challengePollURL = rsp.url
    local cnt=0
@@ -272,14 +309,14 @@ local function getCertCOFunc(job)
    local certtype = {"SSL_CLIENT", "SSL_SERVER"}
    local keyusage = {"DIGITAL_SIGNATURE", "KEY_ENCIPHERMENT"}
    local kop = op.rsa == true and { key="rsa",bits=op.bits} or {curve=op.curve or "SECP384R1"}
-   local certKey = op.privkey or ba.create.key(kop) -- use key via option or new
-   local csr=ba.create.csr(certKey,{commonname=job.domain},certtype,keyusage)
+   local certKey = op.privkey or createkey(job.domain,kop) -- use key via option or new
+   local csr=createcsr(certKey,job.domain, {commonname=job.domain},certtype,keyusage)
    -- Convert CSR to raw URL-safe B64
    header={nonce=nonce,alg='ES256',url=aue(finalizeURL),kid=account.id}
    csr=ba.b64urlencode(ba.b64decode(csr:match".-BEGIN.-\n%s*(.-)\n%s*%-%-"))
    payload={csr=csr}
    -- Send the CSR
-   ok, rsp, nonce, h = http(finalizeURL, jwt.sign(account.key,payload,header))
+   ok, rsp, nonce, h = http(finalizeURL, jwtsign(account.key,payload,header))
    if not ok then return retErr(rsp) end
    if rsp.status ~= "valid" then -- If not ready
       cnt=0
@@ -330,7 +367,7 @@ local function revokeCert(account,cert,rspCB, op)
    local header = {nonce=nonce, alg='ES256', url=dir.revokeCert, kid=account.id}
    local payload = {certificate=
       ba.b64urlencode(ba.b64decode(cert:match".-BEGIN.-\n%s*(.-)\n%s*%-%-"))}
-   local ok, rsp = http(dir.revokeCert, jwt.sign(account.key,payload,header))
+   local ok, rsp = http(dir.revokeCert, jwtsign(account.key,payload,header))
    if ok then
       rspCB(true)
    else
@@ -343,7 +380,9 @@ local function terms(op)
    return ok and dir.meta.termsOfService or "https://letsencrypt.org/"
 end
 
-return {
+local M
+M = {
+   setTPM=function(t) tpm=t M.setTPM=nil end,
    terms=terms,
    cert=getCert,
    jobs=function() return jobs end,
@@ -352,3 +391,4 @@ return {
    ahttp=createAcmeHttp,
    checkCert=function(check) checkCert=check end
 }
+return M

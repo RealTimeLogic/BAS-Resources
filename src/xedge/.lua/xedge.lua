@@ -14,7 +14,7 @@ local authRealm="Xedge"
 local ios=ba.io()
 local nodisk=false -- if no DiskIo
 local errorh,loadPlugins -- funcs
-local pmkey,confKey -- pre-master secret, xedge.conf AES key
+local confKey -- xedge.conf AES key
 ios.vm=nil
 do -- Remove virtual disks from windows to prevent DAV lock if url=localhost
    local t={}
@@ -28,6 +28,67 @@ do -- Remove virtual disks from windows to prevent DAV lock if url=localhost
    end
    ios=t
 end
+
+local tpm
+tpm=function(pmkey)
+   local keys={}
+   local createkey,createcsr,sharkcert=ba.create.key,ba.create.csr,ba.create.sharkcert
+   local PBKDF2,keyparams=ba.crypto.PBKDF2,ba.crypto.keyparams
+   local jwtsign=require"jwt".sign
+
+   local function tpmGetKey(kname)
+      local key=keys[kname]
+      if not key then error(sfmt("ECC key %s not found",tostring(kname)), 3) end
+      return key
+   end
+
+   local function tpmJwtsign(kname,...)
+      return jwtsign(tpmGetKey(kname),...)
+   end
+
+   local function tpmKeyparams(kname)
+      return keyparams(tpmGetKey(kname))
+   end
+
+   local function tpmCreatecsr(kname,...)
+      return createcsr(tpmGetKey(kname),...)
+   end
+
+   local function tpmCreatekey(kname,op)
+      if keys[kname] then error(sfmt("ECC key %s exists",kname),2) end
+      op = op or {}
+      if op.key and op.key ~= "ecc" then error("TPM cannot create RSA keys",2) end
+      local newOp={}
+      for k,v in pairs(op) do newOp[k]=v end
+      newOp.rnd=PBKDF2("sha512", kname, pmkey, 5, 1024)
+      local key=createkey(newOp)
+      keys[kname]=key
+      return true
+   end
+
+   local function tpmHaskey(kname)
+      return keys[kname] and true or false
+   end
+
+   local function tpmSharkcert(kname,certdata)
+      return sharkcert(certdata,tpmGetKey(kname))
+   end
+
+   require"acme/engine".setTPM{
+      jwtsign=tpmJwtsign,
+      keyparams=tpmKeyparams,
+      createcsr=tpmCreatecsr,
+      createkey=tpmCreatekey,
+      haskey=tpmHaskey
+   }
+   tpm=function() return -- Create cert for .config
+      function(op,certdata)
+	 local n=op.keyname
+	 if not tpmHaskey(n) then tpmCreatekey(n,op) end
+	 return tpmSharkcert(n,certdata)
+      end
+   end
+end --- End tpm
 
 local function log(fmt,...)
    local msg=sfmt("Xedge: "..fmt, ...)
@@ -89,7 +150,7 @@ end)()
 local ioStat={mtime=fakeTime(),size=0,isdir=true}
 
 -- A recursive directory iterator
-function recDirIter(io,curPath)
+local function recDirIter(io,curPath)
    local name
    local co
    local doDir
@@ -669,7 +730,7 @@ startAcmeDns=function(warn)
 end
 
 local installAuth -- function is: installOrSetAuth() or setdb()
-function installOrSetAuth()
+local function installOrSetAuth()
    if not next(userdb) and not xedge.sso then return end
    local ju=ba.create.jsonuser()
    local function setdb()
@@ -736,7 +797,7 @@ local function init(cfg)
    local ok,err=pcall(function()
       if cfg.userdb then
 	 for name,data in pairs(encodedStr2Tab(cfg.userdb,"userdb")) do userdb[name]=data end
-         xedge.cfg.userdb=cfg.userdb
+	 xedge.cfg.userdb=cfg.userdb
       end
       for name,appc in pairs(cfg.apps) do
 	 appc.name=name
@@ -747,12 +808,11 @@ local function init(cfg)
    if not ok then
       sendCfgCorrupt(err)
       errorh(err)
-      return false
    end
-   return true
+   return tpm()
 end
 
-function openidDec() -- Decode encoded SSO JSON settings
+local function openidDec() -- Decode encoded SSO JSON settings
    xedge.sso=nil
    openid=encodedStr2Tab(xedge.cfg.openid,"openid")
    pcall(function()
@@ -803,8 +863,9 @@ function xedge.init(cfg,aio,rtld) -- cfg from Xedge config file
    end)
    dir:insert()
    xedge.dir404=dir
+   local tpmSharkcert
    if xedge.saveCfg then
-      init(cfg)
+      tpmSharkcert=init(cfg)
       installAuth()
       startAcmeDns()
    else -- No DiskIo
@@ -812,6 +873,7 @@ function xedge.init(cfg,aio,rtld) -- cfg from Xedge config file
       function xedge.saveCfg() end
    end
    loadPlugins()
+   return tpmSharkcert
 end
 
 --   isreg=function(cmd,data) adns.isreg(function() cmd:json{ok=true, isreg=adns.isreg} end) end,
@@ -1088,9 +1150,11 @@ do
    local klist={}
    local tins=table.insert
    return function(k)
+      local pmkey
       if not k then
 	 -- Mako Server: use dummy key.
-	 pmkey=ba.crypto.hash("sha512")("438fccj39dewe8vc")(true)
+	 k="438fccj39dewe8vc"
+	 pmkey=ba.crypto.hash("sha512")(k)(true)
       elseif true == k then -- done feeding keys
 	 local hf=ba.crypto.hash("sha512")
 	 for _,k in ipairs(klist) do hf(k) end
@@ -1100,7 +1164,8 @@ do
       end
        -- Base it on the first fixed key so xedge.conf can be transferred between devices.
       if not confKey then
-	 confKey=ba.crypto.PBKDF2("sha256", "xedge.conf", k or pmkey, 5, 256)
+	 confKey=ba.crypto.PBKDF2("sha256", "xedge.conf", k, 5, 256)
       end
+      if pmkey then tpm(pmkey) end
    end
 end
