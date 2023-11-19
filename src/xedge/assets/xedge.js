@@ -170,6 +170,14 @@ const appFormObj = [
 	description: "Turn app on or off",
     },
     {
+	el:"input",
+	type: "checkbox",
+	class:"switch",
+	label: "AppCfgAutostart",
+	name: "Auto Start",
+	description: "Automatically launch the application upon system startup; keep it off during development",
+    },
+    {
 	el: "input",
 	type: "text",
 	label: "AppCfgName",
@@ -242,6 +250,7 @@ function appCfg(pn,cfg,isNewNet) {
 	if(cfg.err)
 	    logErr(`App ${pn} is not configured correctly:\n`,cfg.err);
 	elems.AppCfgRunning.prop("checked", cfg.running);
+	elems.AppCfgAutostart.prop("checked", cfg.autostart);
 	elems.AppCfgName.val(cfg.name);
 	elems.AppCfgURL.val(cfg.url);
 	if(undefined !== cfg.dirname) {
@@ -267,7 +276,8 @@ function appCfg(pn,cfg,isNewNet) {
 	let ncfg={
 	    name:elems.AppCfgName.val().trim(),
 	    url:elems.AppCfgURL.val().trim(),
-	    running:elems.AppCfgRunning.prop("checked")
+	    running:elems.AppCfgRunning.prop("checked"),
+	    autostart:elems.AppCfgAutostart.prop("checked")
 	};
 	if(elems.AppCfgLspApp.prop("checked")) {
 	    ncfg.dirname=elems.AppCfgDirName.val().trim();

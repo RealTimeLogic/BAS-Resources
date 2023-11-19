@@ -469,7 +469,7 @@ local function terminateApp(name, nosave)
    if not nosave then xedge.saveCfg() end
 end
 
-local function manageApp(name) -- start/stop/restart
+local function manageApp(name,isStartup) -- start/stop/restart
    local err
    local appc=appsCfg[name]
    assert(appc)
@@ -485,7 +485,7 @@ local function manageApp(name) -- start/stop/restart
    env.app=env
    local app={io=io,env=env,envs={}}
    apps[name]=app
-   if appc.running and not err then
+   if appc.running and (false ~= appc.autostart or not isStartup) and not err then
       if appc.dirname then
 	 local dn=trim(appc.dirname)
 	 local dir=ba.create.resrdr(#dn > 1 and dn or nil,appc.priority or 0,io)
@@ -511,6 +511,8 @@ local function manageApp(name) -- start/stop/restart
 	 end
 	 
       end
+   else
+      appc.running=false
    end
 end
 
@@ -534,7 +536,7 @@ end
 
 local function newOrUpdateApp(cfg,cfgIx,fn,ion) -- On new/update cfg file
    local url=ssub(fn,1, cfgIx-1)
-   local nc={name=cfg.name,url=cfg.url,running=cfg.running or false,dirname=cfg.dirname}
+   local nc={name=cfg.name,url=cfg.url,running=cfg.running or false,autostart=cfg.autostart,dirname=cfg.dirname}
    if cfg.dirname then nc.priority=cfg.priority or 0 end
    if not nc.url then nc.url=url end
    if appsCfg[ion] then -- update
@@ -802,7 +804,7 @@ local function init(cfg)
       for name,appc in pairs(cfg.apps) do
 	 appc.name=name
 	 appsCfg[name]=appc
-	 manageApp(name)
+	 manageApp(name,true)
       end
    end)
    if not ok then
