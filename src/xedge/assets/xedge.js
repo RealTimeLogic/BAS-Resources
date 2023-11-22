@@ -582,7 +582,7 @@ function getDirList(path,cb) {
 	if(false != data) {
 	    let list=[];
 	    for(const [ix, st] of Object.entries(data)) {
-		if(st.s < 1) list[ix]={asynced: true, type: Tree.FOLDER, name:st.n}
+		if(st.s < 0) list[ix]={asynced: true, type: Tree.FOLDER, name:st.n}
 		else list[ix]={name:st.n}
 	    }
 	    cb(list);

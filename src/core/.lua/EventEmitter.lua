@@ -1,23 +1,37 @@
 local E={} -- EventEmitter
 E.__index=E
+local tunpack,trun=table.unpack,ba.thread.run
 
 function E:on(event,cb)
    local ev=self._evs[event]
    if not ev then ev={} self._evs[event]=ev end
    ev[cb]=true
+   local payload = self._retained and self._retained[event]
+   if payload then trun(function() cb(tunpack(payload)) end) end
    return true
 end
 
 function E:emit(event,...)
-   local ev=self._evs[event]
+   local evName
+   if "table" == type(event) then
+      evName=event.name
+      if event.retain then
+	 self._retained=self._retained or {}
+	 if evName then self._retained[evName] = {...} end
+      end
+   else
+      evName=event
+   end
+   if "string" ~= type(evName) then error("Invalid event",2) end
+   local ev=self._evs[evName]
    if ev then
       for cb in pairs(ev) do
 	 local ok,err = pcall(cb,...)
 	 if not ok then
 	    if self.reporterr then
-	       self.reporterr(event,cb,err)
+	       self.reporterr(evName,cb,err)
 	    else
-	       trace("Event CB err:",event,cb,err)
+	       trace("Event CB err:",evName,cb,err)
 	    end
 	 end
       end

@@ -352,7 +352,10 @@ do
       return ev:on(event,cb)
    end
    --Must be called by C code
-   function _XedgeEvent(event,...) ev:emit(event,...) end
+   function _XedgeEvent(event,...)
+      if "sntp" == event then event={name="sntp",retain = true} end
+      ev:emit(event,...)
+   end
    xedgeEvent=_XedgeEvent
 end
 
