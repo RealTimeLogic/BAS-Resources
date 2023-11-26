@@ -7,7 +7,7 @@ function E:on(event,cb)
    if not ev then ev={} self._evs[event]=ev end
    ev[cb]=true
    local payload = self._retained and self._retained[event]
-   if payload then trun(function() cb(tunpack(payload)) end) end
+   if payload then trun(function() cb(event,tunpack(payload)) end) end
    return true
 end
 
@@ -15,9 +15,9 @@ function E:emit(event,...)
    local evName
    if "table" == type(event) then
       evName=event.name
-      if event.retain then
+      if evName and event.retain then
 	 self._retained=self._retained or {}
-	 if evName then self._retained[evName] = {...} end
+	 self._retained[evName] = {...}
       end
    else
       evName=event
@@ -26,7 +26,7 @@ function E:emit(event,...)
    local ev=self._evs[evName]
    if ev then
       for cb in pairs(ev) do
-	 local ok,err = pcall(cb,...)
+	 local ok,err = pcall(cb,evName,...)
 	 if not ok then
 	    if self.reporterr then
 	       self.reporterr(evName,cb,err)

@@ -4,7 +4,7 @@ local function trim(s) return s:gsub("^%s*(.-)%s*$", "%1") end
 local production=true -- Let's Encrypt
 local sfind,ssub,sbyte,sfmt=string.find,string.sub,string.byte,string.format
 local tinsert=table.insert
-local dtraceback=debug.traceback
+local dtraceback=debug and debug.traceback or function(e) return e end
 local jencode,jdecode=ba.json.encode,ba.json.decode
 local startAcmeDns -- func
 local xedgeEvent -- = _XedgeEvent
@@ -57,7 +57,7 @@ tpm=function(pmkey)
    local function tpmCreatekey(kname,op)
       if keys[kname] then error(sfmt("ECC key %s exists",kname),2) end
       op = op or {}
-      if op.key and op.key ~= "ecc" then error("TPM cannot create RSA keys",2) end
+      if op.key and op.key ~= "ecc" then error("TPM can only create ECC keys",2) end
       local newOp={}
       for k,v in pairs(op) do newOp[k]=v end
       newOp.rnd=PBKDF2("sha512", kname, pmkey, 5, 1024)
@@ -88,6 +88,14 @@ tpm=function(pmkey)
 	 return tpmSharkcert(n,certdata)
       end
    end
+   local t={}
+   function t.haskey(k) return tpmHaskey("#"..k) end
+   function t.createkey(k,...) return tpmCreatekey("#"..k,...) end
+   function t.createcsr(k,...) return tpmCreatecsr("#"..k,...) end
+   function t.jwtsign(k,...) return tpmJwtsign("#"..k,...) end
+   function t.keyparams(k,...) return tpmKeyparams("#"..k,...) end
+   function t.sharkcert(k,...) return tpmSharkcert("#"..k,...) end
+   ba.tpm=t
 end --- End tpm
 
 local function log(fmt,...)
@@ -353,8 +361,7 @@ do
    end
    --Must be called by C code
    function _XedgeEvent(event,...)
-      if "sntp" == event then event={name="sntp",retain = true} end
-      ev:emit(event,...)
+      ev:emit({name=event,retain = true},...)
    end
    xedgeEvent=_XedgeEvent
 end
