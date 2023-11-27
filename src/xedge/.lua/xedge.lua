@@ -116,36 +116,7 @@ G.xedge=xedge
 local apps=xedge.apps
 local appsCfg=xedge.cfg.apps
 local userdb={}
-
-function xedge.file(io,name,data)
-   local fp,ret,err
-   if data then
-      fp,err=io:open(name,"w")
-      if fp then ret,err = fp:write(data) end
-   else
-      fp,err=io:open(name)
-      if fp then ret=fp:read"*a" end
-   end
-   if fp then fp:close() end
-   return ret,err
-end
-local file=xedge.file
-function xedge.json(io,name,tab)
-   if tab then
-      return file(io,name,jencode(tab))
-   end
-   local ret,err=file(io,name)
-   if ret then
-      -- If: includes UTF-8 BOM.
-      if sbyte(ret,1) == 0xEF and sbyte(ret,2) == 0xBB and sbyte(ret,3) == 0xBF then
-	 ret=ret:sub(4)
-      end
-      ret=jdecode(ret)
-      if not ret then err="jsonerr" end
-   end
-   return ret,err
-end
--- Must be after the above xedge.json
+local rw=require"rwfile"
 pcall(function() xedge.portal=require"acme/dns".token().info() end)
 
 local fakeTime=(function()
@@ -1122,7 +1093,7 @@ local commands={
    lsPlugins=function(cmd) cmd:json(lsPlugins"js") end,
    getPlugin=function(cmd,d)
       local n=d.name
-      local f=n and n:find("%.js$") and xedge.file(xedge.aio,n)
+      local f=n and n:find("%.js$") and rw.file(xedge.aio,n)
       if f then
 	 cmd:write(f)
       else
@@ -1149,7 +1120,7 @@ function xedge.onunload()
 end
 
 loadPlugins=function()
-   local xf=xedge.file
+   local xf=rw.file
    for _,n in ipairs(lsPlugins"lua") do
       local ok
       local f,e=load(xf(xedge.aio,n),n,"bt",_ENV)
