@@ -41,7 +41,7 @@ function getFileExt(n){
 let loader;
 let afterLogin; // Function set when creating loader obj.
 function login() {afterLogin();}; //called by /rtl/login/index.lsp
-function authenticate() {loader.login();} // Called by TraceLogger
+function authenticate() {loader.login();} //Called by TraceLogger
 
 //Simple $.ajax JSON wrapper
 function jsonReq(settings,cb,emsg) {
@@ -1449,3 +1449,11 @@ $( window ).on( "load",()=> {
 	}
     });
 });
+
+function onreconnect() { //Called by TraceLogger
+    sendCmd("getionames",(rsp)=>{
+	ios={}
+	rsp.ios.forEach((name)=>ios[name]=true);
+	inittree();
+    });
+};

@@ -390,7 +390,7 @@ $(function () {
 	setConnectBut("Connect", false);
     };
 
-    function startWS() {
+    function startWS(reconnected) {
 	let proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
 	let ws = new WebSocket(proto+location.host+trUrl);
 	ws.binaryType = "arraybuffer";
@@ -400,6 +400,8 @@ $(function () {
 	    setConnectedState(true);
 	    setConnectBut("Close", false);
 	    writeCon("Connected!\n");
+	    if(reconnected && window.top && window.top.onreconnect)
+		window.top.onreconnect();
 	};
 	ws.onmessage = function (ev)
 	{
@@ -442,7 +444,7 @@ $(function () {
 	    {
 		busy=false;
 		if(jqXHR.status == 204 || force) {
-		    startWS();
+		    startWS(true);
 		}
 		else {
 		    reconnect=false;
