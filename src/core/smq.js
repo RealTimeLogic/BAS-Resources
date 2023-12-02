@@ -94,7 +94,6 @@ SMQ.wsURL = function(path) {
 	currentPath.pop(); // Remove the last segment
 	path = currentPath.join('/') + '/' + path;
     }
-    console.log(path);
     return ((l.protocol === "https:") ? "wss://" : "ws://") +
 	l.hostname +
 	(l.port != 80 && l.port != 443 && l.port.length != 0 ? ":" + l.port : "") +
