@@ -370,7 +370,9 @@ end
 
 -- Publishes Device Death Certificate (DDEATH)
 function SP:publishDeviceDeath(devId, pl)
-   self._mqtt:publish(self._fmtDTopic("DDEATH",devId),encode(addSeq(self,cloneT(pl))))
+   pl=cloneT(pl)
+   pl.metrics={}
+   self._mqtt:publish(self._fmtDTopic("DDEATH",devId),encode(addSeq(self,pl)))
 end
 
 -- Event handler setup
