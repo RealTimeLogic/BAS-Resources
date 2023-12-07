@@ -1,4 +1,3 @@
-
 --MQTT 3.1.1 Client. Copyright Real Time Logic.
 
 local fmt,schar,sbyte,ssub=string.format,string.char,string.byte,string.sub
@@ -96,8 +95,10 @@ local function mqttRec(self)
 end
 
 local function sendPing(self)
+   if not self.connected then return end
    if self.pingResp then
       self.error="pingresp"
+      self.connected=false
       self.sock:close()
    else
       self.pingResp=true
@@ -109,7 +110,9 @@ end
 
 local function cpPublish(self, msg)
    local tlen = n2h(2,msg)
-   self.onpub(ssub(msg, 3, tlen+2), ssub(msg, tlen+3))
+   local topic=ssub(msg, 3, tlen+2)
+   local func=self.onpubT[topic] or self.onpub
+   func(topic,ssub(msg,tlen+3))
    return true
 end
 
@@ -145,36 +148,83 @@ local cpT={
    [MQTT_PINGRESP]=cpPingresp,
 }
 
+-- An unconnected cosocket, which removes from tail and sends msg
+local function sndCosock(sock,self)
+   local sndQT=self.sndQT
+   while true do
+      local sndQTail=self.sndQTail
+      if self.sndQHead == sndQTail then sock:disable() end
+      if not self.connected then return end
+      assert(self.sndQHead ~= sndQTail)
+      local msg=sndQT[sndQTail]
+      assert(msg)
+      if not self.sock:write(msg) then
+	 self.connected = false
+	 return
+      end
+      sndQT[sndQTail]=nil
+      self.sndQTail=sndQTail+1
+      self.sndQElems=self.sndQElems-1
+   end
+end
+
+-- Queue at head and enable 'sndCosock()', which may already be
+-- enabled and that is OK.
+local function sendMsg(self, msg)
+   local sndQHead=self.sndQHead
+   assert(nil == self.sndQT[sndQHead])
+   self.sndQT[sndQHead]=msg
+   self.sndQHead = sndQHead+1
+   self.sndQElems=self.sndQElems+1
+   if self.connected then self.sndCosock:enable() end
+end
+
 
 local C={} -- MQTT Client
 C.__index=C
 
+function C:setwill(w)
+   if not w.message then w.message=w.payload end
+   if self.opt then
+      self.opt.will=w
+      return true
+   end
+   return false
+end
+
 function C:publish(topic,msg)
    msg = mqttstr(topic)..msg
-   return self.sock:write(schar(MQTT_PUBLISH)..enclen(#msg)..msg)
+   return sendMsg(self,schar(MQTT_PUBLISH)..enclen(#msg)..msg)
 end
 
 
-local function subOrUnsub(self,topic,callback,sub)
+local function subOrUnsub(self,topic,callback,sub,opt)
    local cpt=schar((sub and MQTT_SUBSCRIBE or MQTT_UNSUBSCRIBE) | 0x02)
    local data = encPacketId(self,callback)..mqttstr(topic)
    if sub then
       data = data..schar(0) -- QoS 0
    end
-   return self.sock:write(cpt..enclen(#data)..data)
+   return sendMsg(self,cpt..enclen(#data)..data)
 end
 
-function C:subscribe(topic,callback)
+function C:subscribe(topic,callback,opt)
+   if not opt and "table" == callback then
+      opt,callback=callback,nil
+   end
+   if opt and "function" == type(opt.onpub) then self.onpubT[topic]=onpub end
    return subOrUnsub(self,topic,callback,true)
 end
 
 function C:unsubscribe(topic,callback)
+   self.onpubT[topic]=nil
    return subOrUnsub(self,topic,callback,false)
 end
 
 function C:disconnect()
+   if not self.connected then return nil, self.error end
    self.error="disconnect"
    local ok,err = self.sock:write(schar(MQTT_DISCONNECT)..schar(0))
+   self.connected=false
    self.sock:close()
    return ok,err
 end
@@ -195,20 +245,22 @@ function C:run()
    end
    self.timer:cancel()
    if not self.error then self.error = msg end -- msg=err
+   self.connected,self.recOverflowData=false,nil
    return nil,self.error
 end
 
-local function connect(addr, onpub, opt)
-   local self={}
+
+local function _connect(self, addr, onpub, opt)
    opt = opt or {}
+   self.packetId,self.packetIdT=1,{}
    if opt.secure and not opt.shark then opt.shark=ba.sharkclient() end
    if type(addr) == "string" then
       local sock,err=ba.socket.connect(
 	 addr, opt.port or (opt.shark and 8883 or 1883), opt)
-      if not sock then return nil,err end
+      if not sock then return nil,err,"sock" end
       if opt.shark and not opt.nocheck then
 	 local trusted,status = sock:trusted(addr)
-	 if not trusted then return nil, status end
+	 if not trusted then return nil,status,"sock" end
       end
       self.sock=sock
    elseif type(addr) == "userdata" and type(addr.trusted) == "function" then
@@ -246,17 +298,63 @@ local function connect(addr, onpub, opt)
    end
    self.sock:write(schar(MQTT_CONNECT)..enclen(#data)..data)
    local cpt,msg=mqttRec(self)
-   if not cpt then return nil,msg end -- msg=err
-   if cpt ~= MQTT_CONACK then return nil,"invalidresp" end
+   if not cpt then return nil,msg,"sock" end -- msg=err
+   if cpt ~= MQTT_CONACK then return nil,"invalidresp","mqtt" end
    local rcp = sbyte(msg,2)
-   if rcp ~= 0 then return nil, rcp end
-   self.packetId,self.packetIdT=1,{}
+   if rcp ~= 0 then return nil, rcp, true end
    self.onpub=onpub
    self.timer = ba.timer(function() sendPing(self) return true end)
    self.timer:set((self.pingtmo - 20) * 1000)
-   return setmetatable(self,C)
+   self.connected=true
+   if self.sndQHead ~= self.sndQTail then self.sndCosock:enable() end
+   return self
 end
 
+local function initSelf()
+   return setmetatable({onpubT={},sndQT={},sndQHead=1,sndQTail=1,sndQElems=0},C)
+end
 
+local function connect(addr, onpub, opt)
+   return _connect(initSelf(), addr, onpub, opt)
+end
 
-return {connect=connect}
+local function connectAndRun(self, addr, onstatus, onpub)
+   local recon
+   local opt=self.opt
+   self.sndCosock=ba.socket.event(sndCosock,self)
+   local function connect()
+      local ok,err,rcp = _connect(self, addr, onpub, opt)
+      if ok then
+	 if onstatus("mqtt","connect", {reasoncode=0,properties={}}) then
+	    recon,err=self:run()
+	    recon=onstatus("sock",self.error)
+	 end
+      else
+	 recon=onstatus("mqtt","connect", {reasoncode= (true == rcp and err or 0)})
+      end
+      recon = "number" == type(recon) and recon or (true == recon and 5 or 0)
+      if recon > 0 and "sysshutdown" ~= err then
+	 ba.timer(function() connectAndRun(self, addr, onstatus, onpub) end):set(recon*1000,true)
+      end
+   end
+   ba.socket.event(connect)
+end
+
+local function create(addr, onstatus, onpub, opt)
+   if opt then
+      opt.id=opt.clientidentifier
+      opt.uname=opt.username
+      opt.passwd=opt.password
+      if opt.will then opt.will.message=opt.will.payload end
+      if opt.secure then
+	 opt.shark = opt.secure == true and ba.sharkclient() or opt.secure
+	 opt.secure=true
+      end
+   end
+   local self=initSelf()
+   if opt then self.opt=opt end
+   connectAndRun(self, addr, onstatus, onpub)
+   return self
+end
+   
+return {connect=connect,create=create}
