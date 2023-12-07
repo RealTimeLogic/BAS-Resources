@@ -338,7 +338,7 @@ function SP:stop()
    if self._running then
       self._running=false
       self._mqtt.sock:close()
-      ev:emit"close"
+      self._ev:emit"close"
       return true
    end
    return false
