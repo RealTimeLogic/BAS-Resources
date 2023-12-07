@@ -311,7 +311,9 @@ local function _connect(self, addr, onpub, opt)
 end
 
 local function initSelf()
-   return setmetatable({onpubT={},sndQT={},sndQHead=1,sndQTail=1,sndQElems=0},C)
+   local self=setmetatable({onpubT={},sndQT={},sndQHead=1,sndQTail=1,sndQElems=0},C)
+   self.sndCosock=ba.socket.event(sndCosock,self)
+   return self
 end
 
 local function connect(addr, onpub, opt)
@@ -321,7 +323,6 @@ end
 local function connectAndRun(self, addr, onstatus, onpub)
    local recon
    local opt=self.opt
-   self.sndCosock=ba.socket.event(sndCosock,self)
    local function connect()
       local ok,err,rcp = _connect(self, addr, onpub, opt)
       if ok then
