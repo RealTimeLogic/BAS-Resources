@@ -611,6 +611,7 @@ local function files(fn)
    local function read()
       if not fname or cfg then return false end
       fname, isdir, mtime, size=iter()
+      if ".appcfg" == fname then fname, isdir, mtime, size=iter() end
       if not fname then
 	 if not pn and appsCfg[ion] then
 	    cfg=getJsonAppCfg(ion)
@@ -630,12 +631,10 @@ local function stat(fn)
    if 0 == #fn or "." == fn then return ioStat end
    local io,ion,pn=fn2info(fn)
    if not pn then return ioStat end
-   local ret,err=io:stat(pn)
-   if not ret then
-      if fn:find"%.appcfg$" then
-	 return {mtime=fakeTime(),size=#getJsonAppCfg(ion),isdir=false}
-      end
+   if fn:find"%.appcfg$" then
+      return {mtime=fakeTime(),size=#getJsonAppCfg(ion),isdir=false}
    end
+   local ret,err=io:stat(pn)
    return ret,err
 end
  

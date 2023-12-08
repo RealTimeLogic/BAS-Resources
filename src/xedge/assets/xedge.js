@@ -21,7 +21,6 @@ function logErr(nosound) {
 function alertErr() {
     const e=Array.from(arguments).join(' ');
     logErr(e,"\n");
-    alert(e);
 };
 
 function strMatch(str,pat) {
@@ -561,6 +560,7 @@ const okFileExt={
     lua:true,
     lsp:true
 };
+let notOkFileExt={};
 
 // Check if known text file
 function ok2open(pn) {
@@ -755,6 +755,9 @@ function treeCtxMenu(e,node) {
 */
 function openSelFile() {
     const fn=fsBase+selpn;
+    const ext=getFileExt(selpn);
+    if(notOkFileExt[ext]) return;
+    notOkFileExt[ext]=true;
     function err(xhr, stat, e){
 	if("Unauthorized"==e)
 	    loader.login(openSelFile);
@@ -769,7 +772,7 @@ function openSelFile() {
 		if( !(mt && /^text\//.test(mt) || ok2open(selpn)) ) {
 		    if(!confirm("You can only open text files. Are you sure you want to open this file?"))
 			return;
-		    okFileExt[getFileExt(selpn)]=true;
+		    okFileExt[ext]=true;
 		}
 		$.get(fsBase+selpn).done((data)=>{
 		    if(selpn.match(/\/\.appcfg$/))
@@ -780,6 +783,7 @@ function openSelFile() {
 	    }
 	    else
 		alertErr("File too big");
+	    notOkFileExt[ext]=undefined;
 	},
 	error: err
     });
