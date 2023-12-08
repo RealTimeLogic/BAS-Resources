@@ -15,19 +15,6 @@ local ios=ba.io()
 local nodisk=false -- if no DiskIo
 local errorh,loadPlugins -- funcs
 local confKey -- xedge.conf AES key
-ios.vm=nil
-do -- Remove virtual disks from windows to prevent DAV lock if url=localhost
-   local t={}
-   for name,io in pairs(ios) do
-      local xio
-      local type,plat=io:resourcetype()
-      if "windows" == plat and not io:realpath"" then
-	 xio=ba.mkio(io,"/c/")
-      end
-      t[name]=xio or io
-   end
-   ios=t
-end
 
 local tpm
 tpm=function(pmkey)
@@ -805,6 +792,18 @@ end
 
 function xedge.init(cfg,aio,rtld) -- cfg from Xedge config file
    local err
+   ios=ba.io()
+   ios.vm=nil
+   -- Remove virtual disks from windows to prevent DAV lock if url=localhost
+   local t={}
+   for name,io in pairs(ios) do
+      local xio
+      local type,plat=io:resourcetype()
+      if "windows" == plat and not io:realpath"" then xio=ba.mkio(io,"/c/") end
+      t[name]=xio or io
+   end
+   ios=t
+
    -- rtld set if mako
    local resrdr=ba.create.resrdr(not rtld and "rtl" or nil,0,aio)
    resrdr:lspfilter{io=aio}
