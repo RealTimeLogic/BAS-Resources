@@ -979,7 +979,7 @@ local commands={
 	 if cfg and cfg.running and cfg.dirname then
 	    cmd:json{ok=true,url= #cfg.dirname > 0 and sfmt("/%s/%s",cfg.dirname,pn) or "/"..pn}
 	 end
-	 local emsg= cfg and (cfg.running and "Not an LSP app" or "App not running") or "App not found"
+	 local emsg= cfg and (cfg.running and "'LSP App' not enabled" or "App not running") or "App not found"
 	 cmd:json{err=emsg}
       end
    end,

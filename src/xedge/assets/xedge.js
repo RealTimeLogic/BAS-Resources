@@ -393,11 +393,12 @@ function createEditor(pn,value,savecb,newElem) {
 	sendCmd("pn2info", (rsp) => {
 	    let addSaveBut=true;
 	    if(rsp.running) {
-		if('xlua' == getFileExt(pn)) {
+		const ext=getFileExt(pn);
+		if('xlua' == ext) {
 		    addSaveBut=false;
 		    editorButtons.append($('<button>', { html: 'Save &amp; Run', type: 'submit'}).click(()=>saveData()));
 		}
-		else if('lsp' == getFileExt(pn)) {
+		else if('lsp' == ext || 'htm' == ext || 'html' == ext) {
 		    editorButtons.append($('<button>', { html: 'Open', type: 'submit'}).click( () => {
 			sendCmd("pn2url", (rsp) => {if(rsp.ok) window.open(rsp.url,'lsp');}, {fn:pn});
 		    }));
