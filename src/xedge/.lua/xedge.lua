@@ -1082,11 +1082,16 @@ local commands={
       end
    end,
    execLua=function(cmd,d)
-      local ok=false
       local f,err = load(d.code or "","LuaShell","t",G)
-      if f then ok,err=xpcall(f,errh) end
-      if not ok then tracep(false,0,err) end
-      cmd:json{ok=ok}
+      if f then
+	 ba.thread.run(function()
+	    local ok,err=xpcall(f,errh)
+	    if not ok then tracep(false,0,err) end
+	 end)
+	 cmd:json{ok=true}
+      end
+      tracep(false,0,err)
+      cmd:json{ok=false,err=err}
    end,
    lsPlugins=function(cmd) cmd:json(lsPlugins"js") end,
    getPlugin=function(cmd,d)
