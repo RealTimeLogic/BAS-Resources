@@ -3,7 +3,8 @@ require"wfs" -- Install function ba.create.wfs
 local function trim(s) return s:gsub("^%s*(.-)%s*$", "%1") end
 local production=true -- Let's Encrypt
 local sfind,ssub,sbyte,sfmt=string.find,string.sub,string.byte,string.format
-local dtraceback=debug.traceback
+local tinsert=table.insert
+local dtraceback=debug and debug.traceback or function(e) return e end
 local jencode,jdecode=ba.json.encode,ba.json.decode
 local startAcmeDns -- func
 local xedgeEvent -- = _XedgeEvent
@@ -12,20 +13,77 @@ local openid -- Single Sign On settings, a table used by the ms-sso module, set 
 local authRealm="Xedge"
 local ios=ba.io()
 local nodisk=false -- if no DiskIo
-local errorh -- func
-ios.vm=nil
-do -- Remove virtual disks from windows to prevent DAV lock if url=localhost
-   local t={}
-   for name,io in pairs(ios) do
-      local xio
-      local type,plat=io:resourcetype()
-      if "windows" == plat and not io:realpath"" then
-	 xio=ba.mkio(io,"/c/")
-      end
-      t[name]=xio or io
+local errorh,loadPlugins -- funcs
+local confKey -- xedge.conf AES key
+
+local tpm
+tpm=function(pmkey)
+   local keys={}
+   local createkey,createcsr,sharkcert=ba.create.key,ba.create.csr,ba.create.sharkcert
+   local PBKDF2,keyparams=ba.crypto.PBKDF2,ba.crypto.keyparams
+   local jwtsign=require"jwt".sign
+
+   local function tpmGetKey(kname)
+      local key=keys[kname]
+      if not key then error(sfmt("ECC key %s not found",tostring(kname)), 3) end
+      return key
    end
-   ios=t
-end
+
+   local function tpmJwtsign(kname,...)
+      return jwtsign(tpmGetKey(kname),...)
+   end
+
+   local function tpmKeyparams(kname)
+      return keyparams(tpmGetKey(kname))
+   end
+
+   local function tpmCreatecsr(kname,...)
+      return createcsr(tpmGetKey(kname),...)
+   end
+
+   local function tpmCreatekey(kname,op)
+      if keys[kname] then error(sfmt("ECC key %s exists",kname),2) end
+      op = op or {}
+      if op.key and op.key ~= "ecc" then error("TPM can only create ECC keys",2) end
+      local newOp={}
+      for k,v in pairs(op) do newOp[k]=v end
+      newOp.rnd=PBKDF2("sha512", kname, pmkey, 5, 1024)
+      local key=createkey(newOp)
+      keys[kname]=key
+      return true
+   end
+
+   local function tpmHaskey(kname)
+      return keys[kname] and true or false
+   end
+
+   local function tpmSharkcert(kname,certdata)
+      return sharkcert(certdata,tpmGetKey(kname))
+   end
+
+   require"acme/engine".setTPM{
+      jwtsign=tpmJwtsign,
+      keyparams=tpmKeyparams,
+      createcsr=tpmCreatecsr,
+      createkey=tpmCreatekey,
+      haskey=tpmHaskey
+   }
+   tpm=function() return -- Create cert for .config
+      function(op,certdata)
+	 local n=op.keyname
+	 if not tpmHaskey(n) then tpmCreatekey(n,op) end
+	 return tpmSharkcert(n,certdata)
+      end
+   end
+   local t={}
+   function t.haskey(k) return tpmHaskey("#"..k) end
+   function t.createkey(k,...) return tpmCreatekey("#"..k,...) end
+   function t.createcsr(k,...) return tpmCreatecsr("#"..k,...) end
+   function t.jwtsign(k,...) return tpmJwtsign("#"..k,...) end
+   function t.keyparams(k,...) return tpmKeyparams("#"..k,...) end
+   function t.sharkcert(k,...) return tpmSharkcert("#"..k,...) end
+   ba.tpm=t
+end --- End tpm
 
 local function log(fmt,...)
    local msg=sfmt("Xedge: "..fmt, ...)
@@ -44,37 +102,8 @@ local G=_G
 G.xedge=xedge
 local apps=xedge.apps
 local appsCfg=xedge.cfg.apps
-local userdb=xedge.cfg.userdb
-
-function xedge.file(io,name,data)
-   local fp,ret,err
-   if data then
-      fp,err=io:open(name,"w")
-      if fp then ret,err = fp:write(data) end
-   else
-      fp,err=io:open(name)
-      if fp then ret=fp:read"*a" end
-   end
-   if fp then fp:close() end
-   return ret,err
-end
-local file=xedge.file
-function xedge.json(io,name,tab)
-   if tab then
-      return file(io,name,jencode(tab))
-   end
-   local ret,err=file(io,name)
-   if ret then
-      -- If: includes UTF-8 BOM.
-      if sbyte(ret,1) == 0xEF and sbyte(ret,2) == 0xBB and sbyte(ret,3) == 0xBF then
-	 ret=ret:sub(4)
-      end
-      ret=jdecode(ret)
-      if not ret then err="jsonerr" end
-   end
-   return ret,err
-end
--- Must be after the above xedge.json
+local userdb={}
+local rw=require"rwfile"
 pcall(function() xedge.portal=require"acme/dns".token().info() end)
 
 local fakeTime=(function()
@@ -87,7 +116,7 @@ end)()
 local ioStat={mtime=fakeTime(),size=0,isdir=true}
 
 -- A recursive directory iterator
-function recDirIter(io,curPath)
+local function recDirIter(io,curPath)
    local name
    local co
    local doDir
@@ -165,6 +194,23 @@ local function sendmail(m,s)
    return ok,err
 end
 
+-- Returns a list of all plugin names, if any
+local function lsPlugins(ext)
+   local rsp={}
+   local io=xedge.aio
+   local d=".lua/XedgePlugins"
+   if io:stat(d) then
+      for n in io:files(d) do
+	 if n:find("%."..ext.."$") then
+	    n=sfmt("%s/%s",d,n)
+	    tinsert(rsp,n)
+	 end
+      end
+   end
+   return rsp
+end
+
+
 local elogInit --Func below called once by xedge.init
 do -- elog
    local tlConnected=false
@@ -200,15 +246,11 @@ do -- elog
    end
 
    function xedge.elog(op,fmt,...)
-      if "table" ~= type(op) then
-	 fmt=op
-	 op={}
-      end
       local cfg=xedge.cfg.elog
       if cfg.enablelog and cfg.smtp and not tlConnected then
 	 local msg=sfmt(fmt, ...)
 	 if op.ts then msg = os.date("%H:%M: ",os.time())..msg end
-	 table.insert(msglist,msg)
+	 tinsert(msglist,msg)
 	 msize=msize+#msg
 	 if op.flush then
 	    setTimer(op,30000)
@@ -276,7 +318,9 @@ do
       return ev:on(event,cb)
    end
    --Must be called by C code
-   function _XedgeEvent(event,...) ev:emit(event,...) end
+   function _XedgeEvent(event,...)
+      ev:emit({name=event,retain = true},...)
+   end
    xedgeEvent=_XedgeEvent
 end
 
@@ -393,7 +437,7 @@ local function terminateApp(name, nosave)
    if not nosave then xedge.saveCfg() end
 end
 
-local function manageApp(name) -- start/stop/restart
+local function manageApp(name,isStartup) -- start/stop/restart
    local err
    local appc=appsCfg[name]
    assert(appc)
@@ -409,7 +453,7 @@ local function manageApp(name) -- start/stop/restart
    env.app=env
    local app={io=io,env=env,envs={}}
    apps[name]=app
-   if appc.running and not err then
+   if appc.running and (false ~= appc.autostart or not isStartup) and not err then
       if appc.dirname then
 	 local dn=trim(appc.dirname)
 	 local dir=ba.create.resrdr(#dn > 1 and dn or nil,appc.priority or 0,io)
@@ -435,6 +479,8 @@ local function manageApp(name) -- start/stop/restart
 	 end
 	 
       end
+   else
+      appc.running=false
    end
 end
 
@@ -458,7 +504,7 @@ end
 
 local function newOrUpdateApp(cfg,cfgIx,fn,ion) -- On new/update cfg file
    local url=ssub(fn,1, cfgIx-1)
-   local nc={name=cfg.name,url=cfg.url,running=cfg.running or false,dirname=cfg.dirname}
+   local nc={name=cfg.name,url=cfg.url,running=cfg.running or false,autostart=cfg.autostart,dirname=cfg.dirname}
    if cfg.dirname then nc.priority=cfg.priority or 0 end
    if not nc.url then nc.url=url end
    if appsCfg[ion] then -- update
@@ -565,6 +611,7 @@ local function files(fn)
    local function read()
       if not fname or cfg then return false end
       fname, isdir, mtime, size=iter()
+      if ".appcfg" == fname then fname, isdir, mtime, size=iter() end
       if not fname then
 	 if not pn and appsCfg[ion] then
 	    cfg=getJsonAppCfg(ion)
@@ -584,12 +631,10 @@ local function stat(fn)
    if 0 == #fn or "." == fn then return ioStat end
    local io,ion,pn=fn2info(fn)
    if not pn then return ioStat end
-   local ret,err=io:stat(pn)
-   if not ret then
-      if fn:find"%.appcfg$" then
-	 return {mtime=fakeTime(),size=#getJsonAppCfg(ion),isdir=false}
-      end
+   if fn:find"%.appcfg$" then
+      return {mtime=fakeTime(),size=#getJsonAppCfg(ion),isdir=false}
    end
+   local ret,err=io:stat(pn)
    return ret,err
 end
  
@@ -654,7 +699,7 @@ startAcmeDns=function(warn)
 end
 
 local installAuth -- function is: installOrSetAuth() or setdb()
-function installOrSetAuth()
+local function installOrSetAuth()
    if not next(userdb) and not xedge.sso then return end
    local ju=ba.create.jsonuser()
    local function setdb()
@@ -663,7 +708,7 @@ function installOrSetAuth()
 	 if ju:set(userdb) then return true end
 	 log"Invalid user database. Authenticator not installed"
 	 userdb={} -- reset
-	 xedge.cfg.userdb=userdb
+	 xedge.cfg.userdb=tab2EncodedStr(userdb)
       elseif not xedge.sso then
 	 xedge.prd:unlink()
 	 if xedge.tldir then xedge.tldir:setauth() end
@@ -699,42 +744,46 @@ installAuth=installOrSetAuth
 --Used by /rtl/login/
 function xedge.hasUserDb() return next(userdb) and true or false end
 
+local function sendCfgCorrupt(err)
+   sendErr("configuration file corrupt (%s)!",err)
+end
+
+local function encodedStr2Tab(str,field)
+   if "string" == type(str) then
+      local t=jdecode(ba.aesdecode(confKey,str) or "")
+      if t then return t end
+      sendCfgCorrupt(field)
+   end
+   return {}
+end
+
+local function tab2EncodedStr(tab)
+   return ba.aesencode(confKey,jencode(tab))
+end
 
 local function init(cfg)
    -- Load apps from the Xedge conf. file.
    local ok,err=pcall(function()
       if cfg.userdb then
-	 for name,data in pairs(cfg.userdb) do userdb[name]=data end
+	 for name,data in pairs(encodedStr2Tab(cfg.userdb,"userdb")) do userdb[name]=data end
+	 xedge.cfg.userdb=cfg.userdb
       end
       for name,appc in pairs(cfg.apps) do
 	 appc.name=name
 	 appsCfg[name]=appc
-	 manageApp(name)
+	 manageApp(name,true)
       end
    end)
    if not ok then
-      sendErr("configuration file corrupt (%s)!",err)
+      sendCfgCorrupt(err)
       errorh(err)
-      return false
    end
-   return true
+   return tpm()
 end
 
-local k
-if ba.encryptionkey then
-   k=ba.encryptionkey()
-   ba.encryptionkey=nil
-else
-   k="438fccj39dewe8vc"
-end
-k=ba.crypto.hash("sha256")(k)(true)
-function encodedStr2Tab(str)
-   return jdecode(ba.aesdecode(k,str or "") or "") or {}
-end
-
-function openidDec() -- Decode encoded SSO JSON settings
+local function openidDec() -- Decode encoded SSO JSON settings
    xedge.sso=nil
-   openid=encodedStr2Tab(xedge.cfg.openid)
+   openid=encodedStr2Tab(xedge.cfg.openid,"openid")
    pcall(function()
       xedge.sso=require"ms-sso".init(openid)
    end)
@@ -742,6 +791,18 @@ end
 
 function xedge.init(cfg,aio,rtld) -- cfg from Xedge config file
    local err
+   ios=ba.io()
+   ios.vm=nil
+   -- Remove virtual disks from windows to prevent DAV lock if url=localhost
+   local t={}
+   for name,io in pairs(ios) do
+      local xio
+      local type,plat=io:resourcetype()
+      if "windows" == plat and not io:realpath"" then xio=ba.mkio(io,"/c/") end
+      t[name]=xio or io
+   end
+   ios=t
+
    -- rtld set if mako
    local resrdr=ba.create.resrdr(not rtld and "rtl" or nil,0,aio)
    resrdr:lspfilter{io=aio}
@@ -756,7 +817,7 @@ function xedge.init(cfg,aio,rtld) -- cfg from Xedge config file
    xedge.cfg.smtp=cfg.smtp
    xedge.cfg.openid=cfg.openid
    if "table" == type(cfg.elog) then  xedge.cfg.elog=cfg.elog end
-   smtp=encodedStr2Tab(xedge.cfg.smtp)
+   smtp=encodedStr2Tab(xedge.cfg.smtp,"smtp")
    openidDec()
    if xedge.tldir then rtld:insert(xedge.tldir,true) elogInit() end
    local lockDir -- Scan and look for writable DAV lock dir.
@@ -783,14 +844,17 @@ function xedge.init(cfg,aio,rtld) -- cfg from Xedge config file
    end)
    dir:insert()
    xedge.dir404=dir
+   local tpmSharkcert
    if xedge.saveCfg then
-      init(cfg)
+      tpmSharkcert=init(cfg)
       installAuth()
       startAcmeDns()
    else -- No DiskIo
       nodisk=true
       function xedge.saveCfg() end
    end
+   loadPlugins()
+   return tpmSharkcert
 end
 
 --   isreg=function(cmd,data) adns.isreg(function() cmd:json{ok=true, isreg=adns.isreg} end) end,
@@ -817,7 +881,7 @@ local acmeCmd={
    auto=function(cmd,data)
       xedge.cfg.revcon = xedge.cfg.revcon or false -- not nil
       local revcon = "true" == data.revcon and true or false
-      local op={revcon=revcon,rsa=true,acceptterms=true,production=production}
+      local op={revcon=revcon,acceptterms=true,production=production}
       if data.email and data.name then
 	 xedge.cfg.revcon=revcon
 	 xedge.saveCfg()
@@ -840,7 +904,7 @@ end
 -- Table 2 String. Designed for comparing two tables as strings.
 local function t2s(t)
    local a={}
-   for k,v in pairs(t or {}) do table.insert(a,k) table.insert(a,v) end
+   for k,v in pairs(t or {}) do tinsert(a,k) tinsert(a,v) end
    table.sort(a)
    return table.concat(a)
 end
@@ -870,7 +934,7 @@ local commands={
       local ios=ba.io()
       ios.vm=nil
       local t={}
-      for name in pairs(ios) do table.insert(t, name) end
+      for name in pairs(ios) do tinsert(t, name) end
       cmd:json{ok=true,ios=t,nodisk=nodisk}
    end,
    getappsstat=function(cmd)
@@ -887,6 +951,7 @@ local commands={
       local fp <close> = xedge.aio:open".lua/intro.html"
       cmd:json{ok=true,intro=fp:read"*a"}
    end,
+   getmac=function(cmd) cmd:json{ok=false} end, -- Overload in plugin
    gettemplate=function(cmd,data)
       local fp <close> =xedge.aio:open("templates/template.".. (data.ext or ""))
       cmd:json{ok=true,data=fp and fp:read"*a" or "\n"}
@@ -899,6 +964,7 @@ local commands={
 	 else
 	    userdb[data.name]=nil -- delete
 	 end
+	 xedge.cfg.userdb=tab2EncodedStr(userdb)
 	 xedge.saveCfg()
 	 installAuth()
 	 cmd:json{ok=true}
@@ -913,7 +979,7 @@ local commands={
 	 if cfg and cfg.running and cfg.dirname then
 	    cmd:json{ok=true,url= #cfg.dirname > 0 and sfmt("/%s/%s",cfg.dirname,pn) or "/"..pn}
 	 end
-	 local emsg= cfg and (cfg.running and "Not an LSP app" or "App not running") or "App not found"
+	 local emsg= cfg and (cfg.running and "'LSP App' not enabled" or "App not running") or "App not found"
 	 cmd:json{err=emsg}
       end
    end,
@@ -957,8 +1023,8 @@ local commands={
 	    end
 	    if rsp.ok then
 	       log(settingsOK and "SMTP settings OK" or "Disabling SMTP")
-	       xedge.cfg.smtp=ba.aesencode(k,jencode(d))
-	       smtp=encodedStr2Tab(xedge.cfg.smtp)
+	       xedge.cfg.smtp=tab2EncodedStr(d)
+	       smtp=encodedStr2Tab(xedge.cfg.smtp,"smtp")
 	       if settingsOK then
 		  ecfg.smtp=true
 	       else
@@ -983,13 +1049,13 @@ local commands={
 	 if old ~= new or not openid then
 	    if d.tenant and d.client_id and d.client_secret then
 	       if #d.tenant > 20 and #d.client_id > 20 and #d.client_secret > 10 then
-		  xedge.cfg.openid=ba.aesencode(k,jencode(d))
+		  xedge.cfg.openid=tab2EncodedStr(d)
 		  xedge.saveCfg()
 		  openidDec()
 		  installAuth()
 	       elseif #d.client_secret==0 then
 		  d.client_secret=nil
-		  xedge.cfg.openid=ba.aesencode(k,jencode(d))
+		  xedge.cfg.openid=tab2EncodedStr(d)
 		  openidDec()
 		  xedge.saveCfg()
 		  installAuth()
@@ -1015,6 +1081,29 @@ local commands={
 	 cmd:json{ok=true}
       end
    end,
+   execLua=function(cmd,d)
+      local f,err = load(d.code or "","LuaShell","t",G)
+      if f then
+	 ba.thread.run(function()
+	    local ok,err=xpcall(f,errh)
+	    if not ok then tracep(false,0,err) end
+	 end)
+	 cmd:json{ok=true}
+      end
+      tracep(false,0,err)
+      cmd:json{ok=false,err=err}
+   end,
+   lsPlugins=function(cmd) cmd:json(lsPlugins"js") end,
+   getPlugin=function(cmd,d)
+      local n=d.name
+      local f=n and n:find("%.js$") and rw.file(xedge.aio,n)
+      if f then
+	 cmd:write(f)
+      else
+	 cmd:senderror(404)
+      end
+      cmd:abort()
+   end
 }
 
 -- Used by command.lsp
@@ -1022,11 +1111,47 @@ function xedge.command(cmd)
    local data = cmd:data()
    local f=commands[data.cmd]
    if f then f(cmd,data) end
-   cmd:json{err=sfmt("Unknown command '%s'",data.cmd or "?")}
+   local err=sfmt("Unknown command '%s'",data.cmd or "?")
+   sendErr("%s",err)
+   cmd:json{err=err}
 end
 
 function xedge.onunload()
    for name,cfg in pairs(appsCfg) do
       if(cfg.running) then stopApp(name) end
+   end
+end
+
+loadPlugins=function()
+   local xf=rw.file
+   for _,n in ipairs(lsPlugins"lua") do
+      local ok
+      local f,e=load(xf(xedge.aio,n),n,"bt",_ENV)
+      if f then ok,e=pcall(f,commands) end
+      if not ok then sendErr("Plugin error: %s",e) end
+   end
+end
+
+do
+   local klist={}
+   local tins=table.insert
+   return function(k)
+      local pmkey
+      if not k then
+	 -- Mako Server: use dummy key.
+	 k="438fccj39dewe8vc"
+	 pmkey=ba.crypto.hash("sha512")(k)(true)
+      elseif true == k then -- done feeding keys
+	 local hf=ba.crypto.hash("sha512")
+	 for _,k in ipairs(klist) do hf(k) end
+	 pmkey=hf(true)
+      else
+	 tins(klist,k)
+      end
+       -- Base it on the first fixed key so xedge.conf can be transferred between devices.
+      if not confKey then
+	 confKey=ba.crypto.PBKDF2("sha256", "xedge.conf", k, 5, 256)
+      end
+      if pmkey then tpm(pmkey) end
    end
 end

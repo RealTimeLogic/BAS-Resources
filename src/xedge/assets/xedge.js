@@ -10,7 +10,10 @@ function log() {
     trLog(Array.from(arguments).join(' '));
 };
 
-function logErr() {
+function logR(nosound) {
+    trLogErr(Array.from(arguments).join(' '));
+};
+function logErr(nosound) {
     play("#sound-error");
     trLogErr(Array.from(arguments).join(' '));
 };
@@ -18,7 +21,6 @@ function logErr() {
 function alertErr() {
     const e=Array.from(arguments).join(' ');
     logErr(e,"\n");
-    alert(e);
 };
 
 function strMatch(str,pat) {
@@ -38,7 +40,7 @@ function getFileExt(n){
 let loader;
 let afterLogin; // Function set when creating loader obj.
 function login() {afterLogin();}; //called by /rtl/login/index.lsp
-function authenticate() {loader.login();} // Called by TraceLogger
+function authenticate() {loader.login();} //Called by TraceLogger
 
 //Simple $.ajax JSON wrapper
 function jsonReq(settings,cb,emsg) {
@@ -103,7 +105,7 @@ function diaHide() {
    olist: output list, where key is element ID and value is the element
    pe: Optional parent element
 */
-function mkForm(list,olist,pe) {
+function mkForm(list,olist,pe,insrt) {
     if(!pe) pe=$("<div>",{class:"form"});
     list.forEach(o => {
 	if(undefined != o.html) { // Non form element
@@ -113,6 +115,7 @@ function mkForm(list,olist,pe) {
 	    else
 		el.html(o.html);
 	    pe.append(el);
+	    if(insrt) olist[o.id]=el;
 	    return;
 	}
 	if("radio" == o.type) {
@@ -164,6 +167,14 @@ const appFormObj = [
 	label: "AppCfgRunning",
 	name: "Running",
 	description: "Turn app on or off",
+    },
+    {
+	el:"input",
+	type: "checkbox",
+	class:"switch",
+	label: "AppCfgAutostart",
+	name: "Auto Start",
+	description: "Automatically launch the application upon system startup; keep it off during development",
     },
     {
 	el: "input",
@@ -238,6 +249,7 @@ function appCfg(pn,cfg,isNewNet) {
 	if(cfg.err)
 	    logErr(`App ${pn} is not configured correctly:\n`,cfg.err);
 	elems.AppCfgRunning.prop("checked", cfg.running);
+	elems.AppCfgAutostart.prop("checked", cfg.autostart);
 	elems.AppCfgName.val(cfg.name);
 	elems.AppCfgURL.val(cfg.url);
 	if(undefined !== cfg.dirname) {
@@ -263,7 +275,8 @@ function appCfg(pn,cfg,isNewNet) {
 	let ncfg={
 	    name:elems.AppCfgName.val().trim(),
 	    url:elems.AppCfgURL.val().trim(),
-	    running:elems.AppCfgRunning.prop("checked")
+	    running:elems.AppCfgRunning.prop("checked"),
+	    autostart:elems.AppCfgAutostart.prop("checked")
 	};
 	if(elems.AppCfgLspApp.prop("checked")) {
 	    ncfg.dirname=elems.AppCfgDirName.val().trim();
@@ -329,7 +342,8 @@ function closeEditor(editorId) {
     delete editors[editorId];
     if(lastEditorId == editorId) lastEditorId=false;
 };
-// Set editor was changed and add class to tab to display what it was changed
+
+// Set editor was changed: add class to tab to indicate it was changed.
 function setMod(editorId,mod=true) {
     editors[editorId]=mod;
     if (mod) $(`[data-target="${editorId}"]`).addClass('modified'); else $(`[data-target="${editorId}"]`).removeClass('modified');
@@ -343,7 +357,7 @@ function setMod(editorId,mod=true) {
    savecb: Optional save callback(data,cb), where data is what to save
 	   and cb is a callback that must be called when file is saved
 	   with the value cb(true) ok, or cb(false) failed.
-  newElem: Set if value is null. This must be a DOM element. Used when
+  newElem: Set if 'value' is null. This must be a DOM element. Used when
 	   building form data in an editor frame. See function
 	   appCfg() for how this can be used.
 */
@@ -361,17 +375,17 @@ function createEditor(pn,value,savecb,newElem) {
     lastEditorId=editorId;
     let tabBtn = $('<button>', {class: 'tabbtn','data-target': editorId,text: pn.match(/[^/]+$/)[0]});
     tabBtn.click((e)=>{
-			if(lastEditorId==editorId) lastEditorId=false; 
-			$(e.target).addClass('pined'); 
-			setActiveEditor(editorId);
-		});
+	if(lastEditorId==editorId) lastEditorId=false; 
+	$(e.target).addClass('pined'); 
+	setActiveEditor(editorId);
+    });
     let closeBtn=$('<span>',{class:'closebtn',text:'X'}).appendTo(tabBtn);
     closeBtn.click(()=>{
-			if(editors[editorId]) {
-				var shouldClose = confirm('The file has unsaved changes. Are you sure you want to close the tab?');
-				if (!shouldClose) return;
-			}
-			closeEditor(editorId);
+	if(editors[editorId]) {
+	    var shouldClose = confirm('The file has unsaved changes. Are you sure you want to close the tab?');
+	    if (!shouldClose) return;
+	}
+	closeEditor(editorId);
     });
     let editorContainer = $('<div>', {class: 'editorcontainer',id: editorId});
     let editorButtons = $('<div>', {class:'editor-buttons', id: editorId+'-buttonsdiv'});
@@ -379,22 +393,23 @@ function createEditor(pn,value,savecb,newElem) {
 	sendCmd("pn2info", (rsp) => {
 	    let addSaveBut=true;
 	    if(rsp.running) {
-		if('xlua' == getFileExt(pn)) {
+		const ext=getFileExt(pn);
+		if('xlua' == ext) {
 		    addSaveBut=false;
 		    editorButtons.append($('<button>', { html: 'Save &amp; Run', type: 'submit'}).click(()=>saveData()));
 		}
-		else {
-		    if('lsp' == getFileExt(pn)) {
-			editorButtons.append($('<button>', { html: 'Open', type: 'submit'}).click( () => {
-			    sendCmd("pn2url", (rsp) => {if(rsp.ok) window.open(rsp.url,'lsp');}, {fn:pn});
-			}));
-		    }
+		else if('lsp' == ext || 'htm' == ext || 'html' == ext) {
+		    editorButtons.append($('<button>', { html: 'Open', type: 'submit'}).click( () => {
+			sendCmd("pn2url", (rsp) => {if(rsp.ok) window.open(rsp.url,'lsp');}, {fn:pn});
+		    }));
 		}
 	    }
 	    if(addSaveBut)
 		editorButtons.append($('<button>', { html: 'Save', type: 'submit'}).click(()=>saveData()));
 	}, {fn:pn});
     }
+    else if(savecb)
+	editorButtons.append($('<button>', { html: 'Run', type: 'submit'}).click(()=>saveData()));
     $('#tabheader').append(tabBtn);
     $('#editors').append(editorContainer).append(editorButtons)
     if(newElem) editorContainer.html(newElem);
@@ -546,6 +561,7 @@ const okFileExt={
     lua:true,
     lsp:true
 };
+let notOkFileExt={};
 
 // Check if known text file
 function ok2open(pn) {
@@ -567,7 +583,7 @@ function getDirList(path,cb) {
 	if(false != data) {
 	    let list=[];
 	    for(const [ix, st] of Object.entries(data)) {
-		if(st.s < 1) list[ix]={asynced: true, type: Tree.FOLDER, name:st.n}
+		if(st.s < 0) list[ix]={asynced: true, type: Tree.FOLDER, name:st.n}
 		else list[ix]={name:st.n}
 	    }
 	    cb(list);
@@ -740,6 +756,9 @@ function treeCtxMenu(e,node) {
 */
 function openSelFile() {
     const fn=fsBase+selpn;
+    const ext=getFileExt(selpn);
+    if(notOkFileExt[ext]) return;
+    notOkFileExt[ext]=true;
     function err(xhr, stat, e){
 	if("Unauthorized"==e)
 	    loader.login(openSelFile);
@@ -754,7 +773,7 @@ function openSelFile() {
 		if( !(mt && /^text\//.test(mt) || ok2open(selpn)) ) {
 		    if(!confirm("You can only open text files. Are you sure you want to open this file?"))
 			return;
-		    okFileExt[getFileExt(selpn)]=true;
+		    okFileExt[ext]=true;
 		}
 		$.get(fsBase+selpn).done((data)=>{
 		    if(selpn.match(/\/\.appcfg$/))
@@ -765,6 +784,7 @@ function openSelFile() {
 	    }
 	    else
 		alertErr("File too big");
+	    notOkFileExt[ext]=undefined;
 	},
 	error: err
     });
@@ -1202,8 +1222,13 @@ const emailFormObj = [
 /* Builds and displays the configuration option's context menu when the
    user clicks on the 3-dot icon.
 */
+let ideCfgCB=[]; //CB added by plugins
 function ideCfg(e) {
     const mlist = $('<ul>');
+    mlist.append($('<li>').text("Lua Shell").on("click",()=>{
+	diaHide();
+	createEditor("LuaShell","",(data,cb)=>sendCmd("execLua", cb, {code:data}));
+    }));
     if( ! nodisk ) {
 	mlist.append($('<li>').text("Authentication").on("click",()=>{
 	    diaHide();
@@ -1256,6 +1281,13 @@ function ideCfg(e) {
 		}
 		let elems={};
 		let editorId=createEditor(" Certificate",null,null,mkForm(certificateFormObj,elems));
+		if(! rsp.isreg ) {
+		    sendCmd("getmac",(rsp)=>{
+			if(rsp.ok) {
+			    elems.SetCertName.val(rsp.mac.slice(-6))
+			}
+		    });
+		}
 		elems.SetCertIp.val(rsp.sockname);
 		elems.SetCertWan.val(rsp.wan);
 		elems.SetCertPortal.val(rsp.portal);
@@ -1268,7 +1300,7 @@ function ideCfg(e) {
 		    email=elems.SetCertEmail.val().trim();
 		    name=elems.SetCertName.val().trim();
 		    if(/^\w+([\.-]?\w+)*@\w+([\.-]?\w+)*(\.\w{2,3})+$/.test(email) &&
-		       name.length > 2 && /^[a-zA-Z][a-zA-Z0-9]*$/.test(name))
+		       name.length > 2 && /^[a-zA-Z0-9]+$/.test(name))
 			return true;
 		    alertErr("Invalid settings");
 		    return false;
@@ -1302,50 +1334,50 @@ function ideCfg(e) {
 		}
 	    });
 	}));
+	mlist.append($('<li>').text("SMTP Server").on("click",()=>{
+	    let elems={};
+	    let editorId=createEditor(" SMTP Server",null,null,mkForm(emailFormObj,elems));
+	    sendCmd("smtp",(rsp)=>{
+		function x(s,v) {return s ? s : ""};
+		elems.EmailEmail.val(x(rsp.email));
+		elems.EmailServer.val(x(rsp.server));
+		elems.EmailServerPort.val(x(rsp.port));
+		elems.EmailUsername.val(x(rsp.user));
+		elems.EmailPassword.val(x(rsp.password));
+		if(rsp.connsec)
+		    $(`input[name="EmailConnsec"][value="${rsp.connsec}"]`).prop('checked', true);
+		elems.EmailSubject.val(x(rsp.subject));
+		elems.EmailMaxBuf.val(x(rsp.maxbuf));
+		elems.EmailMaxTime.val(x(rsp.maxtime));
+		elems.EmailEnableLog.prop("checked", rsp.enablelog);
+	    });
+	    elems.EmailSave.click(()=>{
+		let d={
+		    email:elems.EmailEmail.val().trim(),
+		    server:elems.EmailServer.val().trim(),
+		    port:elems.EmailServerPort.val().trim(),
+		    user:elems.EmailUsername.val().trim(),
+		    password:elems.EmailPassword.val().trim(),
+		    connsec:$('input[name="EmailConnsec"]:checked').val()
+		};
+		sendCmd("smtp",(rsp)=>{if(rsp) closeEditor(editorId);},d);
+	    });
+	    elems.EmailEnableLog.click(()=>{
+		let d={
+		    enablelog:elems.EmailEnableLog.prop("checked"),
+		    subject:elems.EmailSubject.val(),
+		    maxbuf:elems.EmailMaxBuf.val(),
+		    maxtime:elems.EmailMaxTime.val()
+		}
+		sendCmd("elog",()=>{}, d);
+	    });
+	}));
     }
-    mlist.append($('<li>').text("SMTP Server").on("click",()=>{
-	let elems={};
-	let editorId=createEditor(" SMTP Server",null,null,mkForm(emailFormObj,elems));
-	sendCmd("smtp",(rsp)=>{
-	    function x(s,v) {return s ? s : ""};
-	    elems.EmailEmail.val(x(rsp.email));
-	    elems.EmailServer.val(x(rsp.server));
-	    elems.EmailServerPort.val(x(rsp.port));
-	    elems.EmailUsername.val(x(rsp.user));
-	    elems.EmailPassword.val(x(rsp.password));
-	    if(rsp.connsec)
-		$(`input[name="EmailConnsec"][value="${rsp.connsec}"]`).prop('checked', true);
-	    elems.EmailSubject.val(x(rsp.subject));
-	    elems.EmailMaxBuf.val(x(rsp.maxbuf));
-	    elems.EmailMaxTime.val(x(rsp.maxtime));
-	    elems.EmailEnableLog.prop("checked", rsp.enablelog);
-	});
-	elems.EmailSave.click(()=>{
-	    let d={
-		email:elems.EmailEmail.val().trim(),
-		server:elems.EmailServer.val().trim(),
-		port:elems.EmailServerPort.val().trim(),
-		user:elems.EmailUsername.val().trim(),
-		password:elems.EmailPassword.val().trim(),
-		connsec:$('input[name="EmailConnsec"]:checked').val()
-	    };
-	    sendCmd("smtp",(rsp)=>{if(rsp) closeEditor(editorId);},d);
-	});
-	elems.EmailEnableLog.click(()=>{
-	    let d={
-		enablelog:elems.EmailEnableLog.prop("checked"),
-		subject:elems.EmailSubject.val(),
-		maxbuf:elems.EmailMaxBuf.val(),
-		maxtime:elems.EmailMaxTime.val()
-	    }
-	    sendCmd("elog",()=>{}, d);
-	});
-    }));
-
     mlist.append($('<li>').text("Xedge Documentation").on("click",()=>{
 	diaHide();
 	window.open('https://realtimelogic.com/ba/doc/?url=Xedge.html', '_blank')
     }));
+    ideCfgCB.forEach((cb) => cb(mlist,nodisk));
     diaShow(e).html(mlist);
 };
 
@@ -1404,6 +1436,10 @@ $( window ).on( "load",()=> {
 	//Continue initialization after possible login.
 	inittree();
 	startTL(); // tracelogger can now establish websocket connection.
+	sendCmd("lsPlugins",(rsp)=>{
+	    for(let i = 0; i < rsp.length; i++)
+		$.getScript("private/command.lsp?cmd=getPlugin&name="+encodeURIComponent(rsp[i]));
+	});
 	$("#IdeCfg").click(ideCfg);
     }, data);
     $( window ).on("beforeunload",function(e) {
@@ -1418,3 +1454,11 @@ $( window ).on( "load",()=> {
 	}
     });
 });
+
+function onreconnect() { //Called by TraceLogger
+    sendCmd("getionames",(rsp)=>{
+	ios={}
+	rsp.ios.forEach((name)=>ios[name]=true);
+	inittree();
+    });
+};

@@ -92,6 +92,7 @@ local function renew(accountT,domain,accepted)
    end
    -- if previously accepted
    if accepted then optionT.acceptterms=true end
+   optionT.privkey=getCert(domain)
    acme.cert(accountT,domain,rspCB,optionT)
 end
 
@@ -112,7 +113,7 @@ loadcerts=function(domainsT)
 	    table.insert(certs,c)
 	 else
 	    log.error("%s not found, recreating...",hio:stat(k) and c or k)
-            ba.thread.run(function() renOnNotFund(domain, true) end)
+	    ba.thread.run(function() renOnNotFund(domain, true) end)
 	 end
       end
    end
@@ -127,7 +128,7 @@ loadcertsOnce=function(domainsT) loadcertsOnce=function() end loadcerts(domainsT
 local function check(forceUpdate)
    if acme.jobs() > 0 then
       log.info("Cannot check certs: acme busy")
-      return false
+      return true
    end
    local domainsT=jfile"domains"
    local accountT=jfile"account"
@@ -138,7 +139,7 @@ local function check(forceUpdate)
    end
    for domain,exptime in pairs(domainsT) do
       if forceUpdate or (renewAllowed(domain) and time2renew(exptime)) then
-         renew(accountT,domain,#exptime > 0)
+	 renew(accountT,domain,#exptime > 0)
       end
    end
    return true
@@ -148,8 +149,8 @@ local function configure(email,domains,op)
    optionT=getproxy(op or {})
    assert((not email or type(email)=='string') and
 	  (not domains or ((type(domains)=='table' and
-           type(domains[1])=='string'))),
-          "Invalid args or 'acme' table")
+	   type(domains[1])=='string'))),
+	  "Invalid args or 'acme' table")
    optionT.renewed=optionT.renewed or function() end
    local accountT=jfile"account" or {}
    if email and accountT.email ~= email then
@@ -165,11 +166,11 @@ local function configure(email,domains,op)
    local oldDomsT=jfile"domains" or {}
    if optionT.cleanup then
       for dn in pairs(oldDomsT) do
-         if not newDomsT[dn] then
-            local k,c=getKeyCertNames(dn)
-            hio:remove(k)
-            hio:remove(c)
-         end
+	 if not newDomsT[dn] then
+	    local k,c=getKeyCertNames(dn)
+	    hio:remove(k)
+	    hio:remove(c)
+	 end
       end
    end
    if not optionT.noDomCopy then -- Set by acmedns : auto update
@@ -185,13 +186,12 @@ local function systemDateOK()
    local time=os.time()
    if time < ba.parsedate("Mon, "..date:gsub("^(%w+)%s*(%w+)","%2 %1")) then
       if not systemDateChecked then
-         systemDateChecked=true
-         log.error(fmt("'%s' %s",ba.datetime(time),"is in the past. Disabling TLS certificate check!"))
+	 systemDateChecked=true
+	 log.error(fmt("'%s' %s",ba.datetime(time),"is in the past. Disabling TLS certificate check!"))
       end
       acme.checkCert(false)
       return false
    end
-   checkDate=function() end
 end
 
 local timer
@@ -240,14 +240,14 @@ local function getcfg()
 end
 
 -- Called by .config if acme options set
-function cfgFileActivation()
+local function cfgFileActivation()
    local aT,op=getcfg()
    configure(aT.email,aT.domains,op)
    autoupdate(true)
 end
 
 local function account()
-   return jfile"account",jfile"domains"   
+   return jfile"account",jfile"domains"
 end
 
 
@@ -261,10 +261,10 @@ M={
    getemail=function() return (jfile"account" or {}).email end,
    getdomains=function() return jfile"domains" or {} end,
    status=function(clear)
-             local e = status.err
-             if clear then status.err=nil end
-             return acme.jobs(), status.domain, e
-          end,
+	     local e = status.err
+	     if clear then status.err=nil end
+	     return acme.jobs(), status.domain, e
+	  end,
    getCert=getCert,
    getproxy=getproxy,
    priv={ -- private: non documented: used by other acme modules

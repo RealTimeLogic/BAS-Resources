@@ -105,12 +105,12 @@ local function findAndLoadCert(loadCert,certf,keyf)
    if path then
       certf = mkname(path,certf)
       if xio:stat(certf) then
-         cert = loadCert(xio, certf, keyf and mkname(path,keyf))
+         cert,err = loadCert(xio, certf, keyf and mkname(path,keyf))
          if not cert and keyf then certf = keyf end -- For error info below
       end
    end
-   if not cert and not err then
-      err=fmt("%s not found",certf)
+   if not cert then
+      print(fmt("Error: %s not found",certf))
    end
 end
 
