@@ -4,6 +4,8 @@
   "description": "This is npm version of creating mako server and XEdge32 into fresh zip builds",
   "scripts": {
     "build-mako": "gulp build-mako",
+    "minify-mako": "gulp minify-mako",
+    "minify-xedge": "gulp minify-xedge",
     "build-xedge": "gulp build-xedge",
     "t": "gulp clean-xedge"
   },
@@ -14,9 +16,7 @@
     "gulp": "^4.0.2",
     "gulp-clean-css": "^4.3.0",
     "gulp-uglify": "^3.0.2",
-    "gulp-zip": "^5.1.0",
     "plugin-error": "^2.0.1",
-    "rimraf": "^5.0.1",
     "through2": "^4.0.2"
   }
 }

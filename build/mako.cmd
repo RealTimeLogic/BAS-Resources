@@ -39,6 +39,18 @@ if exist "..\..\..\LPeg" (
    echo ..\..\..\LPeg not found; Not Including LPeg
 )
 
+set /p "userResponse=Do you want minify the Lua, js and css files (require node and npm) (y/n)? "
+if /i "%userResponse%"=="y" (
+   where /q npm
+    if ERRORLEVEL 1 (
+        echo npm not found in the path. Skipping minification.
+    ) else (
+      call npm install --silent
+      call npm run minify-mako
+    )
+)
 
+echo Create zip file
 zip -D -q -u -r -9 ../mako.zip .
 cd ..
+echo Done

@@ -58,7 +58,18 @@ if exist "..\..\..\lua-protobuf" (
    echo ..\..\..\lua-protobuf not found; Not Including lua-protobuf and Sparkplug
 )
 
+set /p "userResponse=Do you want minify the Lua, js and css files (require node and npm) (y/n)? "
+if /i "%userResponse%"=="y" (
+   where /q npm
+    if ERRORLEVEL 1 (
+        echo npm not found in the path. Skipping minification.
+    ) else (
+      call npm install --silent
+      call npm run minify-xedge
+    )
+)
 
+echo Create zip file
 zip -D -q -u -r -9 ../Xedge.zip .
 cd ..
 IF NOT DEFINED NO_BIN2C (
@@ -66,3 +77,4 @@ IF NOT DEFINED NO_BIN2C (
    echo Done!
    echo Copy the produced XedgeZip.c resource file to your build directory
 )
+echo Done

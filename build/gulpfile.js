@@ -1,144 +1,59 @@
 const gulp = require('gulp');
 const cleanCSS = require('gulp-clean-css');
 const uglify = require('gulp-uglify');
-const { rimraf } = require('rimraf');
 const luamin = require('./plugins/gulp-luamin');
-const fs = require('fs');
-const zip = require('gulp-zip');
 
-gulp.task('clean-xedge', async function (cb) {
-  await rimraf('./ZipBuild/Readme.md'); 
-  await rimraf('./ZipBuild/.preload'); 
-  await rimraf('./ZipBuild/.gitignore'); 
-  await rimraf('./ZipBuild/.lua/Xedge4Mako.lua');
-  return cb();
-});
-gulp.task('clean', async function (cb) {
-  await rimraf('ZipBuild');
-  return cb();
-});
-
-gulp.task('copy-core', function () {
+gulp.task('mako-minify-css', function () {
   return gulp
-    .src(['../src/core/**/*', '../src/core/.lua/**/*', '../src/core/.certificate/**/*'], { base: '../src/core' })
-    .pipe(gulp.dest('./ZipBuild'));
-});
-
-gulp.task('copy-mako', function () {
-  return gulp
-    .src(['../src/mako/**/*', '../src/mako/.lua/**/*', '../src/mako/.certificate/**/*', '../src/mako/.config'], { base: '../src/mako' })
-    .pipe(gulp.dest('./ZipBuild'));
-});
-
-gulp.task('copy-xedge', function () {
-  return gulp
-    .src(['../src/xedge/**/*', '../src/xedge/.lua/**/*', '../src/xedge/.certificate/**/*', '../src/xedge/.config'], { base: '../src/xedge' })
-    .pipe(gulp.dest('./ZipBuild'));
-});
-
-gulp.task('copy-acme', function () {
-  return gulp
-    .src(['../src/mako/.lua/acme/**/*'], { base: './ZipBuild/.lua/acme' })
-    .pipe(gulp.dest('./ZipBuild'));
-});
-
-gulp.task('copy-opcua', function () {
-  return gulp
-    .src(['../src/opcua/**/*'], { base: '../src/opcua' })
-    .pipe(gulp.dest('./ZipBuild/.lua/opcua'));
-});
-
-
-// Including lua-protobuf and Sparkplug lib
-gulp.task('copy-lua-protobuf', function (cb) {
-  if (fs.existsSync('../../lua-protobuf/protoc.lua') 
-    && fs.existsSync('../../lua-protobuf/serpent.lua')) {
-    return gulp
-      .src(['../../lua-protobuf/protoc.lua', '../../lua-protobuf/serpent.lua'], { base: '../../lua-protobuf' })
-      .pipe(gulp.dest('./ZipBuild/.lua/'))
-      .on('end', function () {
-        return gulp
-          .src(['../src/sparkplug/*'], { base: '../src/sparkplug' })
-          .pipe(gulp.dest('./ZipBuild/.lua'));
-      });
-  }
-  return cb();
-});
-
-gulp.task('copy-lua-lpeg', function (cb) {
-  if (fs.existsSync('../../LPeg/re.lua') ) {
-    return gulp
-      .src(['../../LPeg/re.lua', '../../lua-protobuf/serpent.lua'], { base: '../../LPeg' })
-      .pipe(gulp.dest('./ZipBuild/.lua/'))
-  }
-  return cb();
-});
-
-
-gulp.task('minify-css', function () {
-  return gulp
-    .src(['./ZipBuild/**/*.css', './ZipBuild/.**/*.css'], { base: './ZipBuild' })
+    .src(['./MakoBuild/**/*.css', './MakoBuild/.**/*.css'], { base: './MakoBuild' })
     .pipe(cleanCSS())
-    .pipe(gulp.dest('./ZipBuild'));
+    .pipe(gulp.dest('./MakoBuild'));
 });
 
-gulp.task('minify-js', function () {
+gulp.task('mako-minify-js', function () {
   return gulp
-    .src(['./ZipBuild/**/*.js', './ZipBuild/.**/*.js'], { base: './ZipBuild' })
+    .src(['./MakoBuild/**/*.js', './MakoBuild/.**/*.js'], { base: './MakoBuild' })
     .pipe(uglify())
-    .pipe(gulp.dest('./ZipBuild'));
+    .pipe(gulp.dest('./MakoBuild'));
 });
 
-gulp.task('luamin-folder', function () {
+gulp.task('mako-luamin-folder', function () {
   return gulp
-    .src(['./ZipBuild/**/*.lua', './ZipBuild/.lua/**/*.lua'], { base: './ZipBuild' })
+    .src(['./MakoBuild/**/*.lua', './MakoBuild/.lua/**/*.lua'], { base: './MakoBuild' })
     .pipe(luamin())
-    .pipe(gulp.dest('./ZipBuild'));
+    .pipe(gulp.dest('./MakoBuild'));
 });
 
-gulp.task('zip-mako', function (cb) {
-  rimraf('mako.zip');
+gulp.task('xedge-minify-css', function () {
   return gulp
-    .src(['./ZipBuild/**/*', './ZipBuild/.lua/**/*', './ZipBuild/.certificate/*'], { base: './ZipBuild' })
-    .pipe(zip('mako.zip'))
-    .pipe(gulp.dest('./'));
+    .src(['./XedgeBuild/**/*.css', './XedgeBuild/.**/*.css'], { base: './XedgeBuild' })
+    .pipe(cleanCSS())
+    .pipe(gulp.dest('./XedgeBuild'));
 });
 
-gulp.task('zip-Xedge', function (cb) {
-  rimraf('Xedge.zip');
+gulp.task('xedge-minify-js', function () {
   return gulp
-    .src(['./ZipBuild/**/*', './ZipBuild/.lua/**/*', './ZipBuild/.certificate/*'], { base: './ZipBuild' })
-    .pipe(zip('Xedge.zip'))
-    .pipe(gulp.dest('./'));
+    .src(['./XedgeBuild/**/*.js', './XedgeBuild/.**/*.js'], { base: './XedgeBuild' })
+    .pipe(uglify())
+    .pipe(gulp.dest('./XedgeBuild'));
 });
 
-gulp.task('build-mako', 
+gulp.task('xedge-luamin-folder', function () {
+  return gulp
+    .src(['./XedgeBuild/**/*.lua', './XedgeBuild/.lua/**/*.lua'], { base: './XedgeBuild' })
+    .pipe(luamin())
+    .pipe(gulp.dest('./XedgeBuild'));
+});
+
+gulp.task('minify-mako', 
   gulp.series(
-    'clean',
-    'copy-core',
-    'copy-mako',
-    'copy-opcua',
-    'copy-lua-protobuf',
-    'copy-lua-lpeg',
-    'minify-css',
-    'minify-js',
-    'luamin-folder',
-    'zip-mako',
-    'clean',
+    'mako-minify-css',
+    'mako-minify-js',
+    'mako-luamin-folder',
      ));
-
-gulp.task('build-xedge', 
+gulp.task('minify-xedge', 
   gulp.series(
-    'clean',
-    'copy-core',
-    'copy-xedge',
-    'copy-acme',
-    'copy-opcua',
-    'copy-lua-protobuf',
-    'minify-css',
-    'minify-js',
-    'luamin-folder',
-    'zip-Xedge',
-    'clean-xedge',
-    'clean',
+    'xedge-minify-css',
+    'xedge-minify-js',
+    'xedge-luamin-folder',
      ));
