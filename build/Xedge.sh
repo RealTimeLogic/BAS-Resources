@@ -60,6 +60,43 @@ else
     echo "../../../lua-protobuf not found; Not Including lua-protobuf and Sparkplug"
 fi
 
+read -p "Do you want minify the Lua, js and css files (require node.js and npm) (y/n)?" userResponse
+if [ "$userResponse" = "y" ]; then
+    cd .certificate || exit 1
+    rm cacert.shark || exit 1
+    curl https://letsencrypt.org/certs/isrgrootx1.pem > cacert.pem
+    curl https://letsencrypt.org/certs/isrg-root-x2.pem >> cacert.pem
+    curl https://letsencrypt.org/certs/trustid-x3-root.pem.txt >> cacert.pem
+    curl https://cacerts.digicert.com/DigiCertGlobalRootCA.crt.pem >> cacert.pem
+    curl https://cacerts.digicert.com/DigiCertHighAssuranceEVRootCA.crt.pem >> cacert.pem
+    curl https://cacerts.digicert.com/DigiCertTrustedRootG4.crt.pem >> cacert.pem
+    curl https://www.entrust.com/get-support/ssl-certificate-support/root-certificate-downloads/entrust_net_certification_authority_2048.pem >> cacert.pem
+    curl https://secure.globalsign.com/cacert/Root-R1.crt.pem >> cacert.pem
+    SharkSSLParseCAList -b cacert.shark cacert.pem
+    rm cacert.pem
+    cd ..
+fi
+
+
+read -p "Do you want minify the Lua, js and css files (require node and npm) (y/n)? "  userResponse
+if [ "$userResponse" = "y" ]; then
+   if ! command -v npm> /dev/null 2>&1; then
+       echo "npm not found in the path. Skipping minification."
+   else
+    cd ..
+    npm --prefix $(pwd) install --silent
+    npm --prefix $(pwd) run minify-xedge
+    cd XedgeBuild
+   fi
+fi
+
+echo "Create zip file"
+zip -D -q -u -r -9 ../mako.zip .
+cd ..
+
+echo "Done"
+
+
 zip -D -q -u -r -9 ../Xedge.zip .
 cd ..
 if [ -z "$NO_BIN2C" ]; then
