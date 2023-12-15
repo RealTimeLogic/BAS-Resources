@@ -1459,6 +1459,6 @@ function onreconnect() { //Called by TraceLogger
     sendCmd("getionames",(rsp)=>{
 	ios={}
 	rsp.ios.forEach((name)=>ios[name]=true);
-	inittree();
+	if (!tree) inittree();
     });
 };
