@@ -109,7 +109,7 @@ function mkForm(list,olist,pe,insrt) {
     if(!pe) pe=$("<div>",{class:"form"});
     list.forEach(o => {
 	if(undefined != o.html) { // Non form element
-	    let el=$(`<${o.el}>`, o.class ? {class:o.class} :{})
+	    let el=$(`<${o.el}>`, {class: o.class || '', id: o.id || '' })
 	    if(o.children)
 		mkForm(o.children,olist,el);
 	    else
