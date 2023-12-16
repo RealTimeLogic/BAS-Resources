@@ -58,7 +58,7 @@ if exist "..\..\..\lua-protobuf" (
    echo ..\..\..\lua-protobuf not found; Not Including lua-protobuf and Sparkplug
 )
 
-set /p "userResponse=Do you want minify the Lua, js and css files (require node and npm) (y/n)? "
+set /p "userResponse=Do you want minify the js and css files (require node and npm) (y/n)? "
 if /i "%userResponse%"=="y" (
    where /q npm
     if ERRORLEVEL 1 (

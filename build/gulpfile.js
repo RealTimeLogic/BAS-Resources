@@ -49,11 +49,11 @@ gulp.task('minify-mako',
   gulp.series(
     'mako-minify-css',
     'mako-minify-js',
-    'mako-luamin-folder',
+    // 'mako-luamin-folder',
      ));
 gulp.task('minify-xedge', 
   gulp.series(
     'xedge-minify-css',
     'xedge-minify-js',
-    'xedge-luamin-folder',
+    // 'xedge-luamin-folder',
      ));

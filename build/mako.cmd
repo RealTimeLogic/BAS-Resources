@@ -39,7 +39,7 @@ if exist "..\..\..\LPeg" (
    echo ..\..\..\LPeg not found; Not Including LPeg
 )
 
-set /p "userResponse=Do you want minify the Lua, js and css files (require node and npm) (y/n)? "
+set /p "userResponse=Do you want minify the js and css files (require node and npm) (y/n)? "
 if /i "%userResponse%"=="y" (
    where /q npm
     if ERRORLEVEL 1 (
