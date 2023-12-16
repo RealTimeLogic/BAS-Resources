@@ -60,7 +60,7 @@ else
     echo "../../../lua-protobuf not found; Not Including lua-protobuf and Sparkplug"
 fi
 
-read -p "Do you want minify the js and css files (require node and npm) (y/n)? "  userResponse
+read -p "Do you want to minify the js and css files (require node and npm) (y/n)? "  userResponse
 if [ "$userResponse" = "y" ]; then
    if ! command -v npm> /dev/null 2>&1; then
        echo "npm not found in the path. Skipping minification."
@@ -72,7 +72,7 @@ if [ "$userResponse" = "y" ]; then
    fi
 fi
 
-echo "Create zip file"
+echo "Creating the zip file"
 zip -D -q -u -r -9 ../mako.zip .
 cd ..
 

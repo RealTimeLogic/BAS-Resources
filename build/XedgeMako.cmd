@@ -18,7 +18,7 @@ del README.md
 del .config
 rmdir /s /q .certificate
 
-set /p "userResponse=Do you want minify the js and css files (require node and npm) (y/n)? "
+set /p "userResponse=Do you want to minify the js and css files (require node and npm) (y/n)? "
 if /i "%userResponse%"=="y" (
    where /q npm
     if ERRORLEVEL 1 (
@@ -29,7 +29,7 @@ if /i "%userResponse%"=="y" (
     )
 )
 
-echo Create zip file
+echo Creating the zip file
 zip -D -q -u -r -9 ../Xedge.zip .
 cd ..
 echo Done
