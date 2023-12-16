@@ -37,5 +37,21 @@ else
     echo "../../../LPeg not found; Not Including LPeg"
 fi
 
+read -p "Do you want minify the js and css files (require node and npm) (y/n)? "  userResponse
+if [ "$userResponse" = "y" ]; then
+   if ! command -v npm> /dev/null 2>&1; then
+       echo "npm not found in the path. Skipping minification."
+   else
+    cd ..
+    npm --prefix $(pwd) install --silent
+    npm --prefix $(pwd) run minify-mako
+    cd MakoBuild
+   fi
+fi
+
+echo "Create zip file"
 zip -D -q -u -r -9 ../mako.zip .
 cd ..
+
+echo "Done"
+

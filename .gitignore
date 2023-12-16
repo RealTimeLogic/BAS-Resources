@@ -2,6 +2,8 @@
 *~
 build/XedgeBuild
 build/MakoBuild
+build/ZipBuild
 *.c
 *.zip
-
+node_modules
+.vscode
