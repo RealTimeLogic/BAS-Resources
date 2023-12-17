@@ -85,5 +85,3 @@ if [ -z "$NO_BIN2C" ]; then
     bin2c -z getLspZipReader Xedge.zip XedgeZip.c
     echo "Copy XedgeZip.c to your build directory"
 fi
-
-
