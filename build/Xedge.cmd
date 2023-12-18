@@ -1,5 +1,4 @@
 @echo off
-
 where /q SharkSSLParseCAList.exe
 if ERRORLEVEL 1 (
    echo Adding ..\tools\windows to path.
@@ -21,13 +20,26 @@ cd XedgeBuild || exit /b 3
 xcopy ..\..\src\core . /eq || exit /b 4
 xcopy ..\..\src\xedge . /eq || exit /b 5
 xcopy ..\..\src\mako\.lua\acme .lua\acme  /eq || exit /b 6
-set /p "userResponse=Do you want to include OPC-UA (y/n)? "
-if /i "%userResponse%"=="y" (
-   xcopy ..\..\src\opcua .lua\opcua\ /eq || exit /b 7
-)
 
-set /p "userResponse=Do you want to use the large cacert.shark or do you want to create a new with minimal certs: large/small (l/s)? "
-if /i "%userResponse%"=="s" (
+choice /C YN /M "Do you want to include OPC-UA "
+if errorlevel 2 goto NoOPCUA
+if errorlevel 1 goto YesOPCUA
+
+:YesOPCUA
+echo Including OPC-UA.
+xcopy ..\..\src\opcua .lua\opcua\ /eq || exit /b 7
+goto ContinueAfterOPCUA
+
+:NoOPCUA
+echo OPC-UA inclusion skipped.
+goto ContinueAfterOPCUA
+
+:ContinueAfterOPCUA
+choice /C LS /M "Do you want to use the large cacert.shark or create a new with minimal certs: large/small (l/s)? "
+if errorlevel 2 goto SmallCerts
+if errorlevel 1 goto LargeCerts
+
+:SmallCerts
    cd .certificate || exit /b 8
    del cacert.shark || exit /b 9
    rem List from asking AI for the most common root certs
@@ -42,8 +54,12 @@ if /i "%userResponse%"=="s" (
    SharkSSLParseCAList -b cacert.shark cacert.pem
    del cacert.pem
    cd ..
-)
+goto ContinueAfterCerts
 
+:LargeCerts
+echo Using large CA certificate list (cacert.shark)
+
+:ContinueAfterCerts
 del README.md
 del .preload
 del .gitignore
@@ -58,17 +74,24 @@ if exist "..\..\..\lua-protobuf" (
    echo ..\..\..\lua-protobuf not found; Not Including lua-protobuf and Sparkplug
 )
 
-set /p "userResponse=Do you want to minify the js and css files (require node and npm) (y/n)? "
-if /i "%userResponse%"=="y" (
-   where /q npm
-    if ERRORLEVEL 1 (
-        echo npm not found in the path. Skipping minification.
-    ) else (
-      call npm install --silent
-      call npm run minify-xedge
-    )
-)
+choice /C YN /M "Do you want to minify the js and css files (require node and npm) "
+if errorlevel 2 goto NoMinify
+if errorlevel 1 goto YesMinify
 
+:YesMinify
+where /q npm
+if ERRORLEVEL 1 (
+    echo npm not found in the path. Skipping minification.
+    goto ContinueAfterMinify
+)
+call npm install --silent
+call npm run minify-xedge
+goto ContinueAfterMinify
+
+:NoMinify
+echo Minification skipped.
+
+:ContinueAfterMinify
 echo Create zip file
 zip -D -q -u -r -9 ../Xedge.zip .
 cd ..
