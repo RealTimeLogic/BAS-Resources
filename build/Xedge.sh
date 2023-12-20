@@ -68,6 +68,7 @@ if [ "$userResponse" = "y" ]; then
     cd ..
     npm --prefix $(pwd) install --silent
     npm --prefix $(pwd) run minify-xedge
+    cd XedgeBuild
    fi
 fi
 
