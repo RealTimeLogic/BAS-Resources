@@ -68,17 +68,10 @@ if [ "$userResponse" = "y" ]; then
     cd ..
     npm --prefix $(pwd) install --silent
     npm --prefix $(pwd) run minify-xedge
-    cd XedgeBuild
    fi
 fi
 
 echo "Creating the zip file"
-zip -D -q -u -r -9 ../mako.zip .
-cd ..
-
-echo "Done"
-
-
 zip -D -q -u -r -9 ../Xedge.zip .
 cd ..
 if [ -z "$NO_BIN2C" ]; then
