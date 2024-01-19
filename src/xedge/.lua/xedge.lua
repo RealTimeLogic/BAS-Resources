@@ -15,6 +15,8 @@ local ios=ba.io()
 local nodisk=false -- if no DiskIo
 local errorh,loadPlugins -- funcs
 local confKey -- xedge.conf AES key
+local gc=collectgarbage
+local maxHash=pcall(function() ba.crypto.hash("sha512") end) and "sha512" or "sha256"
 
 local tpm
 tpm=function(pmkey)
@@ -47,7 +49,7 @@ tpm=function(pmkey)
       if op.key and op.key ~= "ecc" then error("TPM can only create ECC keys",2) end
       local newOp={}
       for k,v in pairs(op) do newOp[k]=v end
-      newOp.rnd=PBKDF2("sha512", kname, pmkey, 5, 1024)
+      newOp.rnd=PBKDF2(maxHash, kname, pmkey, 5, 1024)
       local key=createkey(newOp)
       keys[kname]=key
       return true
@@ -376,6 +378,8 @@ local function loadAndRunLua(io,fn,env)
    end
    sendErr("%s %s failed:\n\t%s",f and "Running" or "Compiling",io:realpath(fn),err or "?")
    errorh(err)
+   gc()
+   gc()
 end
 xedge.loadAndRunLua=loadAndRunLua
 
@@ -383,7 +387,7 @@ xedge.loadAndRunLua=loadAndRunLua
 local function runOnUnload(pn,env,appenv)
    local func = rawget(env,"onunload")
    if type(func) == "function" then
-      local ok, err = pcall(func)
+      local ok, err = xpcall(func,errh)
       if not ok then sendErr("Stopping '%s' failed: %s",pn,err or "?") end
       errorh(err)
    end
@@ -409,7 +413,7 @@ local function runOnUnload(pn,env,appenv)
       level=level-1
    end
    close(env)
-   collectgarbage()
+   gc()
 end
 
 
@@ -427,7 +431,7 @@ local function stopApp(name)
    if app.dir then app.dir:unlink() end
    for n,env in pairs(app.envs) do runOnUnload(n,env,app.env) end
    runOnUnload(".preload",app.env,app.env)
-   collectgarbage()
+   gc()
 end
 
 local function terminateApp(name, nosave)
@@ -1140,9 +1144,9 @@ do
       if not k then
 	 -- Mako Server: use dummy key.
 	 k="438fccj39dewe8vc"
-	 pmkey=ba.crypto.hash("sha512")(k)(true)
+	 pmkey=ba.crypto.hash(maxHash)(k)(true)
       elseif true == k then -- done feeding keys
-	 local hf=ba.crypto.hash("sha512")
+	 local hf=ba.crypto.hash(maxHash)
 	 for _,k in ipairs(klist) do hf(k) end
 	 pmkey=hf(true)
       else
