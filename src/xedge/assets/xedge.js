@@ -1434,7 +1434,7 @@ $( window ).on( "load",()=> {
 	// Populate the 'ios' variable with all known IOs
 	rsp.ios.forEach((name)=>ios[name]=true);
 	//Continue initialization after possible login.
-	inittree();
+	if(!tree) inittree();
 	startTL(); // tracelogger can now establish websocket connection.
 	sendCmd("lsPlugins",(rsp)=>{
 	    for(let i = 0; i < rsp.length; i++)
@@ -1459,6 +1459,6 @@ function onreconnect() { //Called by TraceLogger
     sendCmd("getionames",(rsp)=>{
 	ios={}
 	rsp.ios.forEach((name)=>ios[name]=true);
-	if (!tree) inittree();
+	if(!tree) inittree();
     });
 };
