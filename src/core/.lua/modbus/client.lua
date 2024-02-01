@@ -41,7 +41,7 @@ local dectypeT = {
 	  end,
 }
 local function dectype(data,len,vtype)
-   local func = dectypeT[vtype] or dectypeT.word
+   local func = dectypeT[vtype]
    return func(data,len)
 end
 -- End: decode type
@@ -104,7 +104,7 @@ local fromwlenT={
 fromwlenT.float=fromwlenT.dword
 
 local function fromwordlen(len,vtype)
-   local func = fromwlenT[vtype] or fromwlenT.word
+   local func = fromwlenT[vtype]
    return func(len)
 end
 -- End: modbus word len to type size
@@ -121,20 +121,28 @@ end
 
 -- Sorts and returns the two optional args: vtype,onresp -> returns vtype
 -- Inserts onresp into async queue table
-local function ftArgSort(self,vtype,onresp,level)
-   if self.async then
-      if type(vtype) == "function" and not onresp then
-	 onresp,vtype=vtype,nil
-      end
-      if type(onresp) ~= "function" then
-	 error("Async callback required", level)
-      end
+local function ftArgSort(self,vtype,uid,onresp,level)
+   if type(vtype) ~= "string" then
+      -- If vtype is not a string, shift the arguments
+      onresp = uid
+      uid = vtype
+      vtype = "word"
+   end
+   if type(uid) ~= "number" then
+      -- If uid is not a number, shift the arguments
+      onresp = uid
+      uid = 1
+   end
+   if type(uid) ~= "number"  or uid < 0 or uid > 247 then
+      error("Unit Identifier", level)
+   end
+   if self.async and type(onresp) ~= "function" then
+      error("Async callback required", level)
    end
    assert(not self.rspQ[self.transaction])
    self.rspQ[self.transaction]={onresp,vtype} -- Ref-Q
-   if vtype and type(vtype) ~= "string" then error("Invalid vtype", level) end
    self.inqueue = self.inqueue+1
-   return vtype
+   return uid,vtype
 end
 
 -- Wait for data
@@ -168,14 +176,14 @@ local function recframe(self)
 end
 
 
-local function prepheader(self,func,addr,val,len)
+local function prepheader(self,uid,func,addr,val,len)
    local tran = self.transaction
    if tran >= 0xFFFF then
       self.transaction = 0
    else
       self.transaction = tran+1
    end
-   return h2n(2,tran)..h2n(2,0)..h2n(2,len)..schar(self.uid,func)..h2n(2,addr)..h2n(2,val)
+   return h2n(2,tran)..h2n(2,0)..h2n(2,len)..schar(uid,func)..h2n(2,addr)..h2n(2,val)
 end
 
 --Start: Modbus response management
@@ -185,6 +193,7 @@ local function readbitsResp(data,vtype)
    local len=tonumber(vtype)
    for byteix=1,sbyte(data,9) do
       local byte = sbyte(data,9+byteix)
+      if nil == byte then break end
       local bit = 1
       while bit < 256 do
 	 if len == 0 then break end
@@ -218,7 +227,6 @@ local mrespT={
 
 -- Synchronous and asynchronous response management
 local function rpcResp(self)
-   local err
    local data,err=recframe(self)
    if data then
       local trans = n2h(2,data)
@@ -245,20 +253,20 @@ local function rpcResp(self)
       end
    end
    if not data and (err ~= "timeout" or not self.async) then
-      self.sock:close()
+      self:close()
    end
    return data,err
 end
 
 -- Async cosocket
 local function asyncRec(sock, self)
+   local ok,err
    while true do
-      local ok,err=rpcResp(self)
+      ok,err=rpcResp(self)
       if not ok then
 	 if err == "timeout" then
 	    if self.inqueue > 0 then -- Async timeout management
 	       if self.queuesample == self.inqueue then -- timeout error
-		  self.onclose(self,"timeout")
 		  break -- exit
 	       end
 	       self.queuesample = self.inqueue
@@ -269,11 +277,16 @@ local function asyncRec(sock, self)
 	       self.ontimeout(self)
 	    end
 	 else -- error
-	    if not self.closed then
-	       self.onclose(self,err)
-	    end
 	    break -- exit
 	 end
+      end
+   end
+   self:close()
+   if self.onclose then
+      self.onclose(err,self)
+   elseif self.async then
+      for trans,cbT in pairs(self.rspQ) do
+	 cbT[1](nil,err,trans,self)
       end
    end
 end
@@ -287,25 +300,25 @@ local function rpc(self,func,data)
       end
       return rpcResp(self)
    end
-   self.sock:close()
+   self:close()
    return nil,err
 end
 
 --  Read coils or discrete inputs
-local function readbits(self,func,addr,len,onresp)
+local function readbits(self,addr,len,func,uid,onresp)
    -- Save len as vtype: ref-L
-   ftArgSort(self,tostring(len),onresp,3)
+   uid=ftArgSort(self,tostring(len),uid,onresp,3)
    if len < 1 or len > 2000 then eRange(2000,2,3) end
-   return rpc(self,func,prepheader(self,func,addr,len,6),onresp,readbitsResp)
+   return rpc(self,func,prepheader(self,uid,func,addr,len,6),onresp,readbitsResp)
 end
 
 
 --  Read Input Registers or Read Multiple Holding Registers
-local function readbytes(self,func,addr,tlen,vtype,onresp)
-   vtype=ftArgSort(self,vtype,onresp,3)
+local function readbytes(self,addr,tlen,func,vtype,uid,onresp)
+   uid,vtype=ftArgSort(self,vtype,uid,onresp,3)
    local len = towordlen(tlen,vtype)
    if len < 1 or len > 125 then eRange(fromwordlen(125,vtype),2,3) end
-   return rpc(self,func,prepheader(self,func,addr,len,6))
+   return rpc(self,func,prepheader(self,uid,func,addr,len,6))
 end
 
 local C={} -- Modbus Client
@@ -314,23 +327,23 @@ C.__index=C
 
 -- Read coil(s): read one or several bits
 -- Read coils: addr: number, len: number
-function C:rcoil(addr,len,onresp)
-   return readbits(self,READ_COILS,addr,len,onresp)
+function C:rcoil(addr,len,uid,onresp)
+   return readbits(self,addr,len,READ_COILS,uid,onresp)
 end
 
 
 -- Discrete input(s): read one or several bits
-function C:discrete(addr,len,onresp)
-   return readbits(self,READ_DISCRETE_INPUTS,addr,len,onresp)
+function C:discrete(addr,len,uid,onresp)
+   return readbits(self,addr,len,READ_DISCRETE_INPUTS,uid,onresp)
 end
 
 -- Write single coil: addr: number, val: boolean
 -- Write multiple coils: addr: number, val: table with booleans
-function C:wcoil(addr,val,onresp)
+function C:wcoil(addr,val,uid,onresp)
    local data,e1,e2
-   ftArgSort(self,nil,onresp,2)
+   local uid=ftArgSort(self,"",uid,onresp,2)
    if type(val) == "boolean" then
-      data=prepheader(self,WRITE_SINGLE_COIL,addr,val and 0xFF00 or 0,6)
+      data=prepheader(self,uid,WRITE_SINGLE_COIL,addr,val and 0xFF00 or 0,6)
       data,e1,e2 = rpc(self,WRITE_SINGLE_COIL,data)
    elseif type(val) == "table" then
       local len = #val
@@ -344,23 +357,23 @@ function C:wcoil(addr,val,onresp)
       end
       if bit ~= 1 then tinsert(data,byte) end
       data=schar(table.unpack(data))
-      data=prepheader(self,WRITE_MULTIPLE_COILS,addr,len,#data+7)..schar(#data)..data
+      data=prepheader(self,uid,WRITE_MULTIPLE_COILS,addr,len,#data+7)..schar(#data)..data
       return rpc(self,WRITE_MULTIPLE_COILS,data)
    end
    error(fmtArgErr(2,"wcoil","boolean/table",val),2)
 end
 
 
-function C:rholding(addr,len,vtype,onresp)
-   return readbytes(self,READ_HOLDING_REGISTERS,addr,len,vtype,onresp)
+function C:rholding(addr,len,vtype,uid,onresp)
+   return readbytes(self,addr,len,READ_HOLDING_REGISTERS,vtype,uid,onresp)
 end
 
-function C:register(addr,len,vtype,onresp)
-   return readbytes(self,READ_INPUT_REGISTERS,addr,len,vtype,onresp)
+function C:register(addr,len,vtype,uid,onresp)
+   return readbytes(self,addr,len,READ_INPUT_REGISTERS,vtype,uid,onresp)
 end
 
-function C:wholding(addr,val,vtype,onresp)
-   vtype=ftArgSort(self,vtype,onresp,2)
+function C:wholding(addr,val,vtype,uid,onresp)
+   uid,vtype=ftArgSort(self,vtype,uid,onresp,2)
    local data,e1,e2,len
    if type(val) == "table" or vtype == "string" then
       len = towordlen(#val,vtype)
@@ -368,19 +381,19 @@ function C:wholding(addr,val,vtype,onresp)
    else
       len = towordlen(1,vtype)
       if len == 1 and type(val) == "number" then
-	 data=prepheader(self,WRITE_SINGLE_REGISTER,addr,val,6)
+	 data=prepheader(self,uid,WRITE_SINGLE_REGISTER,addr,val,6)
 	 return rpc(self,WRITE_SINGLE_REGISTER,data)
       end
       val={val}
    end
-   data=prepheader(self,WRITE_MULTIPLE_REGISTERS,addr,len,7+(len*2))
+   data=prepheader(self,uid,WRITE_MULTIPLE_REGISTERS,addr,len,7+(len*2))
    data = data..schar(len*2)..enctype(val,vtype)
    return rpc(self,WRITE_MULTIPLE_REGISTERS,data)
 end
 
 
-function C:readwrite(raddr,rlen,waddr,wval,vtype,onresp)
-   vtype=ftArgSort(self,vtype,onresp,2)
+function C:readwrite(raddr,rlen,waddr,wval,vtype,uid,onresp)
+   uid,vtype=ftArgSort(self,vtype,uid,onresp,2)
    local data,e1,e2,wlen
    rlen = towordlen(rlen,vtype)
    if rlen < 1 or rlen > 0x7D then eRange(fromwordlen(0x7D,vtype),2,3) end
@@ -391,7 +404,7 @@ function C:readwrite(raddr,rlen,waddr,wval,vtype,onresp)
       wlen = towordlen(1,vtype)
       wval={wval}
    end
-   data=prepheader(self,READ_WRITE_MULTIPLE_REGISTERS,raddr,rlen,11+(wlen*2))
+   data=prepheader(self,uid,READ_WRITE_MULTIPLE_REGISTERS,raddr,rlen,11+(wlen*2))
    data=data..h2n(2,waddr)..h2n(2,wlen)..schar(wlen*2)..enctype(wval,vtype)
    return rpc(self,READ_WRITE_MULTIPLE_REGISTERS,data)
 end
@@ -403,25 +416,30 @@ function C:connected()
 end
 
 function C:close()
-   self.closed=true
-   return self.sock:close()
+   if not self.closed then
+      self.closed=true
+      return self.sock:close()
+   end
 end
 
 local function connect(addr,opt)
    local sock,err
    opt = opt or {}
-   local self={inqueue=0,transaction=0,timeout=opt.timeout or 3000,uid=opt.uid or 255}
+   local self={rspQ={},inqueue=0,transaction=0,timeout=opt.timeout or 3000}
+   local onclose=type(opt.onclose) == "function" and opt.onclose
    if type(addr) == "string" then
       sock,err=ba.socket.connect(addr,opt.port or 502,opt)
       if not sock then return nil,err end
       self.sock=sock
    elseif type(addr) == "userdata" and type(addr.trusted) == "function" then
       self.sock=addr
+   elseif type(addr) == "table" and type(addr.read) == "function" then
+      self.sock,self.async,self.onclose=addr,true,onclose
+      return setmetatable(self,C), function() asyncRec(addr, self) end
    else
       error(fmtArgErr(1,"connect","string",addr),2)
    end
-   self.rspQ={} -- queue, where k=transaction ID, v=callback func (REF-Q)
-   if opt.async then
+   if sock:owner() or opt.async then
       self.async=true
       if type(opt.async) == "function" then self.ontimeout=opt.async end
       if sock:owner() then -- Already in cosocket mode
@@ -429,11 +447,9 @@ local function connect(addr,opt)
       else
 	 sock:event(asyncRec, "s", self)
       end
-      self.onclose = type(opt.onclose) == "function" and
-	 opt.onclose or function(mb,err) tracep(false,0,"Modbus err:",err) end
+      self.onclose = onclose
    end
    return setmetatable(self,C)
 end
-
 
 return {connect=connect}

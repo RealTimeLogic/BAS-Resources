@@ -309,6 +309,7 @@ end -- elog
 local function sendErr(...)
    return xedge.elog({flush=true, subject="Xedge: error"},...)
 end
+xedge.sendErr=sendErr
 
 do
    local ev=require"EventEmitter".create()
