@@ -705,6 +705,7 @@ local function connect(_ENV,cmd,arg)
 		  info=data:sub(idlen+7+crlen)
 	       end
 	       if idlen > 5 then
+                  local s=cmd:session()
 		  xinfo = {
 		     arg=arg,
 		     seed=seed,
@@ -715,6 +716,7 @@ local function connect(_ENV,cmd,arg)
 		     data=cmd:data(),
 		     header=cmd:header(),
 		     uname=uname,
+                     session=s and s:id()
 		  }
 		  ecode,reason=authenticate(credentials, xinfo)
                   if not ecode then
