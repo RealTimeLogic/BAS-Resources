@@ -5,6 +5,7 @@ local sh2n=ba.socket.h2n
 local tinsert=table.insert
 local tconcat=table.concat
 local string=string
+local tostring=tostring
 local schar=string.char
 local fmt=string.format
 local ba=ba
@@ -578,11 +579,11 @@ local function manageMessage(_ENV,sock,data,hasFL)
 	 end -- close on ret
 	 return manage(_ENV,peerT,data,hasFL)
       end
-      prepLog(_ENV,sock,"Msg %d from unknown peer",msg)
+      prepLog(_ENV,sock,"Msg %s from unknown peer",tostring(msg))
       sock:close()
    else
-      prepLog(_ENV,sock,"Received unknown msg %d from %s",
-	      msg, peerT and peerT.uid or "unknown")
+      prepLog(_ENV,sock,"Received unknown msg %s from %s",
+	      tostring(msg), peerT and peerT.uid or "unknown")
       terminatePeerT(_ENV,sock)
    end
    -- close on ret
@@ -705,7 +706,6 @@ local function connect(_ENV,cmd,arg)
 		  info=data:sub(idlen+7+crlen)
 	       end
 	       if idlen > 5 then
-                  local s=cmd:session()
 		  xinfo = {
 		     arg=arg,
 		     seed=seed,
@@ -716,7 +716,7 @@ local function connect(_ENV,cmd,arg)
 		     data=cmd:data(),
 		     header=cmd:header(),
 		     uname=uname,
-                     session=s and s:id()
+                     session=cmd:session()
 		  }
 		  ecode,reason=authenticate(credentials, xinfo)
                   if not ecode then

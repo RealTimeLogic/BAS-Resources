@@ -265,6 +265,8 @@ SMQ.Client = function(url, opt) {
 	subtopicAckCBT={};
 	onMsgCBT={};
 	observeT={};
+	if(true == opt.cleanstart)
+	    return;
 	var oldTid = selfTid;
 	selfTid = newTid;
 
