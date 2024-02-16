@@ -2,9 +2,9 @@ SMQ={};
 
 SMQ.utf8={
     length: function(inp) {
-	var outp = 0;
-	for(var i = 0; i<inp.length; i++) {
-	    var charCode = inp.charCodeAt(i);
+	let outp = 0;
+	for(let i = 0; i<inp.length; i++) {
+	    let charCode = inp.charCodeAt(i);
 	    if(charCode > 0x7FF) {
 		if(0xD800 <= charCode && charCode <= 0xDBFF) {
 		    i++;
@@ -20,9 +20,9 @@ SMQ.utf8={
     encode: function(inp, outp, start) {
 	if(outp == undefined)
 	    outp = new Uint8Array(SMQ.utf8.length(inp))
-	var ix = start ? start : 0;
-	for(var i = 0; i<inp.length; i++) {
-	    var charCode = inp.charCodeAt(i);
+	let ix = start ? start : 0;
+	for(let i = 0; i<inp.length; i++) {
+	    let charCode = inp.charCodeAt(i);
 	    if(0xD800 <= charCode && charCode <= 0xDBFF) {
 		lowCharCode = inp.charCodeAt(++i);
 		if(isNaN(lowCharCode)) return null;
@@ -48,25 +48,25 @@ SMQ.utf8={
 	return outp;
     },
     decode: function(inp, offset, length) {
-	var outp = "";
-	var utf16;
+	let outp = "";
+	let utf16;
 	if(offset == undefined) offset = 0;
 	if(length == undefined) length = (inp.length - offset);
-	var ix = offset;
+	let ix = offset;
 	while(ix < offset+length) {
-	    var b1 = inp[ix++];
+	    let b1 = inp[ix++];
 	    if(b1 < 128) utf16 = b1;
 	    else  {
-		var b2 = inp[ix++]-128;
+		let b2 = inp[ix++]-128;
 		if(b2 < 0) return null;
 		if(b1 < 0xE0)
 		    utf16 = 64*(b1-0xC0) + b2;
 		else { 
-		    var b3 = inp[ix++]-128;
+		    let b3 = inp[ix++]-128;
 		    if(b3 < 0) return null;
 		    if(b1 < 0xF0) utf16 = 4096*(b1-0xE0) + 64*b2 + b3;
 		    else {
-			var b4 = inp[ix++]-128;
+			let b4 = inp[ix++]-128;
 			if(b4 < 0) return null;
 			if(b1 < 0xF8) utf16 = 262144*(b1-0xF0)+4096*b2+64*b3+b4;
 			else return null;
@@ -87,10 +87,10 @@ SMQ.utf8={
 
 
 SMQ.wsURL = function(path) {
-    var l = window.location;
+    let l = window.location;
     if(!path) path = l.pathname;
     if(path[0] !== '/') {
-	var currentPath = l.pathname.split('/');
+	let currentPath = l.pathname.split('/');
 	currentPath.pop(); // Remove the last segment
 	path = currentPath.join('/') + '/' + path;
     }
@@ -113,63 +113,63 @@ SMQ.Client = function(url, opt) {
 	opt=url;
 	url=null;
     }
-    var self = this;
-    var SMQ_VERSION = 1;
-    var MSG_INIT = 1;
-    var MSG_CONNECT = 2;
-    var MSG_CONNACK = 3;
-    var MSG_SUBSCRIBE = 4;
-    var MSG_SUBACK = 5;
-    var MSG_CREATE = 6;
-    var MSG_CREATEACK = 7;
-    var MSG_PUBLISH = 8;
-    var MSG_UNSUBSCRIBE = 9;
-    var MSG_DISCONNECT = 11;
-    var MSG_PING = 12;
-    var MSG_PONG = 13;
-    var MSG_OBSERVE = 14;
-    var MSG_UNOBSERVE = 15;
-    var MSG_CHANGE = 16;
-    var MSG_CREATESUB  = 17
-    var MSG_CREATESUBACK = 18;
-    var socket;
-    var connected=false;
-    var selfTid;
-    var onclose;
-    var onconnect;
-    var intvtmo;
+    let self = this;
+    let SMQ_VERSION = 1;
+    let MSG_INIT = 1;
+    let MSG_CONNECT = 2;
+    let MSG_CONNACK = 3;
+    let MSG_SUBSCRIBE = 4;
+    let MSG_SUBACK = 5;
+    let MSG_CREATE = 6;
+    let MSG_CREATEACK = 7;
+    let MSG_PUBLISH = 8;
+    let MSG_UNSUBSCRIBE = 9;
+    let MSG_DISCONNECT = 11;
+    let MSG_PING = 12;
+    let MSG_PONG = 13;
+    let MSG_OBSERVE = 14;
+    let MSG_UNOBSERVE = 15;
+    let MSG_CHANGE = 16;
+    let MSG_CREATESUB  = 17
+    let MSG_CREATESUBACK = 18;
+    let socket;
+    let connected=false;
+    let selfTid;
+    let onclose;
+    let onconnect;
+    let intvtmo;
     if( ! url ) url = SMQ.wsURL();
-    var tid2topicT={}; //Key= tid, val = topic name
-    var topic2tidT={}; //Key=topic name, val=tid
-    var topicAckCBT={}; //Key=topic name, val=array of callback funcs
-    var tid2subtopicT={}; //Key= tid, val = subtopic name
-    var subtopic2tidT={}; //Key=sub topic name, val=tid
-    var subtopicAckCBT={}; //Key=sub topic name, val=array of callback funcs
-    var onMsgCBT={}; //Key=tid, val = {all: CB, subtops: {stid: CB}}
-    var observeT={}; //Key=tid, val = onchange callback
-    var pendingCmds=[]; //List of functions to exec on connect
+    let tid2topicT={}; //Key= tid, val = topic name
+    let topic2tidT={}; //Key=topic name, val=tid
+    let topicAckCBT={}; //Key=topic name, val=array of callback funcs
+    let tid2subtopicT={}; //Key= tid, val = subtopic name
+    let subtopic2tidT={}; //Key=sub topic name, val=tid
+    let subtopicAckCBT={}; //Key=sub topic name, val=array of callback funcs
+    let onMsgCBT={}; //Key=tid, val = {all: CB, subtops: {stid: CB}}
+    let observeT={}; //Key=tid, val = onchange callback
+    let pendingCmds=[]; //List of functions to exec on connect
 
     if(!opt) opt={}
 
-    var n2h32=function(d,ix) {
+    let n2h32=function(d,ix) {
 	return (d[ix]*16777216) + (d[ix+1]*65536) + (d[ix+2]*256) + d[ix+3];
     };
 
-    var h2n32=function(n,d,ix) {
+    let h2n32=function(n,d,ix) {
 	d[ix]	= n >>> 24;
 	d[ix+1] = n >>> 16;
 	d[ix+2] = n >>> 8;
 	d[ix+3] = n;
     };
 
-    var execPendingCmds=function() {
-	for(var i = 0 ; i < pendingCmds.length; i++)
+    let execPendingCmds=function() {
+	for(let i = 0 ; i < pendingCmds.length; i++)
 	    pendingCmds[i]();
 	pendingCmds=[];
     };
 
-    var decodeTxt = function(data, ptid, tid, subtid) {
-	var msg = SMQ.utf8.decode(data);
+    let decodeTxt = function(data, ptid, tid, subtid) {
+	let msg = SMQ.utf8.decode(data);
 	if( ! msg ) {
 	    if(data.length == 0) return "";
 	    console.log("Cannot decode UTF8 for tid=",
@@ -179,15 +179,15 @@ SMQ.Client = function(url, opt) {
 	return msg;
     };
 
-    var dispatchTxt = function(cbFunc, data, ptid, tid, subtid) {
-	var msg = decodeTxt(data, ptid, tid, subtid);
+    let dispatchTxt = function(cbFunc, data, ptid, tid, subtid) {
+	let msg = decodeTxt(data, ptid, tid, subtid);
 	if(msg) cbFunc(msg, ptid, tid, subtid);
     };
 
-    var dispatchJSON = function(cbFunc, data, ptid, tid, subtid) {
-	var msg = decodeTxt(data, ptid, tid, subtid);
+    let dispatchJSON = function(cbFunc, data, ptid, tid, subtid) {
+	let msg = decodeTxt(data, ptid, tid, subtid);
 	if(!msg) return;
-	var j;
+	let j;
 	try {
 	    j=JSON.parse(msg);
 	}
@@ -205,9 +205,9 @@ SMQ.Client = function(url, opt) {
 
     };
 
-    var pushElem=function(obj,key,elem) {
-	var newEntry=false;
-	var arr = obj[key];
+    let pushElem=function(obj,key,elem) {
+	let newEntry=false;
+	let arr = obj[key];
 	if( ! arr ) {
 	    arr =[];
 	    obj[key]=arr;
@@ -217,17 +217,17 @@ SMQ.Client = function(url, opt) {
 	return newEntry;
     };
 
-    var cancelIntvConnect=function() {
+    let cancelIntvConnect=function() {
 	if(intvtmo) clearTimeout(intvtmo);
 	intvtmo=null;
     };
 
-    var socksend=function(data) {
+    let socksend=function(data) {
 	try {socket.send(data);}
 	catch(e) {onclose(e.message, true); }
     };
 
-    var createSock=function(isReconnect) {
+    let createSock=function(isReconnect) {
 	try {
 	    socket = new WebSocket(url);
 	}
@@ -250,13 +250,13 @@ SMQ.Client = function(url, opt) {
     };
 
     // Restore all tid's and subscriptions after a disconnect/reconnect
-    var restore = function(newTid, rnd, ipaddr) {
-	var tid2to = tid2topicT;
-	var to2tid = topic2tidT;
-	var tid2sto = tid2subtopicT;
-	var sto2tid = subtopic2tidT;
-	var onmsgcb = onMsgCBT;
-	var obs = observeT;
+    let restore = function(newTid, rnd, ipaddr) {
+	let tid2to = tid2topicT;
+	let to2tid = topic2tidT;
+	let tid2sto = tid2subtopicT;
+	let sto2tid = subtopic2tidT;
+	let onmsgcb = onMsgCBT;
+	let obs = observeT;
 	tid2topicT={};
 	topic2tidT={};
 	topicAckCBT={};
@@ -265,19 +265,17 @@ SMQ.Client = function(url, opt) {
 	subtopicAckCBT={};
 	onMsgCBT={};
 	observeT={};
-	if(true == opt.cleanstart)
-	    return;
-	var oldTid = selfTid;
+	let oldTid = selfTid;
 	selfTid = newTid;
 
-	var onResp2Cnt=10000;
-	var onResp1Cnt=10000;
+	let onResp2Cnt=10000;
+	let onResp1Cnt=10000;
 
-	var onresp2 = function() { // (3) Re-create observed tids
+	let onresp2 = function() { // (3) Re-create observed tids
 	    if(--onResp2Cnt <= 0 && connected) {
 		onResp2Cnt=10000;
-		for(var tid in obs) {
-		    var topic = tid2to[tid];
+		for(let tid in obs) {
+		    let topic = tid2to[tid];
 		    if(topic) {
 			self.observe(topic, obs[tid]);
 		    }
@@ -291,21 +289,27 @@ SMQ.Client = function(url, opt) {
 		    onclose("reconnecting failed",false);
 	    }
 	};
-	var onresp1 = function() { // (2) Re-create subscriptions
+	if(true == opt.cleanstart)
+	{
+	    onResp2Cnt=-1;
+	    onresp2();
+	    return;
+	}
+	let onresp1 = function() { // (2) Re-create subscriptions
 	    if(--onResp1Cnt <= 0 && connected) {
 		onResp1Cnt=10000;
 		try {
-		    for(var tid in onmsgcb) {
-			var topic = tid == oldTid ? "self" : tid2to[tid];
+		    for(let tid in onmsgcb) {
+			let topic = tid == oldTid ? "self" : tid2to[tid];
 			if(topic) {
-			    var t = onmsgcb[tid];
+			    let t = onmsgcb[tid];
 			    if(t.onmsg) {
 				onResp2Cnt++;
 				self.subscribe(topic, {
 				    onmsg:t.onmsg,onack:onresp2});
 			    }
-			    for(var stid in t.subtops) {
-				var subtop = tid2sto[stid];
+			    for(let stid in t.subtops) {
+				let subtop = tid2sto[stid];
 				if(subtop) {
 				    onResp2Cnt++;
 				    self.subscribe(topic,subtop,{
@@ -324,8 +328,8 @@ SMQ.Client = function(url, opt) {
 	    }
 	};
 	try { // (1) Re-create tids and subtids
-	    for(var t in to2tid) {onResp1Cnt++; self.create(to2tid[t],onresp1);}
-	    for(var t in sto2tid) {onResp1Cnt++; self.createsub(sto2tid[t],onresp1);}
+	    for(let t in to2tid) {onResp1Cnt++; self.create(to2tid[t],onresp1);}
+	    for(let t in sto2tid) {onResp1Cnt++; self.createsub(sto2tid[t],onresp1);}
 	}
 	catch(e) {}
 	onResp1Cnt -= 10000;
@@ -336,14 +340,14 @@ SMQ.Client = function(url, opt) {
     onclose=function(msg,ok2reconnect) {
 	if(socket) {
 	    connected=false;
-	    var s = socket;
+	    let s = socket;
 	    socket=null;
 	    //Prevent further event messages
 	    try {s.onopen=s.onmessage=s.onclose=s.onerror=function(){};}
 	    catch(err) {}
 	    try { s.close(); } catch(err) {}
 	    if(self.onclose) {
-		var timeout = self.onclose(msg,ok2reconnect);
+		let timeout = self.onclose(msg,ok2reconnect);
 		if(ok2reconnect && typeof(timeout) =="number") {
 		    if(!intvtmo) {
 			if(timeout < 1000) timeout = 1000;
@@ -359,16 +363,18 @@ SMQ.Client = function(url, opt) {
 	connected=false;
     };
 
-    var onmessage = function(evt) {
-	var d = new Uint8Array(evt.data);
+    let onmessage = function(evt) {
+	let tid;
+	let t;
+	let d = new Uint8Array(evt.data);
 	switch(d[0]) {
 
 	case MSG_SUBACK:
 	case MSG_CREATEACK:
 	case MSG_CREATESUBACK:
-	    var accepted=d[1] ? false : true;
-	    var tid=n2h32(d,2);
-	    var topic=SMQ.utf8.decode(d,6);
+	    let accepted=d[1] ? false : true;
+	    tid=n2h32(d,2);
+	    let topic=SMQ.utf8.decode(d,6);
 	    if(accepted) {
 		if(d[0] == MSG_CREATESUBACK) {
 		    tid2subtopicT[tid]=topic;
@@ -379,22 +385,22 @@ SMQ.Client = function(url, opt) {
 		    topic2tidT[topic]=tid;
 		}
 	    }
-	    var t = d[0] == MSG_CREATESUBACK ? subtopicAckCBT : topicAckCBT;
-	    var arr=t[topic];
+	    t = d[0] == MSG_CREATESUBACK ? subtopicAckCBT : topicAckCBT;
+	    let arr=t[topic];
 	    t[topic]=null;
 	    if(arr) {
-		for (var i = 0; i < arr.length; i++)
+		for (let i = 0; i < arr.length; i++)
 		    arr[i](accepted,topic,tid);
 	    }
 	    break;
 
 	case MSG_PUBLISH:
-	    var tid = n2h32(d,1);
-	    var ptid = n2h32(d,5);
-	    var subtid = n2h32(d,9);
-	    var data = new Uint8Array(evt.data,13)
-	    var cbFunc;
-	    var t = onMsgCBT[tid];
+	    tid = n2h32(d,1);
+	    let ptid = n2h32(d,5);
+	    let subtid = n2h32(d,9);
+	    let data = new Uint8Array(evt.data,13)
+	    let cbFunc;
+	    t = onMsgCBT[tid];
 	    if(t) {
 		cbFunc = t.subtops[subtid];
 		if(!cbFunc) cbFunc = t.onmsg ? t.onmsg : self.onmsg;
@@ -405,7 +411,7 @@ SMQ.Client = function(url, opt) {
 	    break;
 
 	case MSG_DISCONNECT:
-	    var msg;
+	    let msg;
 	    if(d.length > 1)
 		msg=SMQ.utf8.decode(d,1);
 	    onclose(msg ? msg : "disconnect",false);
@@ -421,11 +427,11 @@ SMQ.Client = function(url, opt) {
 	    break;
 
 	case MSG_CHANGE:
-	    var tid = n2h32(d,1);
-	    var func = observeT[tid];
+	    tid = n2h32(d,1);
+	    let func = observeT[tid];
 	    if(func) {
-		var subsribers = n2h32(d,5);
-		var topic = tid2topicT[tid];
+		let subsribers = n2h32(d,5);
+		let topic = tid2topicT[tid];
 		if(!topic && subsribers == 0)
 		    observeT[tid]=null; /* Remove ephemeral */
 		func(subsribers, topic ? topic : tid);
@@ -440,28 +446,28 @@ SMQ.Client = function(url, opt) {
     onconnect = function(evt, isReconnect) {
 	if( ! socket ) return;
 	cancelIntvConnect();
-	var d = new Uint8Array(evt.data);
+	let d = new Uint8Array(evt.data);
 	if(d[0] == MSG_INIT)
 	{
 	    if(d[1] == SMQ_VERSION)
 	    {
-		var credent
-		var rnd=n2h32(d,2);
-		var ipaddr=SMQ.utf8.decode(d,6);
-		var uid = SMQ.utf8.encode(opt.uid ? opt.uid : ipaddr+rnd);
-		var info = opt.info ? SMQ.utf8.encode(opt.info) : null;
+		let credent
+		let rnd=n2h32(d,2);
+		let ipaddr=SMQ.utf8.decode(d,6);
+		let uid = SMQ.utf8.encode(opt.uid ? opt.uid : ipaddr+rnd);
+		let info = opt.info ? SMQ.utf8.encode(opt.info) : null;
 		if(self.onauth) {
 		    credent=self.onauth(rnd, ipaddr);
 		    if(credent) credent = SMQ.utf8.encode(credent);
 		}
-		var out = new Uint8Array(3 + uid.length + 
+		let out = new Uint8Array(3 + uid.length + 
 					 (credent ? 1+credent.length : 1) + 
 					 (info ? info.length : 0));
 		out[0] = MSG_CONNECT;
 		out[1] = SMQ_VERSION;
 		out[2] = uid.length;
-		var ix;
-		var i;
+		let ix;
+		let i;
 		for(i = 0; i < uid.length; i++) out[3+i]=uid[i];
 		ix=3+i;
 		if(credent) {
@@ -475,12 +481,12 @@ SMQ.Client = function(url, opt) {
 			out[ix+i]=info[i];
 		}
 		socket.onmessage = function(evt) {
-		    var d = new Uint8Array(evt.data);
+		    let d = new Uint8Array(evt.data);
 		    if(d[0] == MSG_CONNACK)
 		    {
 			if(d[1] == 0)
 			{
-			    var tid = n2h32(d,2);
+			    let tid = n2h32(d,2);
 			    connected=true;
 			    socket.onmessage=onmessage;
 			    if(isReconnect) {
@@ -508,7 +514,7 @@ SMQ.Client = function(url, opt) {
 	    onclose("protocol error", false);
     };
 
-    var subOrCreate=function(topic, subtopic, settings, isCreate) {
+    let subOrCreate=function(topic, subtopic, settings, isCreate) {
 	if( ! connected ) {
 	    pendingCmds.push(function() {
 		subOrCreate(topic, subtopic, settings, isCreate);
@@ -520,15 +526,15 @@ SMQ.Client = function(url, opt) {
 	    subtopic=null;
 	}
 	if(!settings) settings={}
-	var onack=function(accepted,topic,tid,stopic,stid) {
+	let onack=function(accepted,topic,tid,stopic,stid) {
 	    if(settings.onack) settings.onack(accepted,topic,tid,stopic,stid);
 	    else if(!accepted) console.log("Denied:",topic,tid,stopic,stid);
 	    if(!isCreate && accepted && settings.onmsg) {
-		var t = onMsgCBT[tid];
+		let t = onMsgCBT[tid];
 		if(!t) t = onMsgCBT[tid] = {subtops:{}};
-		var onmsg = settings.onmsg;
-		var orgOnmsg=onmsg;
-		var dt=settings.datatype;
+		let onmsg = settings.onmsg;
+		let orgOnmsg=onmsg;
+		let dt=settings.datatype;
 		if(dt) {
 		    if(dt == "json") {
 			onmsg=function(data, ptid, tid, subtid) {
@@ -546,7 +552,7 @@ SMQ.Client = function(url, opt) {
 	    }
 	};
 	if(subtopic) {
-	    var orgOnAck = onack;
+	    let orgOnAck = onack;
 	    onack=function(accepted,topic,tid) {
 		if(accepted) {
 		    self.createsub(subtopic, function(accepted,stopic,stid) {
@@ -569,7 +575,7 @@ SMQ.Client = function(url, opt) {
 	    }
 	    else if(typeof topic == "string") {
 		if(pushElem(topicAckCBT,topic,onack)) {
-		    var d = new Uint8Array(SMQ.utf8.length(topic)+1)
+		    let d = new Uint8Array(SMQ.utf8.length(topic)+1)
 		    d[0] = isCreate ? MSG_CREATE : MSG_SUBSCRIBE;
 		    SMQ.utf8.encode(topic,d,1);
 		    socksend(d.buffer);
@@ -580,8 +586,8 @@ SMQ.Client = function(url, opt) {
 	}
     };
 
-    var getTid=function(topic) {
-	var tid;
+    let getTid=function(topic) {
+	let tid;
 	if(typeof topic =="string") {
 	    tid = topic2tidT[topic];
 	    if( ! tid ) throw new Error("tid not found");
@@ -598,7 +604,7 @@ SMQ.Client = function(url, opt) {
 	    });
 	    return;
 	}
-	var d;
+	let d;
 	if(typeof data == "string") {
 	    d = new Uint8Array(SMQ.utf8.length(data)+13)
 	    SMQ.utf8.encode(data,d,13);
@@ -610,8 +616,8 @@ SMQ.Client = function(url, opt) {
 	}
 	d[0] = MSG_PUBLISH;
 	h2n32(selfTid,d,5);
-	var tid,stid;
-	var sendit=function() { 
+	let tid,stid;
+	let sendit=function() { 
 	    h2n32(tid,d,1);
 	    h2n32(stid,d,9);
 	    socksend(d.buffer);
@@ -619,7 +625,7 @@ SMQ.Client = function(url, opt) {
 	if(typeof(topic) == "string") {
 	    tid = topic2tidT[topic];
 	    if(!tid) {
-		var orgSendit1=sendit;
+		let orgSendit1=sendit;
 		sendit=function() {
 		    self.create(topic,function(ok,x,t) {
 			if(ok) {
@@ -636,7 +642,7 @@ SMQ.Client = function(url, opt) {
 	else if(typeof(subtopic) == "string") {
 	    stid = subtopic2tidT[subtopic];
 	    if(!stid) {
-		var orgSendit2=sendit;
+		let orgSendit2=sendit;
 		sendit=function() {
 		    self.createsub(subtopic, function(ok,x,t) {
 			if(ok) {
@@ -674,7 +680,7 @@ SMQ.Client = function(url, opt) {
     
     self.disconnect=function() {
 	if(connected) {
-	    var d = new Uint8Array(1);
+	    let d = new Uint8Array(1);
 	    d[0] = MSG_DISCONNECT
 	    socket.send(d.buffer);
 	    connected=false;
@@ -710,7 +716,7 @@ SMQ.Client = function(url, opt) {
 	    }
 	    else if(typeof subtopic == "string") {
 		if(pushElem(subtopicAckCBT,subtopic,onsuback)) {
-		    var d = new Uint8Array(SMQ.utf8.length(subtopic)+1)
+		    let d = new Uint8Array(SMQ.utf8.length(subtopic)+1)
 		    d[0] = MSG_CREATESUB;
 		    SMQ.utf8.encode(subtopic,d,1);
 		    socksend(d.buffer);
@@ -721,15 +727,15 @@ SMQ.Client = function(url, opt) {
 	}
     };
 
-    var sendMsgWithTid=function(msgType, tid) {
-	var d = new Uint8Array(5);
+    let sendMsgWithTid=function(msgType, tid) {
+	let d = new Uint8Array(5);
 	d[0] = msgType;
 	h2n32(tid,d,1);
 	socksend(d.buffer);
     };
 
     self.unsubscribe = function(topic) {
-	var tid=getTid(topic);
+	let tid=getTid(topic);
 	if(onMsgCBT[tid]) {
 	    onMsgCBT[tid]=null;
 	    sendMsgWithTid(MSG_UNSUBSCRIBE, tid);
@@ -737,7 +743,7 @@ SMQ.Client = function(url, opt) {
     };
 
     self.observe=function(topic, onchange) {
-	var tid=getTid(topic);
+	let tid=getTid(topic);
 	if(tid != selfTid && !observeT[tid]) {
 	    observeT[tid] = onchange;
 	    sendMsgWithTid(MSG_OBSERVE, tid);
@@ -745,7 +751,7 @@ SMQ.Client = function(url, opt) {
     };
 
     self.unobserve=function(topic) {
-	var tid=getTid(topic);
+	let tid=getTid(topic);
 	if(observeT[tid]) {
 	    observeT[tid]=0;
 	    sendMsgWithTid(MSG_UNOBSERVE, tid);
@@ -760,5 +766,4 @@ SMQ.Client = function(url, opt) {
     };
 
     createSock(false);
-
 };
