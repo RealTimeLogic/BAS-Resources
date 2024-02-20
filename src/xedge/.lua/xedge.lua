@@ -512,6 +512,7 @@ local function newOrUpdateApp(cfg,cfgIx,fn,ion) -- On new/update cfg file
    local nc={name=cfg.name,url=cfg.url,running=cfg.running or false,autostart=cfg.autostart,dirname=cfg.dirname}
    if cfg.dirname then nc.priority=cfg.priority or 0 end
    if not nc.url then nc.url=url end
+   local start=true -- or restart
    if appsCfg[ion] then -- update
       local oc=appsCfg[ion] -- original config
       local aio=apps[ion].io
@@ -520,6 +521,7 @@ local function newOrUpdateApp(cfg,cfgIx,fn,ion) -- On new/update cfg file
 	 terminateApp(ion, true)
 	 newAppCfg(nc)
       else
+	 start = oc.running ~= nc.running
 	 appsCfg[ion]=nc
       end
    elseif ios[ion] then
@@ -530,7 +532,7 @@ local function newOrUpdateApp(cfg,cfgIx,fn,ion) -- On new/update cfg file
       return false
    end
    xedge.saveCfg()
-   manageApp(nc.name)
+   if start then manageApp(nc.name) end
    return true
 end
 
