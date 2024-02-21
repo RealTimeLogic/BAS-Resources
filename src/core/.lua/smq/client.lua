@@ -263,7 +263,7 @@ local function coSmqConnect(sock,self,data)
 	 local rnd,ip=sn2h(4,data,5),data:sub(9,-1)
 	 local uid=self.opt.uid or (ip..self.sock:sockname())
 	 local info = self.opt.info or self.sock:sockname()
-	 uid = #uid < 6 and (uid..ip) or ip
+	 uid = #uid < 6 and (uid..ip) or uid
 	 self.opt.uid=uid
 	 local oa=self.onauth
 	 local credentials = oa and oa(rnd,ip) or ""
@@ -357,7 +357,7 @@ local function connect2url(self,opt,callback)
       local status=http:status()
       if ok and 200 ~= status then
 	 ok,err,msg=nil,"nonsmq",fmt("Expected HTTP 200, got %d %s",
-            status or 0, tostring(err or ""))
+	    status or 0, tostring(err or ""))
       end
       if ok then
 	 callback(ba.socket.http2sock(http))
@@ -485,9 +485,9 @@ function C:subscribe(topic,subtopic,settings)
 	 end
       end
       if "self"==topic then
-         topicAck(true,topic,self.etid)
+	 topicAck(true,topic,self.etid)
       else
-         createTopic(self,topic,self.topic2tidT,self.topicAckCBT,MsgSubscribe,topicAck)
+	 createTopic(self,topic,self.topic2tidT,self.topicAckCBT,MsgSubscribe,topicAck)
       end
    end
    if subtopic then
