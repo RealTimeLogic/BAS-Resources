@@ -681,7 +681,7 @@ local function connect(_ENV,cmd,arg)
       local ecode,uid,info,reason=6
       local seed=ba.rnds(4)
       if sendFrame(sock,{rd=
-	 schar(MsgInit,1)..sh2n(4,seed)..rmIPv6pf(sock:getpeername() or "")})
+	 schar(MsgInit,1)..sh2n(4,seed)..rmIPv6pf(sock:peername() or "")})
       then
 	 local data = ws and
 	    getWebSockFrame(sock, readtmo) or

@@ -101,7 +101,7 @@ function ix:sockname()
 end
 
 function ix:getsockname()
-   return self.s:getsockname()
+   return self.s:sockname()
 end
 
 function ix:upgrade(shark)
@@ -113,7 +113,7 @@ function ix:peername()
 end
 
 function ix:getpeername()
-   return self.s:getpeername()
+   return self.s:peername()
 end
 
 function ix:getstats()
