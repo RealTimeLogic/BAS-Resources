@@ -1115,10 +1115,15 @@ local commands={
 
 -- Used by command.lsp
 function xedge.command(cmd)
-   local data = cmd:data()
-   local f=commands[data.cmd]
-   if f then f(cmd,data) end
-   local err=sfmt("Unknown command '%s'",data.cmd or "?")
+   local site,err=cmd:header"Sec-Fetch-Site"
+   if site and site == "same-origin" then
+      local data = cmd:data()
+      local f=commands[data.cmd]
+      if f then f(cmd,data) end
+      err=sfmt("Unknown command '%s'",data.cmd or "?")
+   else
+      err="Access denied: insecure browser"
+   end
    sendErr("%s",err)
    cmd:json{err=err}
 end

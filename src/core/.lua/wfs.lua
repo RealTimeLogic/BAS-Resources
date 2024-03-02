@@ -661,10 +661,12 @@ local function newWFS(name,priority,io,lockdir,maxuploads,maxlocks)
       _ENV.davbut=hasSesUri
       _ENV.helpdiv=helpdiv
       _ENV.dav=dav
-      local ua = request:header"User-Agent"
+      local ua,site = request:header"User-Agent",request:header"Sec-Fetch-Site"
+      if site and "cross-site" == site then sendresp(_ENV,"Access denied",false,"") end
       local func=serviceMethods[request:method()]
       if func then
 	 if ua and ua:find("Mozilla",1,true) then -- Assume WFM client
+	    if not site then sendresp(_ENV,"Access denied",false,"insecure browser") end
 	    if not session then authenticate(request,rel) end
 	    return func(_ENV,rel)
 	 end
