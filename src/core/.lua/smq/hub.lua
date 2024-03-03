@@ -716,13 +716,13 @@ local function connect(_ENV,cmd,arg)
 		     data=cmd:data(),
 		     header=cmd:header(),
 		     uname=uname,
-                     session=cmd:session()
+		     session=cmd:session()
 		  }
 		  ecode,reason=authenticate(credentials, xinfo)
-                  if not ecode then
-                     defaultLog(sock,"No response from authenticate")
-                     ecode = 6
-                  end
+		  if not ecode then
+		     defaultLog(sock,"No response from authenticate")
+		     ecode = 6
+		  end
 	       else
 		  ecode = 0x01
 	       end
@@ -759,7 +759,7 @@ local function connect(_ENV,cmd,arg)
 	    uidT[uid]=peerT
 	    tidT[tid]=sock
 	    sockT[sock]=peerT
-	    sock:setoption("keepalive",true,keepalive,keepalive)
+	    sock:setoption("keepalive",true,keepidle,keepintv)
 	    -- Start socket thread and convert socket to non blocking.
 	    sock:event(ws and webSockThread or rawSockThread, "s", _ENV)
 	    onconnect(tid, xinfo, peerT)
@@ -1088,7 +1088,11 @@ function B:etid2peer(tid)
 	 local x=self.tidT[tid]
 	 if x then return self.sockT[x] end
       end
-function B:setkeepalive(time) self.keepalive=time end
+function B:setkeepalive(idle,intv)
+   self.keepidle=idle
+   self.keepintv = "number" == type(intv) and intv or idle/10
+   if self.keepintv < 3 then self.keepintv=3 end
+end
 
 function B:pubon(data, totid, fromtid, stid)
    local to=self.tidT[totid]
@@ -1106,7 +1110,7 @@ end
 local function create(op)
    op = op or {}
    local env={
-      keepalive = "number" == type(op.keepalive) and op.keepalive or ((60*4)-10),
+      keepidle = "number" == type(op.keepidle) and op.keepidle or ((60*4)-10),
       uidT={}, -- K =(Universally) Unique ID, V = peerT
       topic2tidT={}, -- K = topic name, V = tid
       tid2topicT={}, -- K = tid, V = topic name
@@ -1131,6 +1135,8 @@ local function create(op)
       nosubscribers=noop,
       onshutdown=noop,
    }
+   env.keepintv = "number" == type(op.keepintv) and op.keepintv or env.keepidle/10
+   if env.keepintv < 3 then env.keepintv=3 end
    assertfunc(op.ondrop or noop, "op.ondrop")
    env.ondrop = op.ondrop
    assertfunc(op.onpublish or noop, "op.onpublish")
