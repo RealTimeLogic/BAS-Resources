@@ -666,7 +666,6 @@ local function newWFS(name,priority,io,lockdir,maxuploads,maxlocks)
       local func=serviceMethods[request:method()]
       if func then
 	 if ua and ua:find("Mozilla",1,true) then -- Assume WFM client
-	    if not site then sendresp(_ENV,"Access denied",false,"insecure browser") end
 	    if not session then authenticate(request,rel) end
 	    return func(_ENV,rel)
 	 end

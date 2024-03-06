@@ -1209,14 +1209,14 @@ local commands={
 -- Used by command.lsp
 function xedge.command(cmd)
    local site,err=cmd:header"Sec-Fetch-Site"
-   if site and site == "same-origin" then
-      local data = cmd:data()
-      local f=commands[data.cmd]
-      if f then f(cmd,data) end
-      err=sfmt("Unknown command '%s'",data.cmd or "?")
-   else
-      err="Access denied: insecure browser"
+   if site and "cross-site" == site then
+      cmd:senderror(404)
+      return
    end
+   local data = cmd:data()
+   local f=commands[data.cmd]
+   if f then f(cmd,data) end
+   err=sfmt("Unknown command '%s'",data.cmd or "?")
    sendErr("%s",err)
    cmd:json{err=err}
 end
