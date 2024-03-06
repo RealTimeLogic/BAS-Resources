@@ -49,7 +49,7 @@ function jsonReq(settings,cb,emsg) {
     settings.success = (rsp)=>{
 	if(!rsp.err && !rsp.emsg) {cb(rsp);return;}
 	alertErr(emsg+(rsp.emsg ? rsp.emsg : rsp.err));
-	cb(false);
+      cb(false,rsp);
     };
     settings.error=(x,s,err)=>{
 	let r=x.responseText;
@@ -119,10 +119,10 @@ function mkForm(list,olist,pe,insrt) {
 	    return;
 	}
 	if("radio" == o.type) {
-	    pe.append($('<label>',{text:o.rname,for:o.label}));
 	    let p={};
 	    for(let k in o)  p["label" == k ? "id" : k]=o[k];
 	    pe.append($('<input>',p));
+	    pe.append($('<label>',{text:o.rname,for:o.label}));
 	    return;
 	}
 	let l=o.label ? $('<label>',{text:o.name,for:o.label}) : $('<span>');
@@ -260,7 +260,7 @@ function appCfg(pn,cfg,isNewNet) {
 	}
     }
     else { //Configure new app
-	let n=strMatch(pn,/\/([^/]+)\/$/)
+	let n=strMatch(pn,/\/([^/]+)(?:\.zip)?\/?$/)
 	if(n) {
 	    elems.AppCfgName.val(n);
 	    elems.AppCfgDirName.val(n);

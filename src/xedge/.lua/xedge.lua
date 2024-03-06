@@ -117,17 +117,25 @@ end)()
 
 local ioStat={mtime=fakeTime(),size=0,isdir=true}
 
+local function filePath(path,file)
+   return #path > 0 and path.."/"..file or file
+end
+
 -- A recursive directory iterator
-local function recDirIter(io,curPath)
+local function recDirIter(io,curPath,onDir)
    local name
    local co
    local doDir
    function doDir(path)
       curPath=path
+      if onDir and #path > 0 then
+	 name=nil
+	 coroutine.yield()
+      end
       for file,isdir in io:files(path, true) do
 	 if "." ~= file and ".." ~= file then
 	    if isdir then
-	       if #path > 0 then doDir(path.."/"..file) else doDir(file) end
+	       doDir(filePath(path,file))
 	       curPath=path
 	    else
 	       name=file
@@ -482,8 +490,9 @@ local function manageApp(name,isStartup) -- start/stop/restart
 	    cnt = cnt+1
 	    if cnt > 100 then sendErr("Too many files in application '%s' (%s)",name,appc.url) break end
 	 end
-	 
       end
+   elseif err then
+      terminateApp(name)
    else
       appc.running=false
    end
@@ -505,10 +514,7 @@ local function newAppCfg(cfg)
    appsCfg[n]=cfg
 end
 
---something weird here
-
-local function newOrUpdateApp(cfg,cfgIx,fn,ion) -- On new/update cfg file
-   local url=ssub(fn,1, cfgIx-1)
+local function newOrUpdateApp(cfg,ion,url) -- On new/update cfg file
    local nc={name=cfg.name,url=cfg.url,running=cfg.running or false,autostart=cfg.autostart,dirname=cfg.dirname}
    if cfg.dirname then nc.priority=cfg.priority or 0 end
    if not nc.url then nc.url=url end
@@ -528,7 +534,7 @@ local function newOrUpdateApp(cfg,cfgIx,fn,ion) -- On new/update cfg file
       newAppCfg(nc)
       log("Creating new app '%s'",nc.name)
    else
-      log("Invalid URL %s",fn)
+      log("Invalid URL %s",url)
       return false
    end
    xedge.saveCfg()
@@ -555,7 +561,7 @@ local function open(fn, mode)
 	 if fn:find(".DAV/", 1, true) then return true end -- do nothing
 	 data=trim(data)
 	 local cfg=#data > 0 and jdecode(data) or {running=false}
-	 return newOrUpdateApp(cfg or {},cfgIx,fn,ion)
+	 return newOrUpdateApp(cfg or {},ion,ssub(fn,1, cfgIx-1))
       end
       local function x() return true end
       return {read=read,write=write,seek=x,flush=x,close=x}
@@ -916,6 +922,10 @@ local function t2s(t)
    return table.concat(a)
 end
 
+local function appIniErr(name,err)
+   return sfmt("%s./config failed: %s",name,err)
+end
+
 
 -- Used by command.lsp via xedge.command()
 local commands={
@@ -1110,6 +1120,89 @@ local commands={
 	 cmd:senderror(404)
       end
       cmd:abort()
+   end,
+   startApp=function(cmd,d)
+      local ioname,x="disk"
+      local dio,zipname=ba.openio(ioname),d.name
+      local dname=zipname and zipname:match"(.-)%.zip$"
+      if not dname or (dio:stat(dname) and "false" == d.deploy) then
+	 cmd:json{ok=false,err="Invalid params"}
+      end
+      local zio,err=ba.mkio(dio,zipname)
+      if zio then
+	 local function mkdir(dname)
+	    if dio:stat(dname) then return true end
+	    return dio:mkdir(dname)
+	 end
+	 local api,io,name,info={}
+	 if "false" == d.deploy then
+	    x,err=mkdir(dname)
+	    if x then io,err=ba.mkio(dio,dname) end
+	    if io then
+	       for path,name in recDirIter(zio,"",true) do
+		  if not name then
+		     x,err=mkdir(path)
+		     if not x then err=sfmt("%s: %s",path,err) break end
+		  else
+		     local fname=filePath(path,name)
+		     x,err=rw.file(zio,fname)
+		     if x then x,err=rw.file(io,fname,x) end
+		     if not x then err=sfmt("%s: %s",fname,err) break end
+		  end
+	       end
+	    end
+	    if not x then
+	       cmd:json{ok=false,err=sfmt("Cannot unpack %s: %s",zipname,err)}
+	    end
+	    zio:close()
+	    dio:remove(zipname)
+	    name=dname
+	 else
+	    io,name=zio,zipname
+	 end
+	 local nc={name=name,url=sfmt("%s/%s",ioname,name)}
+	 err=nil
+	 if io:stat".config" then
+	    x,api=pcall(function() return io:dofile".config" end)
+	    if x and "table" == type(api) then
+	       nc.name = "string" == type(api.name) and api.name or name
+	       nc.running,nc.autostart = api.autostart,api.autostart
+	    else
+	       err=appIniErr(name,"string" == type(api) or "failed")
+	       api={}
+	    end
+	 end
+	 local newApp=true
+	 local url=sfmt("%s/%s",ioname,zipname)
+	 for _,cfg in pairs(appsCfg) do
+	    if cfg.url == url then
+	       if zipname == name then -- depl
+		  newApp=false
+		  local running=cfg.running
+		  cfg.running=false
+		  newOrUpdateApp(cfg,cfg.name,url)
+		  appsCfg[cfg.name].running=running
+		  if api.upgrade then
+		     x,info=pcall(function() return api.upgrade(io) end)
+		     if not x then err=appIniErr(name,info) end
+		  end
+		  if running then manageApp(cfg.name) end
+	       else -- non-depl.
+		  terminateApp(cfg.name,true)
+	       end
+	       break
+	    end
+	 end
+	 if newApp then
+	    if api.install then
+	       x,info=pcall(function() return api.install(io) end)
+	       if not x then err=appIniErr(name,info) end
+	    end
+	    newOrUpdateApp(nc,ioname,url)
+	 end
+	 cmd:json{ok=not err,upgrade=not newApp,err=err,info=info or ""}
+      end
+      cmd:json{ok=true,err=sfmt("Cannot open %s: %s",zipname,err)}
    end
 }
 

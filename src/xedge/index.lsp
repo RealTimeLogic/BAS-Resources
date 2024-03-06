@@ -13,9 +13,7 @@
   <script src="assets/xedge.js"></script>
 </head>
 <body>
-  <div id="loader">
-    <svg xml:space="preserve" viewBox="0 0 100 100"><path fill="#fff" d="M31.6 3.5C5.9 13.6-6.6 42.7 3.5 68.4a49.93 49.93 0 0 0 64.9 28.1l-3.1-7.9a41.46 41.46 0 1 1-30.5-77.1l-3.2-8z"><animateTransform attributeName="transform" attributeType="XML" dur="2s" from="0 50 50" repeatCount="indefinite" to="360 50 50" type="rotate"/></path><path fill="#fff" d="M42.3 39.6c5.7-4.3 13.9-3.1 18.1 2.7 4.3 5.7 3.1 13.9-2.7 18.1l4.1 5.5a19.8 19.8 0 0 0-23.6-31.8l4.1 5.5z"><animateTransform attributeName="transform" attributeType="XML" dur="1s" from="0 50 50" repeatCount="indefinite" to="-360 50 50" type="rotate"/></path><path fill="#fff" d="M82 35.7C74.1 18 53.4 10.1 35.7 18S10.1 46.6 18 64.3l7.6-3.4c-6-13.5 0-29.3 13.5-35.3s29.3 0 35.3 13.5l7.6-3.4z"><animateTransform attributeName="transform" attributeType="XML" dur="2s" from="0 50 50" repeatCount="indefinite" to="360 50 50" type="rotate"/></path></svg>
-  </div>
+<?lsp response:include"assets/loader.html" ?>
   <div id="container">
     <div id="TreeDia"></div>
     <div id="left-pane">
