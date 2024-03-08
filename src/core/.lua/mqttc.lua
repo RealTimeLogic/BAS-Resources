@@ -1,4 +1,4 @@
--- MQTT 5.0 Client. Copyright Real Time Logic. 
+-- MQTT 5.0 Client. Copyright Real Time Logic.
 local fmt=string.format
 local btaCreate,btaCopy,btah2n,btan2h,btaSize,btaSetsize,bta2string=
    ba.bytearray.create,ba.bytearray.copy,ba.bytearray.h2n,ba.bytearray.n2h,

@@ -187,7 +187,7 @@ local function sendresp(_ENV,emsg,ok,err,exterr)
       end
    else
       if type(emsg) == "function" then emsg=emsg() end
-      local e2info={ 
+      local e2info={
 	 invalidname="Invalid name",
 	 notfound="Not found",
 	 exist="Resource exist",
@@ -561,7 +561,7 @@ local function newWFS(name,priority,io,lockdir,maxuploads,maxlocks)
       unlock=unlock,
       lock=lock,
    }
-   
+
    local function doDir(_ENV,rel,isPost)
       local c = cmd:data("cmd")
       local func = dircmd[(c or "ls")]
@@ -694,7 +694,7 @@ local function newWFS(name,priority,io,lockdir,maxuploads,maxlocks)
       end
       return service(_ENV,rel,s)
    end
-      
+
    resrdr=ba.create.resrdr(name,priority,io)
    resrdr:setfunc(service)
    dav=ba.create.dav(name,priority,io,lockdir,maxuploads,maxlocks)

@@ -244,7 +244,7 @@ local function onstatus(cenv,sock,up,id)
 	 local ltidT = cenv.ltidT
 	 -- loop tids for topics and ephemeral tids
 	 for rtid,ltid in pairs(connenv.rtidT) do
-	    ltidTRemove(cenv,ltid,sock) 
+	    ltidTRemove(cenv,ltid,sock)
 	 end
       end
       if type(up) == "nil" then

@@ -58,7 +58,7 @@ local _ENV={}
 			   self:sendResp(respo)
 			elseif ok then
 			   if type(errno) == "number" then
-			      self:sendError(errno,emsg) 
+			      self:sendError(errno,emsg)
 			   else
 			      self:sendError(0, fmt(
 				 "No response from %s",rpc.method))
@@ -137,7 +137,7 @@ local _ENV={}
      end
      resp:setcontenttype("application/json")
      resp:setheader("Cache-Control", "no-store, no-cache, must-revalidate")
-     resp:setheader("Content-Length",#d) 
+     resp:setheader("Content-Length",#d)
      resp:send(d)
   end
 

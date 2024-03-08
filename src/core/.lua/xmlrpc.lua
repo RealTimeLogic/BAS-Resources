@@ -35,7 +35,7 @@ local _ENV={}
 
 -- Make C bindings available in the xmlrpc package
 iso8601=encIso8601
-base64=encBase64 
+base64=encBase64
 
 
 local function doError(msg)
@@ -262,7 +262,7 @@ function metat.__index:execute(request, response)
 	       self:sendResp(result)
 	    elseif ok then
 	       if type(errno) == "number" then
-		  self:sendError(errno,emsg) 
+		  self:sendError(errno,emsg)
 	       else
 		  self:sendError(0,fmt("No response from %s",methn))
 	       end
@@ -328,7 +328,7 @@ local function sendResp(req,resp,d)
    end
    resp:setcontenttype("text/xml")
    resp:setheader("Cache-Control", "no-store, no-cache, must-revalidate")
-   resp:setheader("Content-Length",#d) 
+   resp:setheader("Content-Length",#d)
    resp:send(d)
 end
 

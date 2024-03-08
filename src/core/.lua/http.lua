@@ -28,7 +28,7 @@ local function checkStatus(self)
 	 local op=self.nop
 	 local method = op.method or "GET"
 	 while s == 301 or s == 302 or s == 303 or s == 307 do
-	    raw:read(0) -- Discard response 
+	    raw:read(0) -- Discard response
 	    r=r+1
 	    if r == 10 then return nil, "redirect" end
 	    local url=raw:header"location"

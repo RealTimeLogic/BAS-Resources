@@ -591,7 +591,7 @@ local function open(fn, mode)
    end
    return {read=read,write=write,seek=seek,flush=flush,close=close}
 end
- 
+
 local function files(fn)
    local cfg
    local io,ion,pn=fn2info(fn)
@@ -639,7 +639,7 @@ local function files(fn)
    local function stat() return {name=name,isdir=isdir,mtime=mtime,size=size} end
    return {read=read,name=name,stat=stat}
 end
- 
+
 local function stat(fn)
    if 0 == #fn or "." == fn then return ioStat end
    local io,ion,pn=fn2info(fn)
@@ -650,19 +650,19 @@ local function stat(fn)
    local ret,err=io:stat(pn)
    return ret,err
 end
- 
+
 local function mkdir(fn)
    local io,ion,pn=fn2info(fn)
    if not io or not pn then return nil,"noaccess" end
    return io:mkdir(pn)
 end
- 
+
 local function rmdir(fn)
    local io,ion,pn=fn2info(fn)
    if not io or not pn then return nil,"notfound" end
    return io:rmdir(pn)
 end
- 
+
 
 local function remove(fn)
    local io,ion,pn=fn2info(fn)
@@ -681,7 +681,7 @@ local function rename(fn,to)
    return io:rename(pn,to:sub(#ion+2))
 end
 
- 
+
 local iofuncs={open=open,files=files,stat=stat,mkdir=mkdir,rmdir=rmdir,remove=remove,rename=rename}
 local lio=ba.create.luaio(iofuncs)
 xedge.lio=lio
@@ -847,7 +847,7 @@ function xedge.init(cfg,aio,rtld) -- cfg from Xedge config file
    xedge.aio=aio
 
    -- The default 404 handler
-   local davm={PROPFIND=true,OPTIONS=true} 
+   local davm={PROPFIND=true,OPTIONS=true}
    local dir=ba.create.dir(nil,-127)
    dir:setfunc(function(_ENV)
       if davm[request:method()] then return false end
@@ -1011,7 +1011,7 @@ local commands={
 	 cmd:json{ok=true} -- not an app, but rsp must be OK
       end
    end,
-   run=function(cmd,data) 
+   run=function(cmd,data)
       if data.fn then
 	 local io,ion,pn=fn2info(data.fn)
 	 local app=apps[ion]

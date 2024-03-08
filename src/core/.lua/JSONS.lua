@@ -13,7 +13,7 @@ function JSONS:get(timeout)
    local _,connected = sock:state()
    if not connected then return nil,"closed" end
    while true do
-      local data 
+      local data
       local x,status,bytesRead,frameLen = sock:read(timeout)
       if not x then return nil,status end
       if status then -- if text frame

@@ -359,7 +359,7 @@ local function lShutdown(_ENV,msg,etid)
       if etid then
 	 local sock=tidT[etid]
 	 if sock then
-	    if type(sock) == "userdata" then 
+	    if type(sock) == "userdata" then
 	       sendFrame(sock,{rd=schar(MsgDisconnect)..msg})
 	       terminatePeerT(_ENV,sock)
 	    end
@@ -780,7 +780,7 @@ local function chktype(val,vtype,msg,level)
 end
 
 local function assertfunc(arg,typestr,level)
-   chktype(arg, "function", 
+   chktype(arg, "function",
 	   fmt("%s%s",typestr or ""," must be a function"), level or 3)
 end
 
@@ -977,7 +977,7 @@ end
 
 local function lUnobserve(_ENV,topic)
    local tid = getTid(_ENV, topic, true)
-   if tid then 
+   if tid then
       unobserve(_ENV, serverT, tid)
       serverT.sock.observeT[tid]=nil
    end

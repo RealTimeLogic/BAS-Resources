@@ -357,5 +357,5 @@ local function create(addr, onstatus, onpub, opt)
    connectAndRun(self, addr, onstatus, onpub)
    return self
 end
-   
+
 return {connect=connect,create=create}
