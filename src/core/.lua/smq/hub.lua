@@ -917,6 +917,7 @@ end
 local function lMsgDispatcher(sockThread, _ENV)
    while true do
       managePublish(_ENV,serverT,qT[qTail])
+      qT[qTail]=nil
       qTail = (qTail + 1) % qSize
       qElems = qElems - 1
       -- Stop thread if ring buffer queue empty
