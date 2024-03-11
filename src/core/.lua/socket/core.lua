@@ -5,7 +5,7 @@ $Id: core.lua 4061 2017-04-28 21:51:54Z wini $
 socket.core.lua: Included by socket.lua
 Provides a compatibility layer between ba.socket and Lua sockets.
 See lsocket.c for more info.
-Copyright (C) Real-Time Logic 2010
+Copyright (C) Real-Time Logic 2024
 
 --]]
 
@@ -22,7 +22,13 @@ function socket.gettime()
 end
 
 function socket.sleep(secs)
-   ba.sleep(secs*1000)
+   local s=ba.socket.getsock()
+   if s then
+      ba.timer(function() s:enable() end):set(secs*1000,true)
+      s:disable()
+   else
+      ba.sleep(secs*1000)
+   end
 end
 
 local sharkssl
@@ -52,7 +58,7 @@ end
 
 local function bas2SockErr(err)
    if err then
-      return err == "socketreadtimeout" and "timeout" or "closed"
+      return err == "timeout" and err or "closed"
    end
 end
 
@@ -93,26 +99,32 @@ function ix:connect(address, port)
 end
 
 function ix:certificate()
+   if not self.s then return nil,bas2SockErr() end
    return self.s:certificate()
 end
 
 function ix:sockname()
+   if not self.s then return nil,bas2SockErr() end
    return self.s:sockname()
 end
 
 function ix:getsockname()
+   if not self.s then return nil,bas2SockErr() end
    return self.s:sockname()
 end
 
 function ix:upgrade(shark)
+   if not self.s then return nil,bas2SockErr() end
    return self.s:upgrade(shark)
 end
 
 function ix:peername()
+   if not self.s then return nil,bas2SockErr() end
    return self.s:peername()
 end
 
 function ix:getpeername()
+   if not self.s then return nil,bas2SockErr() end
    return self.s:peername()
 end
 
@@ -141,7 +153,12 @@ function ix:settimeout(value, mode)
    end
 end
 
+function ix:gettimeout()
+   return self.timeout or math.maxinteger
+end
+
 function ix:receive(pattern, prefix)
+   if not self.s then return nil,bas2SockErr() end
    local d,e,t
    local recData=self.recData
    pattern = pattern or "l"
@@ -157,7 +174,7 @@ function ix:receive(pattern, prefix)
       if (pattern and #t > 1) or #t > 0 then return tconcat(t) end
       return nil, bas2SockErr(e)
    end
-   if pattern == "l" or  pattern == "*l" then
+   if pattern == "l" or	 pattern == "*l" then
       while true do
 	 if recData then
 	    local x,y = recData:find("\r?\n",self.recDataIx)
@@ -174,8 +191,8 @@ function ix:receive(pattern, prefix)
 	    end
 	 end
 	 d,e = self.s:read(self.timeout)
-	 if not d then
-	    return nil,bas2SockErr(e),ix_pruneRecData(self)
+	 if not d and not self.recData then
+	    return nil,bas2SockErr(e)
 	 end
 	 recData = ix_pruneRecData(self, d)
 	 self.recData=recData
@@ -217,6 +234,7 @@ end
 
 
 function ix:send(data,i,j)
+   if not self.s then return nil,bas2SockErr() end
    if G.type(data) == "table" then
       data = tconcat(data)
    end
@@ -226,10 +244,14 @@ function ix:send(data,i,j)
 end
 
 function ix:setoption(...)
+   if not self.s then return nil,bas2SockErr() end
    return self.s:setoption(...)
 end
 
+function ix:sock() return self.s end
+
 function ix:shutdown()
+   if not self.s then return nil,bas2SockErr() end
    return self.s:close() -- No shutdown thus use close
 end
 
