@@ -93,7 +93,7 @@ function ix:connect(address, port)
       self.s=address
       return true
    end
-   self.s,e=s.connect(address, port, self.op and self.op or {shark=sharkssl})
+   self.s,e=s.connect(address, port, self.op or {shark=sharkssl})
    if self.s then return true end
    return nil,e
 end
@@ -248,7 +248,10 @@ function ix:setoption(...)
    return self.s:setoption(...)
 end
 
-function ix:sock() return self.s end
+function ix:sock(op)
+   if "table" == G.type(op) then self.op=op end
+   return self.s
+end
 
 function ix:shutdown()
    if not self.s then return nil,bas2SockErr() end
