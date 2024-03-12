@@ -1158,18 +1158,18 @@ local commands={
       end
       local zio,err=ba.mkio(dio,zipname)
       if zio then
-	 local function mkdir(dname)
-	    if dio:stat(dname) then return true end
-	    return dio:mkdir(dname)
+	 local function mkdir(io,dname)
+	    if io:stat(dname) then return true end
+	    return io:mkdir(dname)
 	 end
 	 local api,io,name,info={}
 	 if "false" == d.deploy then
-	    x,err=mkdir(dname)
+	    x,err=mkdir(dio,dname)
 	    if x then io,err=ba.mkio(dio,dname) end
 	    if io then
 	       for path,name in recDirIter(zio,"",true) do
 		  if not name then
-		     x,err=mkdir(path)
+		     x,err=mkdir(io,path)
 		     if not x then err=sfmt("%s: %s",path,err) break end
 		  else
 		     local fname=filePath(path,name)
