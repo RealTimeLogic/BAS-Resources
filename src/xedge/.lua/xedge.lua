@@ -204,6 +204,13 @@ local function sendmail(m,s)
    return ok,err
 end
 
+function xedge.sendmail(op,cb)
+   ba.thread.run(function()
+      cb = "function" == type(cb) and cb or function() end
+      cb(sendmail(op))
+   end)
+end
+
 -- Returns a list of all plugin names, if any
 local function lsPlugins(ext)
    local rsp={}
@@ -434,13 +441,33 @@ local function manageXLuaFile(pn,app) -- start/restart an xx.xlua file
    app.envs[pn]=loadAndRunLua(app.io,pn,env) and env or nil
 end
 
-local function stopApp(name)
-   local app=apps[name]
-   assert(app)
-   if app.dir then app.dir:unlink() end
-   for n,env in pairs(app.envs) do runOnUnload(n,env,app.env) end
-   runOnUnload(".preload",app.env,app.env)
-   gc()
+local stopApp
+do
+   local ioT={}
+   function xedge.createloader(io)
+      if ioT[io] then return end
+      local function loader(name)
+	 name=name:gsub("%.","/")
+	 local lname=sfmt(".lua/%s.lua",name)
+	 if not io:stat(lname) then return nil end
+	 local res,err=io:loadfile(lname)
+	 if not res then tracep(false,1,err) end
+	 return res
+      end
+      tinsert(package.searchers, loader)
+      ioT[io]=#package.searchers
+      return loader
+   end
+   stopApp=function(name)
+      local app=apps[name]
+      assert(app)
+      if app.dir then app.dir:unlink() end
+      for n,env in pairs(app.envs) do runOnUnload(n,env,app.env) end
+      runOnUnload(".preload",app.env,app.env)
+      local ioIx=ioT[app.io]
+      if ioIx then table.remove(package.searchers,ioIx) end
+      gc()
+   end
 end
 
 local function terminateApp(name, nosave)
