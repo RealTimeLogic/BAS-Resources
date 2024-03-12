@@ -118,6 +118,15 @@ function ix:upgrade(shark)
    return self.s:upgrade(shark)
 end
 
+function ix:dohandshake(op)
+   local s=self.s
+   if not s then return nil,bas2SockErr() end
+   op = op or self.op
+   local shark = op and op.shark or G.ba.sharkclient()
+   return s:isresumed() or s:upgrade(shark)
+end
+
+
 function ix:peername()
    if not self.s then return nil,bas2SockErr() end
    return self.s:peername()
@@ -151,6 +160,7 @@ function ix:settimeout(value, mode)
    else
       self.timeout=value*1000
    end
+   return self.s and true or bas2SockErr()
 end
 
 function ix:gettimeout()
@@ -256,6 +266,11 @@ end
 function ix:shutdown()
    if not self.s then return nil,bas2SockErr() end
    return self.s:close() -- No shutdown thus use close
+end
+
+function ix:connected()
+   if self.s then return true end
+   return nil,bas2SockErr()
 end
 
 function tcp()
