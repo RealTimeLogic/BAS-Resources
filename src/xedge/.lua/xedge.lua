@@ -445,6 +445,7 @@ local stopApp
 do
    local ioT={}
    function xedge.createloader(io)
+      assert(io and io.realpath,"Invalid IO")
       if ioT[io] then return end
       local function loader(name)
 	 name=name:gsub("%.","/")
