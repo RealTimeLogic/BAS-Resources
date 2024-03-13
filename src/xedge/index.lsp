@@ -17,9 +17,7 @@
   <div id="container">
     <div id="TreeDia"></div>
     <div id="left-pane">
-      <div id="TreeCont">
-        <div id="tree"></div> 
-      </div>
+      <div id="TreeCont"></div>
     </div>
     <div id="right-pane">
       <div id="editorpane">

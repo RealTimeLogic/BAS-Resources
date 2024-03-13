@@ -793,128 +793,127 @@ function openSelFile() {
 /* At startup, initialize left pane tree.
 */
 function inittree() {
-    let timer;
-    let curNode;
-    let rightClick=false;
-    let longClick=false;
+  let timer;
+  let curNode;
+  let rightClick=false;
+  let longClick=false;
 
-    /* Hides tree dialog if event is outside an element in the
-       dialog. Also resets long press logic.
-    */
-    $("body").click(function (e) {
-	let el = e.target;
-	while(el.parentElement) {
-	    if("TreeDia" == el.id)
-		return;
-	    el=el.parentElement;
-	}
-	if(longClick)
-	    longClick=false;
-	else
-	    diaHide();
-    });
+  /* Hides tree dialog if event is outside an element in the
+     dialog. Also resets long press logic.
+  */
+  $("body").click(function (e) {
+    let el = e.target;
+    while(el.parentElement) {
+      if("TreeDia" == el.id)
+	return;
+      el=el.parentElement;
+    }
+    if(longClick)
+      longClick=false;
+    else
+      diaHide();
+  });
 
+  /* Inner createTree() function; called at startup & for new tree
+     rendering. See createTree=ct below.
+  */
+  function ct() {
+    selpn=undefined;
+    let appsEl={};
+    let jqTree=$("<div>").appendTo($('#TreeCont').empty());
     // Right click: activate context menu
-    $("#tree").contextmenu(ev=>{
-	treeCtxMenu(ev,curNode);
-	return false;
+    $(jqTree).contextmenu(ev=>{
+      treeCtxMenu(ev,curNode);
+      return false;
     }).
-		// Double click = pin editor
-		on('dblclick', () => { $(`[data-target="${lastEditorId}"]`).addClass('pined'); lastEditorId = false;}).
-    // Start long click timer; call treeCtxMenu() upon timer completion.
-    on('mousedown touchstart',ev=>{
+      // Double click = pin editor
+      on('dblclick', () => { $(`[data-target="${lastEditorId}"]`).addClass('pined'); lastEditorId = false;}).
+      // Start long click timer; call treeCtxMenu() upon timer completion.
+      on('mousedown touchstart',ev=>{
 	rightClick = 3 === ev.which;
 	timer=setTimeout(()=> {
-	    treeCtxMenu(ev,curNode);
-	    longClick=true;
-	    timer=null;
+	  treeCtxMenu(ev,curNode);
+	  longClick=true;
+	  timer=null;
 	},1000);
-    }).
-    // Cancel long click timer
-    on('mouseup touchend', ()=>{
+      }).
+      // Cancel long click timer
+      on('mouseup touchend', ()=>{
 	if(timer) {
-	    clearTimeout(timer);
-	    timer=null;
+	  clearTimeout(timer);
+	  timer=null;
 	}
+      });
+    tree = new Tree(jqTree.get(0),{navigate: true});
+    // Fetch all root directories, inclding any loaded apps.
+    setTimeout(()=>{
+      getDirList("",(list)=>{
+	tree.json(list);//Display root list; triggers 'created' event for each node.
+	sendCmd("getappsstat",(rsp)=>{
+	  for(const [name, running] of Object.entries(rsp.apps)) {
+	    appsEl[name].addClass(running ? "apprunning" : "appstopped");
+	  }
+	});
+	// The 'created' event has now populated 'appsEl'
+	if(Object.keys(appsEl).length === 0) {// if no apps
+	  sendCmd("getintro",(rsp)=>{
+	    // Show introductory information if we have no apps.
+	    createEditor("Welcome",null,null,rsp.intro);
+	  });
+	}
+      });
+    },10);
+    // Called for each inserted node.
+    tree.on('created',(e,node)=>{
+      if(!selpn) { //If loading root dirs
+	if(!ios[node.name]) { // if an app
+	  appsEl[node.name] = $(e).addClass("appnode");
+	  $(e).parent().addClass('application')
+	}
+      }
+      //Code below based on: https://github.com/lunu-bounir/tree.js/issues/5
+      e.node=node;
+      node.e=e;
     });
 
-    /* Inner createTree() function; called at startup & for new tree
-       rendering. See createTree=ct below.
-    */
-    function ct() {
-	selpn=undefined;
-	let appsEl={};
-	$('#tree').empty();
-	tree = new Tree(document.getElementById('tree'),{navigate: true});
-	// Fetch all root directories, inclding any loaded apps.
-	setTimeout(()=>{
-	    getDirList("",(list)=>{
-		tree.json(list);//Display root list; triggers 'created' event for each node.
-		sendCmd("getappsstat",(rsp)=>{
-		    for(const [name, running] of Object.entries(rsp.apps)) {
-			appsEl[name].addClass(running ? "apprunning" : "appstopped");
-		    }
-		});
-		// The 'created' event has now populated 'appsEl'
-		if(Object.keys(appsEl).length === 0) {// if no apps
-		    sendCmd("getintro",(rsp)=>{
-			// Show introductory information if we have no apps.
-			createEditor("Welcome",null,null,rsp.intro);
-		    });
-		}
-	    });
-	},10);
-	// Called for each inserted node.
-	tree.on('created',(e,node)=>{
-	    if(!selpn) { //If loading root dirs
-		if(!ios[node.name]) { // if an app
-		    appsEl[node.name] = $(e).addClass("appnode");
-		    $(e).parent().addClass('application')
-		}
-	    }
-	    //Code below based on: https://github.com/lunu-bounir/tree.js/issues/5
-	    e.node=node;
-	    node.e=e;
-	});
+    // On expand tree. 'opn' used by treeCtxMenu() -> newRes()
+    tree.on('open', e => e.node.opn=true);
 
-	// On expand tree. 'opn' used by treeCtxMenu() -> newRes()
-	tree.on('open', e => e.node.opn=true);
+    // When tree node selected (clicked). Build 'selpn' based on
+    // data set in on 'created'
+    tree.on('select',e=>{
+      if(!e.node) return;
+      curNode=e.node;
+      selpn=tree.hierarchy(e).map(e=>[e, e.node]).
+	reduce((n, obj)=>{return obj[1].name + '/' + n;}, '');
+      if(!e.node.type) {//if file
+	selpn=selpn.slice(0, -1); // Remove '/' in file.ext/
+	if(timer) { // Cancel long press
+	  clearTimeout(timer);
+	  timer=null;
+	}
+	if(!rightClick) //Open file in editor if left click.
+	  openSelFile();
+      }
+    });
 
-	// When tree node selected (clicked). Build 'selpn' based on
-	// data set in on 'created'
-	tree.on('select',e=>{
-	    if(!e.node) return;
-	    curNode=e.node;
-	    selpn=tree.hierarchy(e).map(e=>[e, e.node]).
-		reduce((n, obj)=>{return obj[1].name + '/' + n;}, '');
-	    if(!e.node.type) {//if file
-		selpn=selpn.slice(0, -1); // Remove '/' in file.ext/
-		if(timer) { // Cancel long press
-		    clearTimeout(timer);
-		    timer=null;
-		}
-		if(!rightClick) //Open file in editor if left click.
-		    openSelFile();
-	    }
+    // When tree node clicked.
+    tree.on('fetch', folder=>{
+      if("net/" == selpn) {
+	folder.resolve();
+	logErr("Cannot open the uninitialized NET IO.\n");
+	log("However, you may right click 'net' and create a network app.\n");
+      }
+      else {
+	getDirList(selpn, (list)=>{
+	  if(list) tree.json(list,folder);
+	  folder.resolve();
 	});
-
-	// When tree node clicked.
-	tree.on('fetch', folder=>{
-	    if("net/" == selpn) {
-		folder.resolve();
-		logErr("Cannot open the uninitialized NET IO.\n");
-		log("However, you may right click 'net' and create a network app.\n");
-	    }
-	    else {
-		getDirList(selpn, (list)=>{
-		    if(list) tree.json(list,folder);
-		    folder.resolve();
-		});
-	    }
-	});
-    };
-    createTree=ct;
-    createTree();
+      }
+    });
+  };
+  createTree=ct;
+  createTree();
 };
 
 /************** END OF FILE TREE ****************/
