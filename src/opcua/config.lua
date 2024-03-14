@@ -1,5 +1,5 @@
 local ua = require("opcua.api")
-local crt = require("opcua.binary.crypto.certificate")
+local compat = require("opcua.compat")
 
 local function countPolicies(securePolicies, uri)
   local count = 0
@@ -26,12 +26,17 @@ local function checkSecurePolicies(config)
     end
     local mode = policy.securityMode
     if uri == p.None then
-      if mode == nil then
-        policy.securityMode = {modes.None}
-      elseif mode ~= modes.None and type(mode) ~= 'table' and #mode ~= 1 and mode[1] ~= modes.None then
+      if mode ~= nil and mode ~= modes.None and type(mode) ~= 'table' and #mode ~= 1 and mode[1] ~= modes.None then
         error("security mode must be None for securityPolicyUri "..tostring(policy.securityPolicyUri))
       end
-    elseif uri == p.Basic128Rsa15 then
+      if mode == nil or type(mode) == 'number' then
+        policy.securityMode = {modes.None}
+      end
+    elseif uri == p.Basic128Rsa15 or
+           uri == p.Aes256_Sha256_RsaPss or
+           uri == p.Basic256Sha256 or
+           uri == p.Aes128_Sha256_RsaOaep
+    then
       local m
       if type(mode) == 'number' then
         m = {mode}
@@ -65,10 +70,10 @@ local function checkSecurePolicies(config)
 
       -- Try to load certificate and key
       if policy.certificate then
-        crt.createCert(policy.certificate, config.io)
+        ua.crypto.createCert(policy.certificate, config.io)
       end
       if policy.key then
-        crt.createKey(policy.key, config.io)
+        ua.crypto.createKey(policy.key, config.io)
       end
     else
       error("unsupported securityPolicyUri "..tostring(policy.securityPolicyUri))
@@ -78,27 +83,27 @@ end
 
 local function commonConfig(config)
   if config.cosocketMode == nil then
-    config.cosocketMode = ba.socket.getsock() ~= nil
+    config.cosocketMode = compat.socket.getsock() ~= nil
   elseif type(config.cosocketMode) ~= "boolean" then
-      error("invalid cosocketMode")
+      error("cosocketMode")
   end
 
   if config.bufSize == nil then
     config.bufSize = 65536
   elseif type(config.bufSize) ~= "number" then
-    error("invalid bufSize")
+    error("bufSize")
   end
 
   if config.applicationName == nil then
     config.applicationName = ua.Version.ApplicationName
   elseif type(config.applicationName) ~= "string" then
-    error("invalid applicationName")
+    error("applicationName")
   end
 
   if config.applicationUri == nil then
     config.applicationUri = ua.Version.ApplicationUri
   elseif type(config.applicationUri) ~= "string" then
-    error("invalid applicationUri")
+    error("applicationUri")
   end
 
   if config.productUri == nil then
@@ -271,25 +276,58 @@ local function identityTokens(config)
 end
 
 local function serverConfig(config)
-  if type(config.endpointUrl) ~= "string" then
+  if config.endpoints == nil then
+    if config.endpointUrl == nil then
+      error("No endpointUrl")
+    end
+
+    config.endpoints = {
+      {
+        endpointUrl = config.endpointUrl,
+        listenPort = config.listenPort,
+        listenAddress = config.listenAddress
+      }
+    }
+    config.endpointUrl = nil
+    config.listenPort = nil
+    config.listenAddress = nil
+  end
+
+  if type(config.endpoints) ~= "table" then
     error("invalid endpointUrl")
   end
 
-  local url,err = ua.parseUrl(config.endpointUrl)
-  if err then
-    error("Invalid endpointURL. "..err)
-  end
+  for _,endpoint in ipairs(config.endpoints) do
+    if type(endpoint) ~= "table" then
+      error("invalid endpoint")
+    end
 
-  if config.listenPort == nil then
-    config.listenPort = url.port
-  elseif type(config.listenPort) ~= "number" then
-    error("invalid listenPort")
-  end
+    local url,err = ua.parseUrl(endpoint.endpointUrl)
+    if err then
+      error("Invalid endpointURL. "..err)
+    end
+    if url.scheme == "opc.tcp" then
 
-  if config.listenAddress == nil then
-    config.listenAddress = url.host
-  elseif type(config.listenAddress) ~= "string" then
-    error("invalid listenAddress")
+      if endpoint.listenPort == nil then
+        endpoint.listenPort = url.port
+      elseif type(endpoint.listenPort) ~= "number" then
+        error("invalid listenPort")
+      end
+
+      if endpoint.listenAddress == nil then
+        endpoint.listenAddress = url.host
+      elseif type(endpoint.listenAddress) ~= "string" then
+        error("invalid listenAddress")
+      end
+
+    elseif
+      url.scheme == "opc.http" or url.scheme == "http" or
+      url.scheme == "opc.https" or url.scheme == "https"
+    then
+      url.scheme = url.scheme -- do something (left to pass lint check because unused if branch)
+    else
+      error("scheme '" .. url.scheme.."'")
+    end
   end
 
   if config.authenticate and type(config.authenticate) ~= "function" then
@@ -297,19 +335,19 @@ local function serverConfig(config)
   end
 
   if config.certificate then
-    crt.createCert(config.certificate, config.io)
+    ua.crypto.loadCert(config.certificate, config.io)
     if not config.key then
       error("No private key")
     end
-    crt.createKey(config.key, config.io)
+    ua.crypto.loadKey(config.key, config.io)
   end
 
   if config.key then
     if not config.certificate then
       error("No certificate")
     end
-    crt.createCert(config.certificate, config.io)
-    crt.createKey(config.key, config.io)
+    ua.crypto.loadCert(config.certificate, config.io)
+    ua.crypto.loadKey(config.key, config.io)
   end
 
   commonConfig(config)

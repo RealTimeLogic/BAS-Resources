@@ -8,7 +8,7 @@ function address_space:getNode(nodeId)
 
   -- get node from ns0
   local node1 = n[nodeId]
-  local node = ns0.getNode(nodeId)
+  local node = ns0[nodeId]
   if node == nil then
     return node1
   end

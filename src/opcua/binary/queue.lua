@@ -52,13 +52,14 @@
 -- > str = tostring(q)
 
 
+local compat = require("opcua.compat")
 local st = require ("opcua.status_codes")
 local BadOutOfMemory = st.BadOutOfMemory
 local BadNoData = st.BadNoData
 
-local lbacreate = ba.bytearray.create
-local lbasetsize = ba.bytearray.setsize
-local lbasize = ba.bytearray.size
+local lbacreate = compat.bytearray.create
+local lbasetsize = compat.bytearray.setsize
+local lbasize = compat.bytearray.size
 
 local function qpairs(t)
   local function stateless_iter(tbl, k)
@@ -88,6 +89,9 @@ local Q = {
       self.Buf[ix + 1] = data
       return
     elseif type(data) == "string" then
+      if data == "" then
+        return
+      end
       local l =  #data
       if (e + l) > cap then
         error(BadOutOfMemory)

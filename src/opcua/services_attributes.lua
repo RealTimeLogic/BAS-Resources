@@ -45,80 +45,71 @@ local ExtensionObject = "i=22"
 local UtcTime = "i=294"
 
 local function createBadAttribute()
-  return { statusCode = BadAttributeIdInvalid}
+  return { StatusCode = BadAttributeIdInvalid}
 end
 
 local function getValue(attr, dataType)
-  if type(attr) == 'table' and attr.value ~= nil then
+  if type(attr) == 'table' and attr.Value ~= nil then
+    if not t.dataValueValid(attr) then
+      error(BadInternalError)
+    end
     return attr
   end
 
   if attr == nil  then
-    return {
-      statusCode = BadAttributeIdInvalid
-    }
+    return createBadAttribute()
   end
 
   local variant = {}
   if dataType == Boolean then
-    variant.boolean = attr
+    variant.Boolean = attr or false
   elseif dataType == SByte then
-    variant.sbyte = attr or 0
+    variant.SByte = attr or 0
   elseif dataType == Byte then
-    variant.byte = attr
+    variant.Byte = attr
   elseif dataType == Int16 then
-    variant.int16 = attr
+    variant.Int16 = attr
   elseif dataType == UInt16 then
-    variant.uint16 = attr
+    variant.UInt16 = attr
   elseif dataType == Int32 then
-    variant.int32 = attr
+    variant.Int32 = attr
   elseif dataType == UInt32 then
-    variant.uint32 = attr
+    variant.UInt32 = attr
   elseif dataType == Int64 then
-    variant.int64 = attr
+    variant.Int64 = attr
   elseif dataType == UInt64 then
-    variant.uint64 = attr
+    variant.UInt64 = attr
   elseif dataType == Float then
-    variant.float = attr
+    variant.Float = attr
   elseif dataType == Double then
-    variant.double = attr or 0.0
+    variant.Double = attr or 0.0
   elseif dataType == String then
-    variant.string = attr
+    variant.String = attr
   elseif dataType == DateTime or dataType == 294 then
-    variant.dateTime = attr
+    variant.DateTime = attr
   elseif dataType == Guid then
-    variant.guid = attr
+    variant.Guid = attr
   elseif dataType == ByteString then
-    variant.byteString = attr
+    variant.ByteString = attr
   elseif dataType == XmlElement then
     return createBadAttribute()
   elseif dataType == NodeId then
-    variant.nodeId = attr
+    variant.NodeId = attr
   elseif dataType == ExpandedNodeId then
-    variant.expandedNodeId = attr
+    variant.ExpandedNodeId = attr
   elseif dataType == StatusCode then
-    variant.statusCode = attr
+    variant.StatusCode = attr
   elseif dataType == QualifiedName then
-    if t.qualifiedNameValid(attr) then
-      variant.qualifiedName = attr
-    else
-      variant.qualifiedName = {
-        ns = 0,
-        name = attr
-      }
+    assert(t.qualifiedNameValid(attr))
+    variant.QualifiedName = attr
+    if (variant.QualifiedName.ns == nil) then
+      variant.QualifiedName.ns = 0
     end
   elseif dataType == LocalizedText then
-    variant.localizedText = {}
-    if type(attr) == "string" then
-      variant.localizedText = {
-        text = attr,
-        locale = "en"
-      }
-    else
-      variant.localizedText = attr
-    end
+    assert(t.localizedTextValid(attr));
+    variant.LocalizedText = attr
   elseif dataType == ExtensionObject then
-    variant.extensionObject = attr
+    variant.ExtensionObject = attr
   elseif dataType == DataValue then
     return createBadAttribute()
   elseif dataType == Variant then
@@ -127,13 +118,13 @@ local function getValue(attr, dataType)
     return createBadAttribute()
   else
     return {
-      statusCode = BadInternalError
+      StatusCode = BadInternalError
     }
     end
 
   return {
-    value = variant,
-    statusCode = 0
+    Value = variant,
+    StatusCode = 0
   }
 end
 
@@ -170,7 +161,7 @@ local function getCommonAttribute(attrs, attrId)
 
   if attrId == AttributeId.Description then
     if attr == nil then
-      return {statusCode = 0}
+      return {StatusCode = 0}
     end
     return getValue(attr, LocalizedText)
   elseif attrId == AttributeId.RolePermissions then
@@ -196,8 +187,7 @@ local function getViewAttribute(attrs, attrId, nodeset)
   if attrId == AttributeId.EventNotifier then
     return getValue(attrs[attrId] or 0, Byte)
   elseif attrId == AttributeId.ContainsNoLoops then
-    local v = attrs[attrId]
-    return getValue(v ~= nil and v or 0, Boolean)
+    return getValue(attrs[attrId] or false, Boolean)
   else
     return getCommonAttribute(attrs, attrId, nodeset)
   end
@@ -205,7 +195,7 @@ end
 
 local function getObjectTypeAttribute(attrs, attrId, nodeset)
   if attrId == AttributeId.IsAbstract then
-    return getValue(attrs[attrId] or 0, Boolean)
+    return getValue(attrs[attrId] or false, Boolean)
   else
     return getCommonAttribute(attrs, attrId, nodeset)
   end
@@ -214,10 +204,9 @@ end
 
 local function getRefTypeAttribute(attrs, attrId, nodeset)
   if attrId == AttributeId.IsAbstract then
-    local attr = attrs[attrId]
-    return getValue(attr ~= nil and attr or 0, Boolean)
+    return getValue(attrs[attrId] or false, Boolean)
   elseif attrId == AttributeId.Symmetric then
-    return getValue(attrs[attrId] or 0, Boolean)
+    return getValue(attrs[attrId] or false, Boolean)
   elseif attrId == AttributeId.InverseName then
     return getValue(attrs[attrId], LocalizedText)
   else
@@ -233,7 +222,7 @@ local function getVariableAttribute(attrs, attrId, nodeset)
     if attrs.valueSource ~= nil then
       return getValue(attrs.valueSource(attrs[AttributeId.NodeId]), attrs[AttributeId.DataType])
     else
-      if attr == nil then return {statusCode = 0} end
+      if attr == nil then return {StatusCode = 0} end
       return getValue(attrs[attrId], attrs[AttributeId.DataType])
     end
   elseif attrId == AttributeId.DataType then
@@ -250,11 +239,7 @@ local function getVariableAttribute(attrs, attrId, nodeset)
   elseif attrId == AttributeId.MinimumSamplingInterval then
     return getValue(attr or 0, Double)
   elseif attrId == AttributeId.Historizing then
-    if attr == nil then
-      return getValue(false, Boolean)
-    else
-      return getValue(attr, Boolean)
-    end
+    return getValue(attr or false, Boolean)
   elseif attrId == AttributeId.AccessLevelEx then
     return getValue(attr, UInt32)
   else
@@ -269,12 +254,11 @@ local function getVariableTypeAttribute(attrs, attrId, nodeset)
   elseif attrId == AttributeId.Rank then
     return getValue(attrs[attrId] or -2, Int32)
   elseif attrId == AttributeId.IsAbstract then
-    local v = attrs[attrId]
-    return getValue(v ~= nil and v or 0, Boolean)
+    return getValue(attrs[attrId] or false, Boolean)
   -- Optional
   elseif attrId == AttributeId.Value then
     local attr = attrs[attrId]
-    if attr == nil then return {statusCode = 0} end
+    if attr == nil then return {StatusCode = 0} end
     return getValue(attr, attrs[AttributeId.DataType])
   elseif attrId == AttributeId.ArrayDimensions then
     return getValue(attrs[attrId], UInt32)
@@ -287,7 +271,7 @@ local function getDataTypeAttribute(attrs, attrId, nodeset)
   -- Mandatory
   if attrId == AttributeId.IsAbstract then
     local v = attrs[attrId]
-    return getValue(v ~= nil and v or 0, Boolean)
+    return getValue(v, Boolean)
   -- Optional
   elseif attrId == AttributeId.DataTypeDefinition then
     return getValue(attrs[attrId], NodeId)
@@ -299,8 +283,7 @@ end
 local function getMethodAttribute(attrs, attrId, nodeset)
   -- Mandatory
   if attrId == AttributeId.Executable or attrId == AttributeId.UserExecutable then
-    local v = attrs[attrId]
-    return getValue(v ~= nil and v or 0, Boolean)
+    return getValue(attrs[attrId] or false, Boolean)
   else
     return getCommonAttribute(attrs, attrId, nodeset)
   end
@@ -318,9 +301,9 @@ local function checkDataType(val, dataType, nodeset)
     while tt >= AttributeId.Max and nodeset ~= nil do
       local n = nodeset:getNode(dataType)
       if n == nil then return s.NodeIdUnknown end
-      for _,v in ipairs(n.refs) do
-        if v[2] == HasSubtype and v[3] == 0 then
-          dataType = v[1]
+      for _,ref in ipairs(n.refs) do
+        if ref.type == HasSubtype and ref.isForward == false then
+          dataType = ref.target
           tt = ua.NodeId.fromString(dataType).id
           break
         end
@@ -398,7 +381,7 @@ local function checkVariableAttribute(attrs, attrId, val, nodeset)
     if not t.dataValueValid(val) then
         error(BadAttributeIdInvalid)
     end
-    checkDataType(val.value, attrs[AttributeId.DataType], nodeset)
+    checkDataType(val.Value, attrs[AttributeId.DataType], nodeset)
   elseif attrId == AttributeId.DataType then
     checkDataType(val, NodeId, nodeset)
   elseif attrId == AttributeId.ValueRank then
@@ -465,5 +448,6 @@ return {
     end
   end,
 
-  checkDataType = checkDataType
+  checkDataType = checkDataType,
+  createValue = getValue
 }

@@ -43,7 +43,9 @@ t.SecurityPolicy = {
 }
 
 t.TranportProfileUri = {
-  Binary = "http://opcfoundation.org/UA-Profile/Transport/uatcp-uasc-uabinary"
+  TcpBinary = "http://opcfoundation.org/UA-Profile/Transport/uatcp-uasc-uabinary",
+  HttpsBinary = "http://opcfoundation.org/UA-Profile/Transport/https-uabinary",
+  HttpsJson ="http://opcfoundation.org/UA-Profile/Transport/https-uajson"
 }
 
 t.ServerProfile = {

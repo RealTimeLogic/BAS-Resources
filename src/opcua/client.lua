@@ -1,8 +1,9 @@
 local ua = require("opcua.api")
+local createCert = ua.crypto.createCert
+local compat = require("opcua.compat")
 local securePolicy = require("opcua.binary.crypto.policy")
-local certificate = require("opcua.binary.crypto.certificate")
 local Q = require("opcua.binary.queue")
-local Binary = require("opcua.binary.encode_types")
+local BinaryEncoder = require("opcua.binary.encoder")
 local MessageId = require("opcua.binary.message_id")
 local tools = ua.Tools
 
@@ -12,8 +13,10 @@ local traceE = ua.trace.err
 local fmt = string.format
 
 local BadNotConnected = ua.StatusCode.BadNotConnected
+local BadSessionIdInvalid = ua.StatusCode.BadSessionIdInvalid
 local BadIdentityTokenRejected = ua.StatusCode.BadIdentityTokenRejected
 local BadIdentityTokenInvalid = ua.StatusCode.BadIdentityTokenInvalid
+local BadSecureChannelClosed = ua.StatusCode.BadSecureChannelClosed
 
 local C={} -- OpcUa Client
 C.__index=C
@@ -22,7 +25,7 @@ local function syncExecRequest(self, request)
   local dbgOn = self.config.logging.services.dbgOn
   if dbgOn then ua.Tools.printTable("services | execRequest", request, traceD) end
 
-  local suc, err = pcall(self.services.sendMessage, self.services, request)
+  local suc, err = pcall(self.services.sendMessage, self.services, request, true)
   if not suc then
     return self:processResponse(nil, err)
   end
@@ -40,23 +43,29 @@ local function coExecRequest(self, request, callback)
   local dbgOn = self.config.logging.services.dbgOn
   if dbgOn then ua.Tools.printTable("services | execRequest", request, traceD) end
 
-  local coSock = ba.socket.getsock()
   local defCallback
-  if coSock and callback == nil then
-    defCallback = function(m, e)
-      coSock:enable(m, e)
-    end
+  local coSock = compat.socket.getsock()
+  if not coSock and not self.hasSecureChannel and not callback then
+    return syncExecRequest(self, request)
   end
 
-  self.requests[request.requestHeader.requestHandle] = callback or defCallback
+  if callback == nil then
+    defCallback = function(m, e)
+      if dbgOn then traceD("default cosock callback called") end
+      coSock:enable(m, e)
+    end
+    callback = defCallback
+  end
 
+  self.requests[request.RequestHeader.RequestHandle] = callback
   local suc, err = pcall(self.services.sendMessage, self.services, request)
   if not suc then
-    self.requests[request.requestHeader.requestHandle] = nil
+    self.requests[request.RequestHeader.RequestHandle] = nil
     return self:processResponse(nil, err)
   end
 
   if coSock and defCallback then
+    if dbgOn then traceD("waiting default cosock callback") end
     return coSock:disable()
   end
 end
@@ -70,72 +79,77 @@ local function coProcessResp(self, resp, err)
     end
     self.requests = {}
   else
-    local callback = self.requests[resp.responseHeader.requestHandle]
+    local callback = self.requests[resp.ResponseHeader.RequestHandle]
     if callback then
-      if resp.responseHeader.serviceResult ~= 0 then
-        return callback(nil, resp.responseHeader.serviceResult)
+      if resp.ResponseHeader.ServiceResult ~= 0 then
+        return callback(nil, resp.ResponseHeader.ServiceResult)
       else
         return callback(resp, err)
       end
     else
-      error("unknown response handle: "..resp.responseHeader.requestHandle)
+      error("unknown response handle: "..resp.ResponseHeader.RequestHandle)
     end
   end
 end
 
 local function syncProcessResp(_, resp, err)
-  if resp and resp.responseHeader.serviceResult ~= 0 then
-    return nil, resp.responseHeader.serviceResult
+  if resp and resp.ResponseHeader.ServiceResult ~= 0 then
+    return nil, resp.ResponseHeader.ServiceResult
   end
 
   return resp, err
 end
 
-function C:connect(endpointUrl, connectCallback)
+function C:connect(endpointUrl, transportProfile, connectCallback)
   local config = self.config
   local infOn = config.logging.services.infOn
-  local services = self.services
-  local coSock = ba.socket.getsock()
 
+  if type(transportProfile) == "function" then
+    assert(connectCallback == nil)
+    connectCallback = transportProfile
+    transportProfile = nil
+  end
+
+  -- check url is valid before entering cosockets: we might hang there
+  -- because of parsing URL is perofmed before first network call.
+  local url,err = ua.parseUrl(endpointUrl)
+  if err then
+    error(err)
+  end
   self.endpointUrl = endpointUrl
 
+  if url.scheme == "opc.tcp" then
+    if transportProfile == nil then
+      transportProfile = ua.Types.TranportProfileUri.TcpBinary
+    end
+
+    local binary = require("opcua.binary.client")
+    self.services = binary.new(self.config, self.sock, self.model)
+    self.hasSecureChannel = true
+  elseif
+    url.scheme == "opc.http"  or url.scheme == "http" or
+    url.scheme == "opc.https" or url.scheme == "https"
+  then
+    if transportProfile == nil then
+      transportProfile = ua.Types.TranportProfileUri.HttpsBinary
+    end
+
+    self.hasSecureChannel = false
+    local http = require("opcua.binary.client_http")
+    self.services = http.new(self.config, self.sock, self.model)
+  else
+    error("OPCUA: unsupported scheme: "..url.scheme)
+  end
+
   if config.cosocketMode == true then
-    if coSock == nil and connectCallback == nil then
-      error("OPCUA: no connect callback in empty cosocket context")
-    end
-
-    if infOn then traceI(fmt("services | Connecting to endpoint '%s' in cosock mode", endpointUrl)) end
-    local defCallback
-    if connectCallback == nil then
-      defCallback = function(resp, err)
-        coSock:enable(resp, err)
-      end
-    end
-
     self.execRequest = coExecRequest
     self.processResp = coProcessResp
-    local messageCallback = function(msg, err)
-      self:processResponse(msg, err)
+    local responseCallback = function(msg, e)
+      self:processResponse(msg, e)
     end
 
-    -- check url is valid before entering cosockets: we might hang there
-    -- because of parsing URL is perofmed before first network call.
-    local _,err = ua.parseUrl(endpointUrl)
-    if err then
-      (connectCallback or defCallback)(nil, err)
-      return err;
-    end
-
-    services:coRun(endpointUrl, connectCallback or defCallback, messageCallback)
-    if defCallback ~= nil then
-      if infOn then traceI(fmt("services | waiting for connection", endpointUrl)) end
-      return coSock:disable()
-    end
+    self.services:coRun(endpointUrl, transportProfile, connectCallback, responseCallback)
   else
-    if coSock then
-      error("OPCUA: can't connect in cosocket context")
-    end
-
     if connectCallback then
       error("OPCUA: can't use callbacks in non-cosocket mode")
     end
@@ -143,8 +157,12 @@ function C:connect(endpointUrl, connectCallback)
     if infOn then traceI(fmt("services | Connecting to endpoint '%s' in synchronous mode", endpointUrl)) end
     self.execRequest = syncExecRequest
     self.processResp = syncProcessResp
-    return services:connectServer(endpointUrl)
+    return self.services:connectServer(endpointUrl, transportProfile)
   end
+end
+
+function C:setEnpointUrl(endpointUrl)
+  self.endpointUrl = endpointUrl
 end
 
 function C:disconnect()
@@ -154,6 +172,10 @@ function C:disconnect()
   self.channelNonce = nil
   self.userIdentityTokens = nil
   self.sessionNonce = nil
+
+  if not self:connected() then
+    return nil, BadNotConnected
+  end
 
   if self.channelTimer then
     if infOn then traceI("services | closing secure channel") end
@@ -175,15 +197,16 @@ function C:processResponse(msg, err)
   end
   local response
   if msg then
-    response = msg.body
-    if response.responseHeader.serviceResult == 0 then
-      if msg.type == MessageId.OPEN_SECURE_CHANNEL_RESPONSE then
+    local typeId = msg.TypeId
+    response = msg.Body
+    if response.ResponseHeader.ServiceResult == 0 then
+      if typeId == MessageId.OPEN_SECURE_CHANNEL_RESPONSE then
         if infOn then traceI("services | received OPEN_SECURE_CHANNEL_RESPONSE") end
-        self:processOpenSecureChannelResponse(response)
-      elseif msg.type == MessageId.CREATE_SESSION_RESPONSE then
-        self:processCreateSessionResponse(response)
-      elseif msg.type == MessageId.ACTIVATE_SESSION_RESPONSE then
-        self:processActivateSessionResponse(response)
+        err = self:processOpenSecureChannelResponse(response)
+      elseif typeId == MessageId.CREATE_SESSION_RESPONSE then
+        err = self:processCreateSessionResponse(response)
+      elseif typeId == MessageId.ACTIVATE_SESSION_RESPONSE then
+        err = self:processActivateSessionResponse(response)
       end
     end
   end
@@ -194,21 +217,18 @@ end
 function C:processOpenSecureChannelResponse(response)
   local infOn = self.config.logging.services.infOn
 
-  local serverNonce = response.serverNonce
+  local serverNonce = response.ServerNonce
 
-  self.services.enc:setNonces(self.channelNonce, serverNonce)
-  self.services.dec:setNonces(serverNonce, self.channelNonce)
+  self.services:setSecureMode(self.securityMode)
+  self.services:setNonces(self.channelNonce, serverNonce)
 
-  self.services.dec:setSecureMode(self.securityMode)
-  self.services.enc:setSecureMode(self.securityMode)
-
-  self.services.enc:setChannelId(response.securityToken.channelId)
-  self.services.enc:setTokenId(response.securityToken.tokenId)
-  local timeoutMs = response.securityToken.revisedLifetime
+  self.services.enc:setChannelId(response.SecurityToken.ChannelId)
+  self.services.enc:setTokenId(response.SecurityToken.TokenId)
+  local timeoutMs = response.SecurityToken.RevisedLifetime
   if infOn then traceI(fmt("services | secure channel token timeout %s", timeoutMs)) end
   timeoutMs = timeoutMs * 3 / 4
   if self.channelTimer == nil then
-    self.channelTimer = ba.timer(function()
+    self.channelTimer = compat.timer(function()
       if infOn then traceI("services | renewing secure channel token") end
       local _, err = self:renewSecureChannel(timeoutMs, function (_, err)
         if err == nil then
@@ -230,28 +250,33 @@ end
 function C:processCreateSessionResponse(response)
   local infOn = self.config.logging.services.infOn
   if infOn then
-    traceI("services | received CREATE_SESSION_RESPONSE SessionId='"..response.sessionId..
-          "' MaxRequestMessageSize="..response.maxRequestMessageSize..
-          " AuthenticationToken='"..response.authenticationToken..
-          "' RevisedSessionTimeout="..response.revisedSessionTimeout)
+    traceI("services | received CREATE_SESSION_RESPONSE SessionId='"..response.SessionId..
+          "' MaxRequestMessageSize="..response.MaxRequestMessageSize..
+          " AuthenticationToken='"..response.AuthenticationToken..
+          "' RevisedSessionTimeout="..response.RevisedSessionTimeout)
   end
 
-  self.services.sessionId = response.sessionId
-  self.services.sessionAuthToken = response.authenticationToken
-
   -- search current policy
-  for _,endpoint in ipairs(response.serverEndpoints) do
-    if endpoint.endpointUrl == self.endpointUrl and
-       endpoint.securityPolicyUri == self.services.enc.policy.uri and
-       endpoint.securityMode == self.securityMode
+  for _,endpoint in ipairs(response.ServerEndpoints) do
+    if
+      endpoint.EndpointUrl == self.endpointUrl and
+      endpoint.SecurityPolicyUri == self.securityPolicyUri and
+      endpoint.SecurityMode == self.securityMode
     then
+      self.services.sessionId = response.SessionId
+      self.services.sessionAuthToken = response.AuthenticationToken
+
       self.session = {
-        userIdentityTokens = endpoint.userIdentityTokens,
-        serverCertificate = endpoint.serverCertificate,
-        nonce = response.serverNonce
+        userIdentityTokens = endpoint.UserIdentityTokens,
+        serverCertificate = endpoint.ServerCertificate,
+        nonce = response.ServerNonce
       }
       break
     end
+  end
+
+  if not self.session then
+    return BadSessionIdInvalid
   end
 end
 
@@ -261,30 +286,55 @@ function C:processActivateSessionResponse(response)
     traceI("services | received ACTIVATE_SESSION_RESPONSE")
   end
 
-  if response.responseHeader.serviceResult == 0 then
-    self.session.nonce = response.serverNonce
+  if response.ResponseHeader.ServiceResult ~= 0 then
+    return
   end
+
+  self.session.nonce = response.ServerNonce
 end
 
 function C:openSecureChannel(timeoutMs, securityPolicyUri, securityMode, remoteCert, callback)
   assert(type(securityPolicyUri) == 'string', "invalid policy uri")
   assert(type(securityMode) == 'number', "invalid security mode")
 
+  if type(remoteCert) == "function" then
+    assert(callback == nil)
+    callback = remoteCert
+    remoteCert = nil
+  end
+
   local infOn = self.config.logging.services.infOn
   if infOn then traceI("services | Opening secure channel") end
-  if self.services.enc == nil then return nil, BadNotConnected end
+  if not self:connected() then
+    return nil, BadNotConnected
+  end
 
-  self.services.enc:setupPolicy(securityPolicyUri, remoteCert)
-  self.channelNonce = self.services.enc.policy:genNonce()
+  self.securityPolicyUri = securityPolicyUri
   self.securityMode = securityMode
+  self.remoteCert = remoteCert
+  self.policy = self.security(securityPolicyUri)
+  self.policy:setRemoteCertificate(remoteCert)
+  self.policy:setSecureMode(securityMode)
+
+  self.services:setupPolicy(securityPolicyUri, remoteCert)
+  self.services:setSecureMode(securityMode)
+
+  if not self.hasSecureChannel then
+    if callback then
+      callback()
+    end
+    return
+  end
+
+  self.channelNonce = self.policy:genNonce()
 
   local request, err = self.services:createRequest(MessageId.OPEN_SECURE_CHANNEL_REQUEST)
   if err then return nil, err end
-  request.clientProtocolVersion = 0
-  request.requestType = ua.Types.SecurityTokenRequestType.Issue
-  request.securityMode = securityMode
-  request.clientNonce = self.channelNonce
-  request.requestedLifetime = timeoutMs
+  request.ClientProtocolVersion = 0
+  request.RequestType = ua.Types.SecurityTokenRequestType.Issue
+  request.SecurityMode = securityMode
+  request.ClientNonce = self.channelNonce
+  request.RequestedLifetime = timeoutMs
 
   return self:execRequest(request, callback)
 end
@@ -292,20 +342,22 @@ end
 function C:renewSecureChannel(timeoutMs, callback)
   local infOn = self.config.logging.services.infOn
   if infOn then traceI("services | Renew secure channel") end
-  if self.services.enc == nil then return nil, BadNotConnected end
+  if not self:connected() then
+    return nil, BadNotConnected
+  end
 
-  if self.services.enc.policy then
-    self.channelNonce = self.services.enc.policy.genNonce()
+  if self.policy then
+    self.channelNonce = self.policy.genNonce()
   end
 
   local request, err = self.services:createRequest(MessageId.OPEN_SECURE_CHANNEL_REQUEST)
   if err then return nil, err end
 
-  request.clientProtocolVersion = 0
-  request.requestType = ua.Types.SecurityTokenRequestType.Renew
-  request.securityMode = self.securityMode
-  request.clientNonce = self.channelNonce
-  request.requestedLifetime = timeoutMs
+  request.ClientProtocolVersion = 0
+  request.RequestType = ua.Types.SecurityTokenRequestType.Renew
+  request.SecurityMode = self.securityMode
+  request.ClientNonce = self.channelNonce
+  request.RequestedLifetime = timeoutMs
 
   return self:execRequest(request, callback)
 end
@@ -313,63 +365,63 @@ end
 function C:createSession(name, timeoutMs, callback)
   local infOn = self.config.logging.services.infOn
 
-  if infOn then traceI("services | Creating session"..name.." timeout"..timeoutMs) end
-  if self.services.enc == nil then return nil, BadNotConnected end
+  if infOn then traceI(fmt("services | Creating session '%s' timeout '%s'", name, timeoutMs)) end
 
-  local nonce
-  local cert
-  if self.services.enc.policy then
-    nonce = self.services.enc.policy:genNonce(32)
-    cert = self.services.enc.policy:getLocalCert()
+  if not self:connected() then
+    return nil, BadNotConnected
   end
+
+  local nonce = self.policy:genNonce(32)
+  local cert = self.policy:getLocalCert()
 
   local sessionParams
   if type(name) == 'string' then
     sessionParams = {
-      clientDescription = {
-          applicationUri = self.config.applicationUri,
-          productUri = self.config.productUri,
-          applicationName = {
-            text = self.config.applicationName
+      ClientDescription = {
+          ApplicationUri = self.config.applicationUri,
+          ProductUri = self.config.productUri,
+          ApplicationName = {
+            Text = self.config.applicationName
           },
-          applicationType = ua.Types.ApplicationType.Client,
-          gatewayServerUri = nil,
-          discoveryProfileUri = nil,
-          discoveryUrls = {},
+          ApplicationType = ua.Types.ApplicationType.Client,
+          GatewayServerUri = nil,
+          DiscoveryProfileUri = nil,
+          DiscoveryUrls = {},
         },
-      serverUri = nil,
-      endpointUrl = self.endpointUrl,
-      sessionName = name,
-      clientNonce = nonce,
-      clientCertificate = cert,
-      requestedSessionTimeout = timeoutMs,
-      maxResponseMessageSize = 0,
+      ServerUri = nil,
+      EndpointUrl = self.endpointUrl,
+      SessionName = name,
+      ClientNonce = nonce,
+      ClientCertificate = cert,
+      RequestedSessionTimeout = timeoutMs,
+      MaxResponseMessageSize = 0,
     }
   else
     sessionParams = {
-      clientDescription = {
-          applicationUri = name.applicationUri,
-          productUri = name.productUri,
-          applicationName = {
-            text = name.applicationName
+      ClientDescription = {
+          ApplicationUri = name.ApplicationUri,
+          ProductUri = name.ProductUri,
+          ApplicationName = {
+            Text = name.ApplicationName
           },
-          applicationType = name.applicationType,
-          gatewayServerUri = nil,
-          discoveryProfileUri = nil,
-          discoveryUrls = {},
+          ApplicationType = name.ApplicationType,
+          GatewayServerUri = nil,
+          DiscoveryProfileUri = nil,
+          DiscoveryUrls = {},
         },
-      serverUri = name.serverUri,
-      endpointUrl = name.endpointUrl,
-      sessionName = name.sessionName,
-      clientNonce = nonce,
-      clientCertificate = cert,
-      requestedSessionTimeout = name.sessionTimeout,
-      maxResponseMessageSize = 0,
+      ServerUri = name.ServerUri,
+      EndpointUrl = name.EndpointUrl,
+      SessionName = name.SessionName,
+      ClientNonce = nonce,
+      ClientCertificate = cert,
+      RequestedSessionTimeout = name.SessionTimeout,
+      MaxResponseMessageSize = 0,
     }
 
     callback = timeoutMs
   end
 
+  self.sessionNonce = nonce
   local request, err = self.services:createRequest(MessageId.CREATE_SESSION_REQUEST, sessionParams)
   if err then return nil, err end
 
@@ -378,7 +430,7 @@ end
 
 local function findTokenPolicyType(tokenPolicies, tokenType)
   for _,token in ipairs(tokenPolicies) do
-    if token.tokenType == tokenType then
+    if token.TokenType == tokenType then
       return token
     end
   end
@@ -386,7 +438,7 @@ end
 
 local function findTokenPolicyId(tokenPolicies, policyId)
   for _,token in ipairs(tokenPolicies) do
-    if token.policyId == policyId then
+    if token.PolicyId == policyId then
       return token
     end
   end
@@ -399,13 +451,13 @@ local function encrypt(policy, password, nonce)
 
   local len = #password + #nonce
   local d = Q.new(len + 4)
-  local decoder = Binary.Encoder.new(d)
-  decoder:uint32(len)
-  decoder:str(password)
-  decoder:str(nonce)
+  local encoder = BinaryEncoder.new(d)
+  encoder:uint32(len)
+  encoder:array(password)
+  encoder:array(nonce)
 
   local data = tostring(d)
-  local m,err = ba.crypto.encrypt(data, policy.remote.pem, {nopadding=false})
+  local m,err = ua.crypto.encrypt(data, policy.remote, policy.params.rsaParams)
   if err then
     error(err)
   end
@@ -416,7 +468,14 @@ function C:activateSession(params, token, token2, callback)
   local infOn = self.config.logging.services.infOn
   local errOn = self.config.logging.services.errOn
   if infOn then traceI("services | Activating session") end
-  if self.services.enc == nil then return nil, BadNotConnected end
+
+  if not self:connected() then
+    return nil, BadNotConnected
+  end
+
+  if self.session == nil then
+    return nil, BadSessionIdInvalid
+  end
 
   local tokenPolicy
   -- Called with manual parameters
@@ -438,33 +497,32 @@ function C:activateSession(params, token, token2, callback)
     params = nil
   end
 
-  local policy = self.services.enc.policy
   local activateParams = params
   if not activateParams then
     activateParams = {}
   end
 
-  if not activateParams.clientSignature then
+  if not activateParams.ClientSignature then
+    local policy = self.policy
     if policy.secureMode == 2 or policy.secureMode == 3 then
-      activateParams.clientSignature= {
-        algorithm = policy.aSignatureUri,
-        signature = policy:asymmetricSign(policy:getRemoteCert(), self.session.nonce)
+      activateParams.ClientSignature= {
+        Algorithm = policy.aSignatureUri,
+        Signature = policy:asymmetricSign(policy:getRemoteCert(), self.session.nonce)
       }
     elseif policy.secureMode ~= 1 then
       error("Invalid secure mode")
     end
   end
 
-  if not activateParams.userIdentityToken then
+  if not activateParams.UserIdentityToken then
     if not tokenPolicy then
       return nil, BadIdentityTokenRejected
     end
 
     local authPolicy
-    if tokenPolicy.securityPolicyUri and tokenPolicy.securityPolicyUri ~= ua.Types.SecurityPolicy.None and self.session.serverCertificate then
-      local encryption = securePolicy(self.config)
-      authPolicy = encryption(tokenPolicy.securityPolicyUri)
-      if tokenPolicy.tokenType == ua.Types.UserTokenType.Certificate then
+    if tokenPolicy.SecurityPolicyUri and tokenPolicy.SecurityPolicyUri ~= ua.Types.SecurityPolicy.None and self.session.serverCertificate then
+      authPolicy = self.security(tokenPolicy.SecurityPolicyUri)
+      if tokenPolicy.TokenType == ua.Types.UserTokenType.Certificate then
         authPolicy:setLocalCertificate(token, token2)
       end
       if not self.session.serverCertificate then
@@ -472,15 +530,15 @@ function C:activateSession(params, token, token2, callback)
         return nil, BadIdentityTokenInvalid
       end
       authPolicy:setRemoteCertificate(self.session.serverCertificate)
-      activateParams.userTokenSignature = {
-        algorithm = authPolicy.aSignatureUri,
-        signature = authPolicy:asymmetricSign(self.session.serverCertificate, self.session.nonce)
+      activateParams.UserTokenSignature = {
+        Algorithm = authPolicy.aSignatureUri,
+        Signature = authPolicy:asymmetricSign(self.session.serverCertificate, self.session.nonce)
       }
     end
 
-    if tokenPolicy.tokenType == ua.Types.UserTokenType.Anonymous then
-      activateParams.userIdentityToken = tools.createAnonymousToken(tokenPolicy.policyId)
-    elseif tokenPolicy.tokenType == ua.Types.UserTokenType.UserName then
+    if tokenPolicy.TokenType == ua.Types.UserTokenType.Anonymous then
+      activateParams.UserIdentityToken = tools.createAnonymousToken(tokenPolicy.PolicyId)
+    elseif tokenPolicy.TokenType == ua.Types.UserTokenType.UserName then
       if type(token) ~= "string" or type(token2) ~= "string" then
         return nil, BadIdentityTokenInvalid
       end
@@ -488,30 +546,30 @@ function C:activateSession(params, token, token2, callback)
       if authPolicy then
         token2 = encrypt(authPolicy, token2, self.session.nonce)
       end
-      activateParams.userIdentityToken = tools.createUsernameToken(tokenPolicy.policyId, token, token2, authPolicy and authPolicy.aEncryptionAlgorithm)
-    elseif tokenPolicy.tokenType == ua.Types.UserTokenType.Certificate then
-      activateParams.userIdentityToken = tools.createX509Token(tokenPolicy.policyId, certificate.createCert(token).der)
-    elseif tokenPolicy.tokenType == ua.Types.UserTokenType.IssuedToken then
+      activateParams.UserIdentityToken = tools.createUsernameToken(tokenPolicy.PolicyId, token, token2, authPolicy and authPolicy.aEncryptionAlgorithm)
+    elseif tokenPolicy.TokenType == ua.Types.UserTokenType.Certificate then
+      activateParams.UserIdentityToken = tools.createX509Token(tokenPolicy.PolicyId, createCert(token, self.config.io).der)
+    elseif tokenPolicy.TokenType == ua.Types.UserTokenType.IssuedToken then
       if authPolicy then
         token = encrypt(authPolicy, token, self.session.nonce)
       end
-      activateParams.userIdentityToken = tools.createIssuedToken(tokenPolicy.policyId, token, authPolicy and authPolicy.aEncryptionAlgorithm)
+      activateParams.UserIdentityToken = tools.createIssuedToken(tokenPolicy.PolicyId, token, authPolicy and authPolicy.aEncryptionAlgorithm)
     else
       error("invalid identity token")
     end
   end
 
-  if not activateParams.userTokenSignature then
-    activateParams.userTokenSignature = {}
+  if not activateParams.UserTokenSignature then
+    activateParams.UserTokenSignature = {}
   end
-  if not activateParams.clientSignature then
-    activateParams.clientSignature = {}
+  if not activateParams.ClientSignature then
+    activateParams.ClientSignature = {}
   end
-  if not activateParams.locales then
-    activateParams.locales = {"en"}
+  if not activateParams.Locales then
+    activateParams.Locales = {"en"}
   end
 
-  activateParams.clientSoftwareCertificates = {}
+  activateParams.ClientSoftwareCertificates = {}
 
   local request, err = self.services:createRequest(MessageId.ACTIVATE_SESSION_REQUEST, activateParams)
   if err then return nil, err end
@@ -521,46 +579,49 @@ end
 
 local function browseParams(nodeId)
   return {
-    nodeId = nodeId, -- nodeId we want to browse
-    browseDirection = ua.Types.BrowseDirection.Forward,
-    referenceTypeId = "i=33", -- HierarchicalReferences,
-    nodeClassMask = ua.Types.NodeClass.Unspecified,
-    resultMask = ua.Types.BrowseResultMask.All,
-    includeSubtypes = true,
+    NodeId = nodeId, -- nodeId we want to browse
+    BrowseDirection = ua.Types.BrowseDirection.Forward,
+    ReferenceTypeId = "i=33", -- HierarchicalReferences,
+    NodeClassMask = ua.Types.NodeClass.Unspecified,
+    ResultMask = ua.Types.BrowseResultMask.All,
+    IncludeSubtypes = true,
   }
 end
 
 function C:browse(params, callback)
   local infOn = self.config.logging.services.infOn
   if infOn then traceI("servcies | Browsing nodes") end
-  if self.services.enc == nil then return nil, BadNotConnected end
+
+  if not self:connected() then
+    return nil, BadNotConnected
+  end
 
   local request = {
-    nodesToBrowse = {}
+    NodesToBrowse = {}
   }
 
   -- single node ID
   if type(params) == 'string' then
-    request.nodesToBrowse[1] = browseParams(params)
+    request.NodesToBrowse[1] = browseParams(params)
   -- array of nodeIDs
   elseif type(params) == 'table' and params[1] ~= nil then
     for _,nodeId in ipairs(params) do
-      table.insert(request.nodesToBrowse, browseParams(nodeId))
+      table.insert(request.NodesToBrowse, browseParams(nodeId))
     end
   else
     -- manual
     request = params
   end
 
-  if request.view == nil then
-    request.view = {
-      viewId = ua.NodeId.Null,
-      timestamp = nil, -- not specified ~1600 year
-      viewVersion = 0
+  if request.View == nil then
+    request.View = {
+      ViewId = ua.NodeId.Null,
+      Timestamp = nil, -- not specified ~1600 year
+      ViewVersion = 0
     }
   end
-  if request.requestedMaxReferencesPerNode == nil then
-    request.requestedMaxReferencesPerNode = 1000
+  if request.RequestedMaxReferencesPerNode == nil then
+    request.RequestedMaxReferencesPerNode = 1000
   end
 
   local err
@@ -572,47 +633,50 @@ end
 
 local function allAttributes(nodeId, attrs)
   for _,val in pairs(ua.Types.AttributeId) do
-    attrs[val] = {nodeId=nodeId, attributeId=val}
+    attrs[val] = {NodeId=nodeId, AttributeId=val}
   end
 end
 
 function C:read(params, callback)
   local infOn = self.config.logging.services.infOn
   if infOn then traceI("services | Reading attributes") end
-  if self.services.enc == nil then return nil, BadNotConnected end
+
+  if not self:connected() then
+    return nil, BadNotConnected
+  end
 
   local readParams = {}
   if type(params) == 'string' then
     local attrs = {}
     allAttributes(params, attrs)
-    readParams.nodesToRead = attrs
+    readParams.NodesToRead = attrs
   elseif type(params) == 'table' then
     if type(params[1]) == 'string' then
       local attrs = {}
       for _,nodeId in ipairs(params) do
         allAttributes(nodeId, attrs)
       end
-      readParams.nodesToRead = attrs
+      readParams.NodesToRead = attrs
     else
       readParams = params
     end
   end
 
-  if readParams.maxAge == nil then
-    readParams.maxAge = 0
+  if readParams.MaxAge == nil then
+    readParams.MaxAge = 0
   end
 
-  if readParams.timestampsToReturn == nil then
-    readParams.timestampsToReturn = 0
+  if readParams.TimestampsToReturn == nil then
+    readParams.TimestampsToReturn = 0
   end
 
-  if readParams.nodesToRead then
-    for _,v in pairs(readParams.nodesToRead) do
-      if v.indexRange == nil then
-        v.indexRange = ""
+  if readParams.NodesToRead then
+    for _,v in pairs(readParams.NodesToRead) do
+      if v.IndexRange == nil then
+        v.IndexRange = ""
       end
-      if v.dataEncoding == nil then
-        v.dataEncoding = {ns=0}
+      if v.DataEncoding == nil then
+        v.DataEncoding = {ns=0}
       end
     end
   end
@@ -624,7 +688,10 @@ function C:read(params, callback)
 end
 
 function C:write(nodes, callback)
-  if self.services.enc == nil then return nil, BadNotConnected end
+  if not self:connected() then
+    return nil, BadNotConnected
+  end
+
   local request, err = self.services:createRequest(MessageId.WRITE_REQUEST, nodes)
   if err then return nil, err end
   return self:execRequest(request, callback)
@@ -632,32 +699,45 @@ end
 
 
 function C:addNodes(params, callback)
-  if self.services.enc == nil then return nil, BadNotConnected end
+  if not self:connected() then
+    return nil, BadNotConnected
+  end
+
   local request, err = self.services:createRequest(MessageId.ADD_NODES_REQUEST, params)
   if err then return nil, err end
   return self:execRequest(request, callback)
 end
 
 function C:createSubscription(sub, callback)
-  if self.services.enc == nil then return nil, BadNotConnected end
+  if not self:connected() then
+    return nil, BadNotConnected
+  end
+
   local request, err = self.services:createRequest(MessageId.CREATE_SUBSCRIPTION_REQUEST, sub)
   if err then return nil, err end
   return self:execRequest(request, callback)
 end
 
 function C:translateBrowsePaths(browsePaths, callback)
-  if self.services.enc == nil then return nil, BadNotConnected end
+  if not self:connected() then
+    return nil, BadNotConnected
+  end
+
   local request, err = self.services:createRequest(MessageId.TRANSLATE_BROWSE_PATHS_TO_NODE_IdS_REQUEST,browsePaths)
   if err then return nil, err end
   return self:execRequest(request, callback)
 end
 
 function C:closeSession(callback)
-  if self.services.enc == nil then return nil, BadNotConnected end
   local infOn = self.config.logging.services.infOn
   if infOn then traceI("Closing session") end
+
+  if not self:connected() then
+    return nil, BadNotConnected
+  end
+
   local closeSessionParams = {
-    deleteSubscriptions = 1
+    DeleteSubscriptions = true
   }
 
   self.userIdentityTokens = nil
@@ -674,7 +754,18 @@ function C:closeSecureChannel(callback)
 
   -- Just send request: there is no CloseSecureChannelResponse.
   if infOn then traceI("services | Closing secure channel") end
-  if self.services.enc == nil then return BadNotConnected end
+  if not self:connected() then
+    return nil, BadNotConnected
+  end
+
+  if not self.hasSecureChannel then
+    if callback then
+      callback(nil, BadSecureChannelClosed)
+      return
+    else
+      return nil, BadSecureChannelClosed
+    end
+  end
 
   if self.channelTimer then
     if infOn then traceI("services | Stop channel refresh timer") end
@@ -689,7 +780,10 @@ function C:closeSecureChannel(callback)
 end
 
 function C:findServers(params, callback)
-  if self.services.enc == nil then return nil, BadNotConnected end
+  if not self:connected() then
+    return nil, BadNotConnected
+  end
+
   if type(params) == 'function' then
     callback = params
     params = nil
@@ -698,31 +792,45 @@ function C:findServers(params, callback)
   local request, err = self.services:createRequest(MessageId.FIND_SERVERS_REQUEST)
   if err then return nil, err end
   if params then
-    request.endpointUrl = params.endpointUrl
+    request.EndpointUrl = params.EndpointUrl
   end
-  request.localeIds = {}
-  request.serverUris = {}
+  request.LocaleIds = {}
+  request.ServerUris = {}
 
   return self:execRequest(request, callback)
 end
 
 function C:getEndpoints(params, callback)
-  if self.services.enc == nil then return nil, BadNotConnected end
+
+  if not self:connected() then
+    return nil, BadNotConnected
+  end
+
   if type(params) == 'function' then
     callback = params
     params = nil
   end
   local request, err = self.services:createRequest(MessageId.GET_ENDPOINTS_REQUEST, params)
   if err then return nil, err end
-  request.localeIds = {}
-  request.profileUris = {}
+  request.LocaleIds = {}
+  request.ProfileUris = {}
 
   return self:execRequest(request, callback)
 end
 
-local function NewUaClient(clientConfig, sock)
+function C:connected()
+  if self.services == nil then
+    return false
+  end
+  return self.services:connected()
+end
+
+local function NewUaClient(clientConfig, sock, model)
   if clientConfig == nil then
     error("no OPCUA configuration")
+  end
+  if model == nil then
+    model = require("opcua.model.import").getBaseModel()
   end
 
   local uaConfig = require("opcua.config")
@@ -733,8 +841,11 @@ local function NewUaClient(clientConfig, sock)
 
   local c = {
     config = clientConfig,
+    security = securePolicy(clientConfig),
     requests = {},
-    services = require("opcua.binary.client").new(clientConfig, sock),
+    sock = sock,
+    model = model,
+    hasSecureChannel = true,
 
     -- endpointUrl
     -- userIdentityTokens

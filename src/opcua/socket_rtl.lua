@@ -1,4 +1,5 @@
 local ua = require("opcua.api")
+local compat = require("opcua.compat")
 local s = ua.StatusCode
 
 local fmt = string.format
@@ -30,7 +31,7 @@ function clientSock:send(data)
   end
 end
 
-function clientSock:receive()
+function clientSock:receive(sz)
   local dbgOn = self.logging.dbgOn
   local errOn = self.logging.errOn
 
@@ -40,7 +41,7 @@ function clientSock:receive()
   end
 
   if dbgOn then traceD(fmt("socket | %s waiting for new data", sock)) end
-  local data,err = sock:read(self.timeoutMs)
+  local data,err = sock:read(self.timeoutMs, sz)
   if err ~= nil then
     if dbgOn then
       traceD(fmt("socket | %s TCP read error: %s", sock, err))
@@ -50,7 +51,7 @@ function clientSock:receive()
     error(s.BadCommunicationError)
   end
   if data == nil then
-    if dbgOn then traceD(fmt("socket | %s TCP read nil data", sock)) end
+    if errOn then traceE(fmt("socket | %s TCP read nil data", sock)) end
     error(s.BadCommunicationError)
   end
 
@@ -84,8 +85,9 @@ end
 local serverSock = {}
 serverSock.__index = serverSock
 
-local function newServerSock(config)
+local function newServerSock(endpoint, config)
   local result = {
+    endpoint = endpoint,
     logging = config.logging.socket,
     config = config
   }
@@ -137,13 +139,13 @@ function serverSock:run(binaryServer)
     self.sock = nil
   end
 
-  if infOn then traceI(fmt("socket | Opening port '%d'", self.config.listenPort)) end
-  local sock = ba.socket.bind(self.config.listenPort)
+  if infOn then traceI(fmt("socket | Opening port '%d'", self.endpoint.listenPort)) end
+  local sock = compat.socket.bind(self.endpoint.listenAddress, self.endpoint.listenPort)
   self.sock = sock
   if sock then
-    if infOn then traceI(fmt("socket | %s created server socket.", sock, self.config.listenPort)) end
+    if infOn then traceI(fmt("socket | %s created server socket.", sock, self.endpoint.listenPort)) end
     sock:event(accept,"r")
-    if infOn then traceI(fmt("socket | %s listening on port %d.", sock, self.config.listenPort)) end
+    if infOn then traceI(fmt("socket | %s listening on port %d.", sock, self.endpoint.listenPort)) end
   else
     if infOn then traceE("socket |Cannot open listen port!") end
   end
@@ -164,7 +166,7 @@ function serverSock:shutdown()
     if not active then
       break
     end
-    ba.sleep(10)
+    compat.sleep(1)
   end
 end
 

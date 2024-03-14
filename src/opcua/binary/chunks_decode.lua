@@ -1,6 +1,6 @@
+local compat = require("opcua.compat")
 local Q = require("opcua.binary.queue")
-local Binary = require("opcua.binary.encode_types")
-local Msg = require("opcua.binary.message_id")
+local BinaryDecoder = require("opcua.binary.decoder")
 local ua = require("opcua.api")
 
 local traceE = ua.trace.err
@@ -12,7 +12,6 @@ local fmt = string.format
 local HeaderSize = 8
 local BadTcpMessageTypeInvalid = 0x807E0000
 local BadTcpMessageTooLarge = 0x80800000
-local BadNotSupported = 0x803D0000
 local BadCommunicationError = 0x80050000
 local BadInternalError = 0x80020000
 local BadSecurityChecksFailed = 0x80130000
@@ -26,7 +25,7 @@ function ch:hello()
   if infOn then traceI("binary | Receiving hello") end
 
   self.q.msgMode = false
-  local res = self.decoder:hello()
+  local res = self.binaryDecoder:hello()
   if infOn then traceI("binary | Hello received") end
   return res
 end
@@ -36,69 +35,32 @@ function ch:acknowledge()
   if infOn then traceI("binary | Receiving acknowledge") end
 
   self.q.msgMode = false
-  local res = self.decoder:acknowledge()
+  local res = self.binaryDecoder:acknowledge()
   if infOn then traceI("binary | Ackowledge received") end
   return res
 end
 
-function ch:setBuferSize(size)
+function ch:setBufferSize(size)
   local infOn = self.logging.infOn
   if infOn then traceI(fmt("binary | New buffer size %d", size)) end
-
-  local oldData = self.q.data
   self.q.data = Q.new(size)
-  self.q.data = oldData
 end
-
-local enc = {}
-enc[Msg.OPEN_SECURE_CHANNEL_REQUEST] = Binary.Decoder.openSecureChannelRequest
-enc[Msg.OPEN_SECURE_CHANNEL_RESPONSE] = Binary.Decoder.openSecureChannelResponse
-enc[Msg.CLOSE_SECURE_CHANNEL_REQUEST] = Binary.Decoder.closeSecureChannelRequest
-enc[Msg.FIND_SERVERS_REQUEST] = Binary.Decoder.findServersRequest
-enc[Msg.FIND_SERVERS_RESPONSE] = Binary.Decoder.findServersResponse
-enc[Msg.GET_ENDPOINTS_REQUEST] = Binary.Decoder.getEndpointsRequest
-enc[Msg.GET_ENDPOINTS_RESPONSE] = Binary.Decoder.getEndpointsResponse
-enc[Msg.CREATE_SESSION_REQUEST] = Binary.Decoder.createSessionRequest
-enc[Msg.CREATE_SESSION_RESPONSE] = Binary.Decoder.createSessionResponse
-enc[Msg.ACTIVATE_SESSION_REQUEST] = Binary.Decoder.activateSessionRequest
-enc[Msg.ACTIVATE_SESSION_RESPONSE] = Binary.Decoder.activateSessionResponse
-enc[Msg.CLOSE_SESSION_REQUEST] = Binary.Decoder.closeSessionRequest
-enc[Msg.CLOSE_SESSION_RESPONSE] = Binary.Decoder.closeSessionResponse
-enc[Msg.BROWSE_REQUEST] = Binary.Decoder.browseRequest
-enc[Msg.BROWSE_RESPONSE] = Binary.Decoder.browseResponse
-enc[Msg.READ_REQUEST] = Binary.Decoder.readRequest
-enc[Msg.READ_RESPONSE] = Binary.Decoder.readResponse
-enc[Msg.WRITE_REQUEST] = Binary.Decoder.writeRequest
-enc[Msg.WRITE_RESPONSE] = Binary.Decoder.writeResponse
-enc[Msg.CREATE_SUBSCRIPTION_REQUEST] = Binary.Decoder.createSubscriptionRequest
-enc[Msg.CREATE_SUBSCRIPTION_RESPONSE] = Binary.Decoder.createSubscriptionResponse
-enc[Msg.SERVICE_FAULT] = Binary.Decoder.serviceFault
-enc[Msg.TRANSLATE_BROWSE_PATHS_TO_NODE_IdS_REQUEST] = Binary.Decoder.translateBrowsePathsToNodeIdsRequest
-enc[Msg.TRANSLATE_BROWSE_PATHS_TO_NODE_IdS_RESPONSE] = Binary.Decoder.translateBrowsePathsToNodeIdsResponse
-enc[Msg.ADD_NODES_REQUEST] = Binary.Decoder.addNodesRequest
-enc[Msg.ADD_NODES_RESPONSE] = Binary.Decoder.addNodesResponse
 
 function ch:message()
   local dbgOn = self.logging.dbgOn
   local infOn = self.logging.infOn
-  local errOn = self.logging.errOn
 
   if infOn then traceI("binary | Receiving message") end
 
   self.q.msgMode = true
-  local i = self.decoder:nodeId()
+  local i = self.binaryDecoder:nodeId()
   if infOn then traceI(fmt("binary | Received message ID '%s'", i)) end
-  local f = enc[i]
-  if not f then
-    if errOn then traceE("binary | Decoding unsupported") end
-    error(BadNotSupported)
-  end
 
   if dbgOn then traceD("binary | Decoding message body") end
-
   local msg = self.q.msg
-  msg.type = i
-  msg.body = f(self.decoder)
+  local extObject = self.Model.ExtObjects[i]
+  msg.TypeId = extObject.DataTypeId
+  msg.Body = self.Model:Decode(msg.TypeId)
 
   if infOn then traceI("binary | Message decoded") end
   return msg
@@ -118,19 +80,21 @@ function ch:setupPolicy(uri, remoteCert)
   self.q.policy = policy
 end
 
-
-local function new(config, security, sock)
+local function new(config, security, sock, hasChunks, model)
   assert(config ~= nil, "no config")
   assert(sock ~= nil, "no socket")
   assert(security ~= nil, "no security")
+  assert(type(hasChunks) == "boolean", "hasChunks must be boolean")
+  assert(model ~= nil, "no model")
 
   local d = Q.new(config.bufSize)
   local coq = {
     security = security,
     config = config,
+    hasChunks = hasChunks,
     msgMode = false,
     d = d,  -- Queue with chunk data
-    decoder = Binary.Decoder.new(d),
+    binaryDecoder = BinaryDecoder.new(d),
     sock = sock,
     leftSize = 0, -- size of data left in current chunk buffer
     logging = config.logging.binary,
@@ -167,9 +131,9 @@ local function new(config, security, sock)
 
         local data = sock:receive(size - #q)
         if self.logging.dbgOn  then
-          traceD(fmt("socket | ------------ RECEIVED %d BYTES----------------", #data))
-          tools.hexPrint(data, function(msg) traceD("socket | "..msg) end)
-          traceD("socket | ----------------------------------------------")
+          traceD(fmt("binary | ------------ RECEIVED %d BYTES----------------", #data))
+          tools.hexPrint(data, function(msg) traceD("binary | "..msg) end)
+          traceD("binary | ----------------------------------------------")
         end
 
         local leftSize = math.min(size - #q, #data)
@@ -177,7 +141,9 @@ local function new(config, security, sock)
           if dbgOn then traceD("binary | Push all data to queue") end
           q:pushBack(data)
         else
-          if dbgOn then traceD(fmt("binary | Received too much data. Put to partial buffer. Push to queue %d bytes", leftSize)) end
+          if dbgOn then
+            traceD(fmt("binary | Received too much data. Put to partial buffer. Push to queue %d bytes", leftSize))
+          end
           q:pushBack(string.sub(data, 1, leftSize))
           self.partBuf = data
           self.partSize = leftSize
@@ -198,96 +164,110 @@ local function new(config, security, sock)
 
       q:clear()
 
-      local capacity = ba.bytearray.size(q.Buf)
+      if not self.hasChunks then
+        local sz = 1
+        if self.partBuf then
+          sz = #self.partBuf - self.partSize
+        end
+        self:recvSize(sz)
+        self.msg = {
+          ChannelId = 0,
+          RequestId = 0
+        }
+
+        return
+      end
+
+      local capacity = compat.bytearray.size(q.Buf)
 
       self:recvSize(HeaderSize)
-      local hdr = self.decoder:messageHeader()
-      if hdr.messageSize > capacity then
+      local hdr = self.binaryDecoder:messageHeader()
+      if hdr.MessageSize > capacity then
         error(BadTcpMessageTooLarge)
       end
 
-      local bodySize = hdr.messageSize - HeaderSize
+      local bodySize = hdr.MessageSize - HeaderSize
       self:recvSize(bodySize)
 
-      if hdr.type ~= "MSG" and hdr.chunk ~= "F" then
-        if errOn then traceE(fmt("binary | Message %s cannot be chunked", hdr.type)) end
+      if hdr.Type ~= "MSG" and hdr.Chunk ~= "F" then
+        if errOn then traceE(fmt("binary | Message %s cannot be chunked", hdr.Type)) end
         error(BadTcpMessageTypeInvalid)
       end
 
-      if dbgOn then traceD(fmt("binary | Received message '%s' chunk '%s'", hdr.type, hdr.chunk)) end
-      if hdr.type == "MSG" or hdr.type == "CLO" then
+      if dbgOn then traceD(fmt("binary | Received message '%s' chunk '%s'", hdr.Type, hdr.Chunk)) end
+      if hdr.Type == "MSG" or hdr.Type == "CLO" then
         if self.msgMode == false then
           if errOn then traceE("binary | Secure channel not opened") end
           error(BadTcpMessageTypeInvalid)
         end
 
-        local channelId = self.decoder:uint32()
-        local secureHeader = self.decoder:symmetricSecurityHeader()
+        local channelId = self.binaryDecoder:uint32()
+        local secureHeader = self.binaryDecoder:symmetricSecurityHeader()
         self.policy:symmetricDecrypt(q.Buf)
 
-        local sequenceHeader = self.decoder:sequenceHeader()
+        local sequenceHeader = self.binaryDecoder:sequenceHeader()
 
         self.msg = {
-          channelId = channelId,
-          secureHeader = secureHeader,
-          requestId = sequenceHeader.requestId
+          ChannelId = channelId,
+          SecureHeader = secureHeader,
+          RequestId = sequenceHeader.RequestId
         }
 
-        if hdr.chunk == 'A' then
+        if hdr.Chunk == 'A' then
           if errOn then traceE("binary | Received ABORT message") end
-          local msg = self.decoder:error()
-          if errOn then traceE(fmt("binary | ERROR code: %s. Reason: %s", msg.error, msg.reason)) end
-          error(msg.error)
+          local msg = self.binaryDecoder:error()
+          if errOn then traceE(fmt("binary | ERROR code: %s. Reason: %s", msg.Error, msg.Reason)) end
+          error(msg.Error)
         end
 
-      elseif hdr.type == "OPN" then
+      elseif hdr.Type == "OPN" then
         if self.msgMode == false then
           if errOn then traceE("binary | Secure channel not opened") end
           error(BadTcpMessageTypeInvalid)
         end
 
-        local channelId = self.decoder:uint32()
-        local secureHeader = self.decoder:asymmetricSecurityHeader()
+        local channelId = self.binaryDecoder:uint32()
+        local secureHeader = self.binaryDecoder:asymmetricSecurityHeader()
 
-        local securePolicy = self.security(secureHeader.securityPolicyUri)
-        if securePolicy.uri ~= ua.Types.SecurityPolicy.None and secureHeader.receiverCertificateThumbprint ~= securePolicy:getLocalThumbprint() then
+        local securePolicy = self.security(secureHeader.SecurityPolicyUri)
+        if securePolicy.uri ~= ua.Types.SecurityPolicy.None and secureHeader.ReceiverCertificateThumbprint ~= securePolicy:getLocalThumbprint() then
           if errOn then traceE("binary | Unknown local certificate thumbprint") end
           error(BadSecurityChecksFailed)
         end
 
-        securePolicy:setRemoteCertificate(secureHeader.senderCertificate)
-        securePolicy:asymmetricDecrypt(self.decoder.data.Buf)
+        securePolicy:setRemoteCertificate(secureHeader.SenderCertificate)
+        securePolicy:asymmetricDecrypt(self.binaryDecoder.data.Buf)
         self.policy = securePolicy
 
-        local sequenceHeader = self.decoder:sequenceHeader()
+        local sequenceHeader = self.binaryDecoder:sequenceHeader()
         self.msg = {
-          channelId = channelId,
-          secureHeader = secureHeader,
-          requestId = sequenceHeader.requestId,
+          ChannelId = channelId,
+          SecureHeader = secureHeader,
+          RequestId = sequenceHeader.RequestId,
         }
-      elseif hdr.type == "HEL" then
+      elseif hdr.Type == "HEL" then
         if self.msgMode == true then
           if errOn then traceE("binary | Secure channel already opened") end
           error(BadTcpMessageTypeInvalid)
         end
 
         self.msg = nil
-      elseif hdr.type == "ACK" then
+      elseif hdr.Type == "ACK" then
         if self.msgMode == true then
           if errOn then traceE("binary | Secure channel already opened") end
           error(BadTcpMessageTypeInvalid)
         end
 
-        if hdr.messageSize ~= 28 then
+        if hdr.MessageSize ~= 28 then
           if errOn then traceE("binary | Invalid Acnowledge message") end
           error(BadCommunicationError)
         end
         self.msg = nil
-      elseif hdr.type == "ERR" then
+      elseif hdr.Type == "ERR" then
         if errOn then traceE("binary | Received ERR message") end
-        local msg = self.decoder:error()
-        if errOn then traceE(fmt("binary | ERROR code: %s. Reason:%s", msg.error, msg.reason)) end
-        error(msg.error)
+        local msg = self.binaryDecoder:error()
+        if errOn then traceE(fmt("binary | ERROR code: %s. Reason:%s", msg.Error, msg.Reason)) end
+        error(msg.Error)
       else
         if errOn then traceE("binary | Unknown message") end
         error(BadTcpMessageTypeInvalid)
@@ -323,13 +303,19 @@ local function new(config, security, sock)
 
   setmetatable(coq, {__index=d})
 
+  local m = {
+    Deserializer = BinaryDecoder.new(coq)
+  }
+  setmetatable(m, {__index=model})
+
   local res = {
     config = config,
     logging = config.logging.binary,
 
     -- buffer for Chunk.
     q = coq,
-    decoder = Binary.Decoder.new(coq),
+    Model = m,
+    binaryDecoder = m.Deserializer,
   }
 
   setmetatable(res, ch)
