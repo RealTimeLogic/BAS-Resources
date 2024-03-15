@@ -37,7 +37,15 @@ else
     echo "../../../LPeg not found; Not Including LPeg"
 fi
 
-read -p "Do you want minify the js and css files (require node and npm) (y/n)? "  userResponse
+# Check if the MinifyMakoZip environment variable is set to 'yes' or 'no'
+if [ "$MinifyMakoZip" = "yes" ]; then
+    userResponse="y"
+elif [ "$MinifyMakoZip" = "no" ]; then
+    userResponse="n"
+else
+    # If MinifyMakoZip is not set or set to another value, ask the user
+    read -p "Do you want to minify the js and css files (require node and npm) (y/n)? " userResponse
+fi
 if [ "$userResponse" = "y" ]; then
    if ! command -v npm> /dev/null 2>&1; then
        echo "npm not found in the path. Skipping minification."

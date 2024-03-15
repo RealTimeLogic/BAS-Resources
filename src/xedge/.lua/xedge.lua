@@ -496,8 +496,12 @@ local function manageApp(name,isStartup) -- start/stop/restart
    apps[name]=app
    if appc.running and (false ~= appc.autostart or not isStartup) and not err then
       if appc.dirname then
-	 local dn=trim(appc.dirname)
-	 local dir=ba.create.resrdr(#dn > 1 and dn or nil,appc.priority or 0,io)
+	 local dn,dom,dir=trim(appc.dirname),trim(appc.domainname or "")
+	 if #dom > 0 then
+	    dir=ba.create.domainresrdr(dom,appc.priority or 0,io)
+	 else
+	    dir=ba.create.resrdr(#dn > 1 and dn or nil,appc.priority or 0,io)
+	 end
 	 env.dir=dir
 	 dir:setfunc(function(_ENV,pn)
 	    if pn:find"%.x?lua$" then
@@ -543,7 +547,7 @@ local function newAppCfg(cfg)
 end
 
 local function newOrUpdateApp(cfg,ion,url) -- On new/update cfg file
-   local nc={name=cfg.name,url=cfg.url,running=cfg.running or false,autostart=cfg.autostart,dirname=cfg.dirname}
+   local nc={name=cfg.name,url=cfg.url,running=cfg.running or false,autostart=cfg.autostart,dirname=cfg.dirname,domainname=cfg.domainname}
    if cfg.dirname then nc.priority=cfg.priority or 0 end
    if not nc.url then nc.url=url end
    local start=true -- or restart
@@ -789,12 +793,12 @@ local function sendCfgCorrupt(err)
    sendErr("configuration file corrupt (%s)!",err)
 end
 
-local function encodedStr2Tab(str,field)
-   if "string" == type(str) then
-      local t=jdecode(ba.aesdecode(confKey,str) or "")
+local function encodedStr2Tab(x,field)
+   if "string" == type(x) then
+      local t=jdecode(ba.aesdecode(confKey,x) or "")
       if t then return t end
       sendCfgCorrupt(field)
-   end
+   elseif "table" == type(x) then return x end
    return {}
 end
 
@@ -1022,7 +1026,8 @@ local commands={
 	 local io,ion,pn=fn2info(data.fn)
 	 local cfg = io and appsCfg[ion]
 	 if cfg and cfg.running and cfg.dirname then
-	    cmd:json{ok=true,url= #cfg.dirname > 0 and sfmt("/%s/%s",cfg.dirname,pn) or "/"..pn}
+	    cmd:json{ok=true,url=cfg.domainname and sfmt("http://%s/%s",cfg.domainname,pn) or (
+	       #cfg.dirname > 0 and sfmt("/%s/%s",cfg.dirname,pn) or "/"..pn)}
 	 end
 	 local emsg= cfg and (cfg.running and "'LSP App' not enabled" or "App not running") or "App not found"
 	 cmd:json{err=emsg}
@@ -1033,7 +1038,7 @@ local commands={
 	 local io,ion,pn=fn2info(data.fn)
 	 local cfg = io and appsCfg[ion]
 	 if cfg then
-	    cmd:json{ok=true,isapp=true,running=cfg.running,lsp=cfg.dirname and yes or no,
+	    cmd:json{ok=true,isapp=true,running=cfg.running,lsp=cfg.dirname and true or false,
 	       url=cfg.dirname and not pn:find"%.xlua$" and (#cfg.dirname > 0 and sfmt("/%s/%s",cfg.dirname,pn) or "/"..pn)}
 	 end
 	 cmd:json{ok=true} -- not an app, but rsp must be OK

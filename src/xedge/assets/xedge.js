@@ -211,8 +211,16 @@ const appFormObj = [
 		type: "text",
 		label: "AppCfgDirName",
 		name: "Directory Name",
-		description: "The LSP app's base URL",
+		description: "The LSP app's base URL; if 'myapp', then root URL is http://address/myapp/",
 		placeholder: "Enter the app's base URL or leave blank if root app",
+	    },
+	    {
+		el: "input",
+		type: "text",
+		label: "AppCfgDomainName",
+		name: "Domain Name",
+		description: "Enable the domain name filter and filter out names that do not match the domain name",
+		placeholder: "Leave blank unless you want to enable a domain name filter",
 	    },
 	    {
 		el: "input",
@@ -255,6 +263,7 @@ function appCfg(pn,cfg,isNewNet) {
 	if(undefined !== cfg.dirname) {
 	    elems.AppCfgLspApp.prop("checked", true);
 	    elems.AppCfgDirName.val(cfg.dirname);
+	    elems.AppCfgDomainName.val(cfg.domainname);
 	    elems.AppCfgPriority.val(cfg.priority);
 	    $("#AppCfgLspAppDetails").show();
 	}
@@ -280,6 +289,12 @@ function appCfg(pn,cfg,isNewNet) {
 	};
 	if(elems.AppCfgLspApp.prop("checked")) {
 	    ncfg.dirname=elems.AppCfgDirName.val().trim();
+	    let dn=elems.AppCfgDomainName.val().trim();
+	    if(dn) {
+	      if(ncfg.dirname)
+		return alertErr("Directory name must be blank when using domain name filter.");
+	      ncfg.domainname=dn;
+	    }
 	    ncfg.priority=elems.AppCfgPriority.val().trim();
 	}
 	if(ncfg.name.length == 0 || ncfg.url.length == 0) return err();

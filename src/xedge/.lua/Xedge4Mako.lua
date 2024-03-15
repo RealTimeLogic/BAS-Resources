@@ -1,5 +1,3 @@
-
-
 local function deferred()
    local rw=require"rwfile"
    local log=xedge.log
@@ -16,7 +14,7 @@ local function deferred()
       if not cfgio then return end
       local ok,err= rw.json(cfgio, cfgname, cfg)
       if not ok then
-         log("Cannot save %s: %s",cfgio:realpath(cfgname),err)
+	 log("Cannot save %s: %s",cfgio:realpath(cfgname),err)
       end
    end
 
@@ -37,6 +35,9 @@ local function deferred()
        cfgio:realpath(cfgname), cfg and "loaded" or err)
    cfg = cfg or {apps={}}
    xedge.init(cfg,io,mako.rtldir)
+   if mako.udb and not xedge.authenticator then
+      xedge.appsd:setauth(ba.create.authenticator(mako.udb()))
+   end
    onunload=xedge.onunload
 end
 dir:unlink()
