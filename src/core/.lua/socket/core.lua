@@ -1,12 +1,9 @@
 --[[
-
 $Id: core.lua 4061 2017-04-28 21:51:54Z wini $ 
-
 socket.core.lua: Included by socket.lua
 Provides a compatibility layer between ba.socket and Lua sockets.
 See lsocket.c for more info.
 Copyright (C) Real-Time Logic 2024
-
 --]]
 
 local G = _G
@@ -36,12 +33,8 @@ function socket.secure(shark)
    sharkssl=shark
 end
 
-local tinsert=table.insert
-local tremove=table.remove
-local tconcat=table.concat
-local sgmatch=string.gmatch
-local sfind=string.find
-local fmt=string.format
+local tinsert, tremove, tconcat, sgmatch, sfind, fmt,type,ipairs = table.insert, table.remove, table.concat, string.gmatch, string.find, string.format,type,ipairs
+
 
 local _ENV={}
 local ix={}
@@ -89,7 +82,7 @@ end
 function ix:connect(address, port)
    local e
    initSock(self)
-   if G.type(address) == "userdata" and address.upgrade then
+   if type(address) == "userdata" and address.upgrade then
       self.s=address
       return true
    end
@@ -126,6 +119,7 @@ function ix:dohandshake(op)
    return s:isresumed() or s:upgrade(shark)
 end
 
+function ix:sslhandshake() return self:dohandshake() end
 
 function ix:peername()
    if not self.s then return nil,bas2SockErr() end
@@ -245,7 +239,10 @@ end
 
 function ix:send(data,i,j)
    if not self.s then return nil,bas2SockErr() end
-   if G.type(data) == "table" then
+   if "table" == type(data) then
+      for ix,v in ipairs(data) do
+	 if "table" == type(v) then data[ix]=tconcat(v) end
+      end
       data = tconcat(data)
    end
    local ok,err=self.s:write(data,i,j)
@@ -259,7 +256,7 @@ function ix:setoption(...)
 end
 
 function ix:sock(op)
-   if "table" == G.type(op) then self.op=op end
+   if "table" == type(op) then self.op=op end
    return self.s
 end
 
