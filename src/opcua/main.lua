@@ -3,6 +3,7 @@ This is a simple command line entry point for OPC UA Server
 ]]
 
 local ua = require("opcua.api")
+local compat = require("opcua.compat")
 
 local function PrintUsage()
   print("Usage:")
@@ -32,7 +33,7 @@ server:run()
 
 local ba = ba
 while ba ~= nil do
-  ba.sleep(1000)
+  compat.sleep(1)
 end
 
 os.exit(0)

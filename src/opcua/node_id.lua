@@ -23,8 +23,10 @@ local function hexs(s)
   return tonumber(s, 16)
 end
 
-local b64decode = ba.b64decode
-local b64encode = ba.b64encode
+local compat = require("opcua.compat")
+
+local b64decode = compat.b64decode
+local b64encode = compat.b64encode
 
 local function fromString(s)
   assert(type(s) == 'string')
@@ -63,17 +65,17 @@ local function fromString(s)
       match(ident, "^g=(%x%x%x%x%x%x%x%x)-(%x%x%x%x)-(%x%x%x%x)-(%x%x)(%x%x)-(%x%x)(%x%x)(%x%x)(%x%x)(%x%x)(%x%x)$")
     assert(d1 and d2 and d3 and d4 and d5 and d6 and d7 and d8 and d9 and d10 and d11)
     ident = {
-      data1=hexs(d1),
-      data2=hexs(d2),
-      data3=hexs(d3),
-      data4=hexs(d4),
-      data5=hexs(d5),
-      data6=hexs(d6),
-      data7=hexs(d7),
-      data8=hexs(d8),
-      data9=hexs(d9),
-      data10=hexs(d10),
-      data11=hexs(d11),
+      Data1=hexs(d1),
+      Data2=hexs(d2),
+      Data3=hexs(d3),
+      Data4=hexs(d4),
+      Data5=hexs(d5),
+      Data6=hexs(d6),
+      Data7=hexs(d7),
+      Data8=hexs(d8),
+      Data9=hexs(d9),
+      Data10=hexs(d10),
+      Data11=hexs(d11),
     }
   elseif begins(ident, 'b=') then
     local str = match(ident, "^b=([A-Za-z0-9+/=]+)$")
@@ -110,7 +112,7 @@ local function toString(i, ns, srv, nodeIdType)
     elseif nodeIdType == String then
       i = fmt("s=%s", i)
     elseif nodeIdType == Guid then
-      i = fmt('g=%08x-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x', i.data1, i.data2, i.data3, i.data4, i.data5, i.data6, i.data7, i.data8, i.data9, i.data10, i.data11)
+      i = fmt('g=%08X-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X', i.Data1, i.Data2, i.Data3, i.Data4, i.Data5, i.Data6, i.Data7, i.Data8, i.Data9, i.Data10, i.Data11)
     elseif nodeIdType == ByteString then
       i = fmt('b=%s', b64encode(i))
     end
@@ -121,8 +123,8 @@ local function toString(i, ns, srv, nodeIdType)
     elseif type(i) == "string" then
       i = fmt("s=%s", i)
     elseif type(i) == "table" then
-      if i.data1 ~= nil then
-        i = fmt('g=%08x-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x', i.data1, i.data2, i.data3, i.data4, i.data5, i.data6, i.data7, i.data8, i.data9, i.data10, i.data11)
+      if i.Data1 ~= nil then
+        i = fmt('g=%08X-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X', i.Data1, i.Data2, i.Data3, i.Data4, i.Data5, i.Data6, i.Data7, i.Data8, i.Data9, i.Data10, i.Data11)
       else
         local data = {}
         for _, val in pairs(i) do

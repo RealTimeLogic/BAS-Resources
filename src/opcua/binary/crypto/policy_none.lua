@@ -1,6 +1,6 @@
 local ua = require("opcua.api") -- REMOVE, Not used in encryption
-local createCert = require("opcua.binary.crypto.certificate").createCert
-local createKey = require("opcua.binary.crypto.certificate").createKey
+local createCert = ua.crypto.createCert
+local createKey = ua.crypto.createKey
 
 local BadSecurityChecksFailed = 0x80130000
 local BadSecurityPolicyRejected = 0x80550000
@@ -8,14 +8,11 @@ local BadSecurityPolicyRejected = 0x80550000
 local function empty()
 end
 
-local function zero()
-  return 0
-end
 local function size(_, sz)
   return sz
 end
 
-local function createPolicy(_--[[modes]], fsIo)
+local function createPolicy(_--[[modes]], _--[[params]], fsIo)
   return {
     uri = ua.Types.SecurityPolicy.None,
 
@@ -29,9 +26,9 @@ local function createPolicy(_--[[modes]], fsIo)
       key = createKey(key, fsIo)
       assert(key)
 
-      local size,err = ba.crypto.keysize(key)
+      local sz,err = ua.crypto.keysize(key)
       if err then error(err) end
-      if size < 128 or size > 256 then
+      if sz < 128 or sz > 256 then
         error(BadSecurityChecksFailed)
       end
       self.certificate = createCert(certificate, fsIo)
@@ -56,7 +53,7 @@ local function createPolicy(_--[[modes]], fsIo)
       return self.remote and #self.remote.thumbprint or 0
     end,
     genNonce = function(_, len)
-      return ba.rndbs(len or 16)
+      return ua.crypto.rndbs(len or 16)
     end,
     getLocalThumbprint = function(self)
       return self.certificate and self.certificate.thumbprint

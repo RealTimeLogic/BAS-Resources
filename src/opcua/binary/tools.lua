@@ -120,7 +120,7 @@ end
 function T.browseNameValid(browseName)
   return type(browseName) == 'table' and
     (browseName.ns == nil or type(browseName.ns) == 'number') and
-    type(browseName.name) == 'string'
+    type(browseName.Name) == 'string'
 end
 
 function T.nodeClassValid(cls)
@@ -177,29 +177,34 @@ function T.doubleValid(v)
 end
 
 function T.guidValid(v)
+  if type(v) == "string" then
+    local m = string.match(v, "^%x%x%x%x%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%x%x%x%x%x%x%x%x$")
+    return m == v
+  end
+
   return
   type(v) == 'table' and
-  T.uint32Valid(v.data1) and
-  T.uint16Valid(v.data2) and
-  T.uint16Valid(v.data3) and
-  T.byteValid(v.data4) and
-  T.byteValid(v.data5) and
-  T.byteValid(v.data6) and
-  T.byteValid(v.data7) and
-  T.byteValid(v.data8) and
-  T.byteValid(v.data9) and
-  T.byteValid(v.data10) and
-  T.byteValid(v.data11)
+  T.uint32Valid(v.Data1) and
+  T.uint16Valid(v.Data2) and
+  T.uint16Valid(v.Data3) and
+  T.byteValid(v.Data4) and
+  T.byteValid(v.Data5) and
+  T.byteValid(v.Data6) and
+  T.byteValid(v.Data7) and
+  T.byteValid(v.Data8) and
+  T.byteValid(v.Data9) and
+  T.byteValid(v.Data10) and
+  T.byteValid(v.Data11)
 end
 
 function T.localizedTextValid(v)
   return type(v) == 'table' and
-  (v.locale == nil or type(v.locale) == 'string') and
-  type(v.text) == 'string'
+         (v.Locale == nil or type(v.Locale) == 'string') and
+         type(v.Text) == 'string'
 end
 
 function T.qualifiedNameValid(v)
-  return type(v) == 'table' and T.uint16Valid(v.ns) and  type(v.name) == 'string'
+  return type(v) == 'table' and (v.ns == nil or T.uint16Valid(v.ns)) and type(v.Name) == 'string'
 end
 
 function T.byteStringValid(v)
@@ -227,41 +232,15 @@ function T.xmlElementValid(v)
     return false
   end
 
-  if v.value == nil then
+  if v.Value == nil then
     return false
   end
 
-  return type(v.value) == 'string'
+  return type(v.Value) == 'string'
 end
 
 function T.nodeIdValid(v)
   return nodeId.isValid(v)
-end
-
-function T.dataValueValid(v)
-  if type(v) ~= 'table' then
-    return false
-  end
-  if not T.variantValid(v.value) then
-    return false
-  end
-  if v.statusCode ~= nil and not T.uint32Valid(v.statusCode) then
-    return false
-  end
-  if v.sourceTimestamp ~= nil and not T.doubleValid(v.sourceTimestamp) then
-    return false
-  end
-  if v.serverTimestamp ~= nil and not T.doubleValid(v.serverTimestamp) then
-    return false
-  end
-  if v.sourcePicoseconds ~= nil and not T.uint16Valid(v.sourcePicoseconds) then
-    return false
-  end
-  if v.serverPicoseconds ~= nil and not T.uint16Valid(v.serverPicoseconds) then
-    return false
-  end
-
-  return true
 end
 
 function T.diagnosticInfoValid(v)
@@ -269,25 +248,25 @@ function T.diagnosticInfoValid(v)
     return false
   end
 
-  if v.symbolicId ~= nil and not T.int32Valid(v.symbolicId) then
+  if v.SymbolicId ~= nil and not T.int32Valid(v.SymbolicId) then
     return false
   end
-  if v.nsUri ~= nil and not T.int32Valid(v.nsUri) then
+  if v.NsUri ~= nil and not T.int32Valid(v.NsUri) then
     return false
   end
-  if v.locale ~= nil and not T.int32Valid(v.locale) then
+  if v.Locale ~= nil and not T.int32Valid(v.Locale) then
     return false
   end
-  if v.localizedText ~= nil and not T.int32Valid(v.localizedText) then
+  if v.LocalizedText ~= nil and not T.int32Valid(v.LocalizedText) then
     return false
   end
-  if v.additionalInfo ~= nil and not T.stringValid(v.additionalInfo) then
+  if v.AdditionalInfo ~= nil and not T.stringValid(v.AdditionalInfo) then
     return false
   end
-  if v.innerStatusCode ~= nil and not T.uint32Valid(v.innerStatusCode) then
+  if v.InnerStatusCode ~= nil and not T.uint32Valid(v.InnerStatusCode) then
     return false
   end
-  if v.innerDiagnosticInfo ~= nil and not T.diagnosticInfoValid(v.innerDiagnosticInfo) then
+  if v.InnerDiagnosticInfo ~= nil and not T.diagnosticInfoValid(v.InnerDiagnosticInfo) then
     return false
   end
   return true
@@ -311,71 +290,71 @@ function T.variantValid(val)
     return false
   end
 
-  if val.boolean ~= nil then
-    return variantDataValid(val.boolean, T.booleanValid)
-  elseif val.sbyte ~= nil then
-    return variantDataValid(val.sbyte, T.sbyteValid)
-  elseif val.byte ~= nil then
-    return variantDataValid(val.byte, T.byteValid)
-  elseif val.int16 ~= nil then
-    return variantDataValid(val.int16, T.int16Valid)
-  elseif val.uint16 ~= nil then
-    return variantDataValid(val.uint16, T.uint16Valid)
-  elseif val.int32 ~= nil then
-    return variantDataValid(val.int32, T.int32Valid)
-  elseif val.uint32 ~= nil then
-    return variantDataValid(val.uint32, T.uint32Valid)
-  elseif val.int64 ~= nil then
-    return variantDataValid(val.int64, T.int64Valid)
-  elseif val.uint64 ~= nil then
-    return variantDataValid(val.uint64, T.uint64Valid)
-  elseif val.float ~= nil then
-    return variantDataValid(val.float, T.floatValid)
-  elseif val.double ~= nil then
-    return variantDataValid(val.double, T.doubleValid)
-  elseif val.string ~= nil then
-    return variantDataValid(val.string, T.stringValid)
-  elseif val.dateTime ~= nil then
-    return variantDataValid(val.dateTime, T.doubleValid)
-  elseif val.guid ~= nil then
-    return variantDataValid(val.guid, T.guidValid)
-  elseif val.byteString ~= nil then
-    if type(val.byteString) ~= 'table' then
-      return false
-    end
-    if #val.byteString == 0 then
-      return true
-    end
-    if type(val.byteString[1]) == 'table' then
-      for _,b in ipairs(val.byteString) do
-        if T.byteStringValid(b) == false then
-          return false
-        end
+  if val.Boolean ~= nil then
+    return variantDataValid(val.Boolean, T.booleanValid)
+  elseif val.SByte ~= nil then
+    return variantDataValid(val.SByte, T.sbyteValid)
+  elseif val.Byte ~= nil then
+    return variantDataValid(val.Byte, T.byteValid)
+  elseif val.Int16 ~= nil then
+    return variantDataValid(val.Int16, T.int16Valid)
+  elseif val.UInt16 ~= nil then
+    return variantDataValid(val.UInt16, T.uint16Valid)
+  elseif val.Int32 ~= nil then
+    return variantDataValid(val.Int32, T.int32Valid)
+  elseif val.UInt32 ~= nil then
+    return variantDataValid(val.UInt32, T.uint32Valid)
+  elseif val.Int64 ~= nil then
+    return variantDataValid(val.Int64, T.int64Valid)
+  elseif val.UInt64 ~= nil then
+    return variantDataValid(val.UInt64, T.uint64Valid)
+  elseif val.Float ~= nil then
+    return variantDataValid(val.Float, T.floatValid)
+  elseif val.Double ~= nil then
+    return variantDataValid(val.Double, T.doubleValid)
+  elseif val.String ~= nil then
+    return variantDataValid(val.String, T.stringValid)
+  elseif val.DateTime ~= nil then
+    return variantDataValid(val.DateTime, T.doubleValid)
+  elseif val.Guid ~= nil then
+    return variantDataValid(val.Guid, T.guidValid)
+  elseif val.ByteString ~= nil then
+    if type(val.ByteString) == 'table' then
+      if #val.ByteString == 0 then
+        return true
       end
-      return true
-    else
-      return T.byteStringValid(val.byteString)
+      if type(val.ByteString[1]) == 'table' or type(val.ByteString[1]) == 'string' then
+        for _,b in ipairs(val.ByteString) do
+          if T.byteStringValid(b) == false then
+            return false
+          end
+        end
+        return true
+      else
+        return T.byteStringValid(val.ByteString)
+      end
     end
-  elseif val.xmlElement ~= nil then
-    return variantDataValid(val.xmlElement, T.xmlElementValid)
-  elseif val.nodeId ~= nil then
-    return variantDataValid(val.nodeId, T.nodeIdValid)
-  elseif val.expandedNodeId ~= nil then
-    return variantDataValid(val.expandedNodeId, T.nodeIdValid)
-  elseif val.statusCode ~= nil then
-    return variantDataValid(val.statusCode, T.uint32Valid)
-  elseif val.qualifiedName ~= nil then
-    return variantDataValid(val.qualifiedName, T.qualifiedNameValid)
-  elseif val.localizedText ~= nil then
-    return variantDataValid(val.localizedText, T.localizedTextValid)
-  elseif val.extensionObject ~= nil then
-    return variantDataValid(val.extensionObject, T.extensionObjectValid)
-  elseif val.dataValue ~= nil then
-    return variantDataValid(val.dataValue, T.dataValueValid)
-  elseif val.variant ~= nil then
-    return variantDataValid(val.variant, T.variantValid)
-  elseif val.diagnosticInfo ~= nil then
-    return variantDataValid(val.diagnosticInfo, T.diagnosticInfoValid)
+    return type(val.ByteString) == 'string'
+  elseif val.XmlElement ~= nil then
+    return variantDataValid(val.XmlElement, T.xmlElementValid)
+  elseif val.NodeId ~= nil then
+    return variantDataValid(val.NodeId, T.nodeIdValid)
+  elseif val.ExpandedNodeId ~= nil then
+    return variantDataValid(val.ExpandedNodeId, T.nodeIdValid)
+  elseif val.StatusCode ~= nil then
+    return variantDataValid(val.StatusCode, T.uint32Valid)
+  elseif val.QualifiedName ~= nil then
+    return variantDataValid(val.QualifiedName, T.qualifiedNameValid)
+  elseif val.LocalizedText ~= nil then
+    return variantDataValid(val.LocalizedText, T.localizedTextValid)
+  elseif val.ExtensionObject ~= nil then
+    return variantDataValid(val.ExtensionObject, T.extensionObjectValid)
+  elseif val.DataValue ~= nil then
+    return variantDataValid(val.DataValue, T.dataValueValid)
+  elseif val.Variant ~= nil then
+    return variantDataValid(val.Variant, T.variantValid)
+  elseif val.DiagnosticInfo ~= nil then
+    return variantDataValid(val.DiagnosticInfo, T.diagnosticInfoValid)
   end
 
   return false
@@ -383,64 +362,90 @@ end
 
 
 function T.getVariantType(val)
-  if val.boolean ~= nil then
+  if val.Boolean ~= nil then
     return "i=1"
-  elseif val.sbyte ~= nil then
+  elseif val.SByte ~= nil then
     return "i=2"
-  elseif val.byte ~= nil then
+  elseif val.Byte ~= nil then
     return "i=3"
-  elseif val.int16 ~= nil then
+  elseif val.Int16 ~= nil then
     return "i=4"
-  elseif val.uint16 ~= nil then
+  elseif val.UInt16 ~= nil then
     return "i=5"
-  elseif val.int32 ~= nil then
+  elseif val.Int32 ~= nil then
     return "i=6"
-  elseif val.uint32 ~= nil then
+  elseif val.UInt32 ~= nil then
     return "i=7"
-  elseif val.int64 ~= nil then
+  elseif val.Int64 ~= nil then
     return "i=8"
-  elseif val.uint64 ~= nil then
+  elseif val.UInt64 ~= nil then
     return "i=9"
-  elseif val.float ~= nil then
+  elseif val.Float ~= nil then
     return "i=10"
-  elseif val.double ~= nil then
+  elseif val.Double ~= nil then
     return "i=11"
-  elseif val.string ~= nil then
+  elseif val.String ~= nil then
     return "i=12"
-  elseif val.dateTime ~= nil then
+  elseif val.DateTime ~= nil then
     return "i=13"
-  elseif val.guid ~= nil then
+  elseif val.Guid ~= nil then
     return "i=14"
-  elseif val.byteString ~= nil then
+  elseif val.ByteString ~= nil then
     return "i=15"
-  elseif val.xmlElement ~= nil then
+  elseif val.XmlElement ~= nil then
     return "i=16"
-  elseif val.nodeId ~= nil then
+  elseif val.NodeId ~= nil then
     return "i=17"
-  elseif val.expandedNodeId ~= nil then
+  elseif val.ExpandedNodeId ~= nil then
     return "i=18"
-  elseif val.statusCode ~= nil then
+  elseif val.StatusCode ~= nil then
     return "i=19"
-  elseif val.qualifiedName ~= nil then
+  elseif val.QualifiedName ~= nil then
     return "i=20"
-  elseif val.localizedText ~= nil then
+  elseif val.LocalizedText ~= nil then
     return "i=21"
-  elseif val.extensionObject ~= nil then
+  elseif val.ExtensionObject ~= nil then
     return "i=22"
-  elseif val.dataValue ~= nil then
+  elseif val.DataValue ~= nil then
     return "i=23"
-  elseif val.variant ~= nil then
+  elseif val.Variant ~= nil then
     return "i=24"
-  elseif val.diagnosticInfo ~= nil then
+  elseif val.DiagnosticInfo ~= nil then
     return "i=25"
   end
 
   error("unknown variant type"..val)
 end
 
+function T.dataValueValid(v)
+  if type(v) ~= 'table' then
+    return false
+  end
+  if not T.variantValid(v.Value) then
+    return false
+  end
+  if v.StatusCode ~= nil and not T.uint32Valid(v.StatusCode) then
+    return false
+  end
+  if v.SourceTimestamp ~= nil and not T.doubleValid(v.SourceTimestamp) then
+    return false
+  end
+  if v.ServerTimestamp ~= nil and not T.doubleValid(v.ServerTimestamp) then
+    return false
+  end
+  if v.SourcePicoseconds ~= nil and not T.uint16Valid(v.SourcePicoseconds) then
+    return false
+  end
+  if v.ServerPicoseconds ~= nil and not T.uint16Valid(v.ServerPicoseconds) then
+    return false
+  end
+
+  return true
+end
+
+
 function T.extensionObjectValid(v)
---  return type(v) == 'table' and T.nodeIdValid(v.typeId) and T.byteStringValid(v.body)
-  return type(v) == 'table' and T.nodeIdValid(v.typeId) and (v.body == nil or type(v.body) == 'table' or T.byteStringValid(v.body))
+  return type(v) == 'table' and T.nodeIdValid(v.TypeId) and (v.Body == nil or T.byteStringValid(v.Body))
 end
 
 function T.valueRankValid(v)
@@ -449,7 +454,7 @@ end
 
 
 local function scalarValid(val, arrayDimensions)
-  return val == nil or (arrayDimensions == nil or arrayDimensions == {-1}) and (type(val) ~= 'table' or #val == 0 or T.byteStringValid(val))
+  return val == nil or (arrayDimensions == nil or arrayDimensions[1] == -1 or arrayDimensions[1] == nil) and (type(val) ~= 'table' or #val == 0 or T.byteStringValid(val))
 end
 
 local function oneDimensionValid(val, arrayDimensions)
@@ -534,42 +539,42 @@ end
 
 function T.createAnonymousToken(policyId)
   return {
-    typeId = "i=321",
-    body = {
-      policyId = policyId
+    TypeId = "i=319",
+    Body = {
+      PolicyId = policyId
     }
   }
 end
 
 function T.createUsernameToken(policyId, username, password, encryptionAlgorithm)
   return {
-    typeId = "i=324",
-    body = {
-      policyId = policyId,
-      userName = username,
-      password = password,
-      encryptionAlgorithm = encryptionAlgorithm
+    TypeId = "i=322",
+    Body = {
+      PolicyId = policyId,
+      UserName = username,
+      Password = password,
+      EncryptionAlgorithm = encryptionAlgorithm
     }
   }
 end
 
 function T.createX509Token(policyId, cert)
   return {
-    typeId = "i=327",
-    body = {
-      policyId = policyId,
-      certificateData = cert
+    TypeId = "i=325",
+    Body = {
+      PolicyId = policyId,
+      CertificateData = cert
     }
   }
 end
 
 function T.createIssuedToken(policyId, token, encryptionAlgorithm)
   return {
-    typeId = "i=940",
-    body = {
-      policyId = policyId,
-      tokenData = token,
-      encryptionAlgorithm = encryptionAlgorithm
+    TypeId = "i=938",
+    Body = {
+      PolicyId = policyId,
+      TokenData = token,
+      EncryptionAlgorithm = encryptionAlgorithm
     }
   }
 end

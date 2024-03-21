@@ -1,10 +1,9 @@
-local socket = require("socket")
-
 local encoder = require("opcua.binary.chunks_encode")
 local decoder = require("opcua.binary.chunks_decode")
 local securePolicy = require("opcua.binary.crypto.policy")
 local Msg = require("opcua.binary.message_id")
 local ua = require("opcua.api")
+local compat = require("opcua.compat")
 
 local s = ua.StatusCode
 local trace = ua.trace
@@ -59,31 +58,31 @@ function S:processHello()
 
   if dbgOn then traceD(fmt("%s decoding hello message", self.logId)) end
   local hello = self.decoder:hello()
-  if infOn then traceI(fmt("%s Received Hello: EndpointUrl='%s' SendBufferSize=%d, ReceiveBufferSize=%d", self.logId, hello.endpointUrl, hello.sendBufferSize, hello.receiveBufferSize)) end
+  if infOn then traceI(fmt("%s Received Hello: EndpointUrl='%s' SendBufferSize=%d, ReceiveBufferSize=%d", self.logId, hello.EndpointUrl, hello.SendBufferSize, hello.ReceiveBufferSize)) end
 
   -- Endpoint URLs are used in proxy servers
-  if hello.endpointUrl ~= nil and self.services.hello ~= nil then
+  if hello.EndpointUrl ~= nil and self.services.hello ~= nil then
     if dbgOn then traceD(fmt("%s Pass HEL to Services", self.logId)) end
-    self.services:hello(hello.endpointUrl)
+    self.services:hello(hello.EndpointUrl)
   end
 
-  local bufSize = math.min(self.config.bufSize, hello.receiveBufferSize)
+  local bufSize = math.min(self.config.bufSize, hello.ReceiveBufferSize)
   local messageSize = 1 << 20 -- 1MB
   local maxChunkCount = messageSize / bufSize
 
-  self.decoder:setBuferSize(bufSize)
+  self.decoder:setBufferSize(bufSize)
 
   local ack = {
-    protocolVersion = 0,
-    receiveBufferSize = bufSize,
-    sendBufferSize = bufSize,
-    maxMessageSize = messageSize,
-    maxChunkCount = maxChunkCount
+    ProtocolVersion = 0,
+    ReceiveBufferSize = bufSize,
+    SendBufferSize = bufSize,
+    MaxMessageSize = messageSize,
+    MaxChunkCount = maxChunkCount
   }
 
   if infOn then
     traceI(fmt("%s Acknowledge: ReceiveBufferSize=%d, SendBufferSize=%d, MaxMessageSize=%d, MaxChunkCount=%d",
-        self.logId, ack.receiveBufferSize, ack.sendBufferSize, ack.maxMessageSize, ack.maxChunkCount))
+        self.logId, ack.ReceiveBufferSize, ack.SendBufferSize, ack.MaxMessageSize, ack.MaxChunkCount))
   end
 
   self.encoder:acknowledge(ack)
@@ -102,22 +101,22 @@ function S:processOpenSecureChannel(msg)
     msg = self.decoder:message()
   end
 
-  local req = msg.body
+  local req = msg.Body
 
   if self.state == State.New then
     if errOn then traceE(fmt("%s Failed to open secure channel: Client didn't send hello", self.logId)) end
     self:responseServiceFault(msg, s.BadRequestTypeInvalid)
     return
   elseif self.state == State.Hello then
-    if req.requestType ~= ua.Types.SecurityTokenRequestType.Issue then
-      if errOn then traceE(fmt("%s Received request type '%s' instead 'issue(0)'", self.logId, req.requestType)) end
+    if req.RequestType ~= ua.Types.SecurityTokenRequestType.Issue then
+      if errOn then traceE(fmt("%s Received request type '%s' instead 'issue(0)'", self.logId, req.RequestType)) end
       self:responseServiceFault(msg, s.BadRequestTypeInvalid)
       return
     end
     if infOn then traceI(fmt("%s Issuing new channel token", self.logId)) end
   elseif self.state == State.Open then
-    if req.requestType ~= ua.Types.SecurityTokenRequestType.Renew then
-      if errOn then traceE(fmt("%s Received request type '%s' instead 'renew(1)'", self.logId, req.requestType)) end
+    if req.RequestType ~= ua.Types.SecurityTokenRequestType.Renew then
+      if errOn then traceE(fmt("%s Received request type '%s' instead 'renew(1)'", self.logId, req.RequestType)) end
       self:responseServiceFault(msg, s.BadRequestTypeInvalid)
       return
     end
@@ -132,44 +131,45 @@ function S:processOpenSecureChannel(msg)
   end
 
 
-  self.encoder:setupPolicy(msg.secureHeader.securityPolicyUri, msg.secureHeader.senderCertificate)
+  self.encoder:setupPolicy(msg.SecureHeader.SecurityPolicyUri, msg.SecureHeader.SenderCertificate)
   local serverNonce = self.encoder.policy:genNonce()
-  local clientNonce = req.clientNonce
+  local clientNonce = req.ClientNonce
 
   self.encoder:setNonces(serverNonce, clientNonce)
-  self.encoder:setSecureMode(msg.body.securityMode)
+  self.encoder:setSecureMode(msg.Body.SecurityMode)
 
-  self.decoder:setupPolicy(msg.secureHeader.securityPolicyUri, msg.secureHeader.senderCertificate)
+  self.decoder:setupPolicy(msg.SecureHeader.SecurityPolicyUri, msg.SecureHeader.SenderCertificate)
   self.decoder:setNonces(clientNonce, serverNonce)
-  self.decoder:setSecureMode(msg.body.securityMode)
+  self.decoder:setSecureMode(msg.Body.SecurityMode)
 
   if dbgOn then traceD(fmt("%s Pass open secure channel to services", self.logId)) end
   self.services:openSecureChannel(req, self)
 
   local responseParams = {
-    channelId = self.channelId,
-    requestId = msg.requestId,
-    securityPolicy = msg.secureHeader.securityPolicyUri,
-    sertificate = self.config.sertificate,
-    sertificateThumbprint = self.encoder.policy:getRemoteThumbprint(),
-    requestHandle = req.requestHeader.requestHandle,
-    requestCreatedAt = socket.gettime(),
-    serviceResult = s.Good,
+    ChannelId = self.channelId,
+    RequestId = msg.RequestId,
+    SecurityPolicy = msg.SecureHeader.SecurityPolicyUri,
+    Sertificate = self.config.sertificate,
+    SertificateThumbprint = self.encoder.policy:getRemoteThumbprint(),
+    RequestHandle = req.RequestHeader.RequestHandle,
+    RequestCreatedAt = compat.gettime(),
+    ServiceResult = s.Good,
   }
 
-  local tokenId = genNextToken()
-  local createdAt = socket.gettime()
-  local lifeTime = req.requestedLifetime -- ms
+  local lifeTime = req.RequestedLifetime -- ms
   if lifeTime <= 1000 then
     lifeTime = 1000
   elseif lifeTime > 300000 then
     lifeTime = 300000
   end
 
+  local tokenId = genNextToken()
+  local createdAt = compat.gettime()
+  local expiresAt = createdAt + lifeTime / 1000
+
   self.tokens[tokenId] = {
     createdAt = createdAt,
-    cifeTime = lifeTime,
-    expiresAt = createdAt + lifeTime / 1000
+    expiresAt = expiresAt
   }
 
   self.encoder:setChannelId(self.channelId)
@@ -179,20 +179,20 @@ function S:processOpenSecureChannel(msg)
 
 
   local response = self.encoder:createResponse(Msg.OPEN_SECURE_CHANNEL_RESPONSE, responseParams)
-  response.securityToken = {
-    channelId = self.channelId,
-    tokenId =   tokenId,
-    createdAt = createdAt,
-    revisedLifetime = lifeTime,
+  response.SecurityToken = {
+    ChannelId = self.channelId,
+    TokenId =   tokenId,
+    CreatedAt = createdAt,
+    RevisedLifetime = lifeTime,
   }
-  response.serverNonce = serverNonce
-  response.serverProtocolVersion = 0
+  response.ServerNonce = serverNonce
+  response.ServerProtocolVersion = 0
 
   self.encoder:message(response)
 
   self.state = State.Open
   self:cleanupExpredTokens(createdAt)
-  if infOn then traceI(fmt("%s Issued secure channel token %s lifetime %s", self.logId, tokenId, lifeTime)) end
+  if infOn then traceI(fmt("%s Issued secure channel token %s createdAt %s expiresAt %s", self.logId, tokenId, createdAt, expiresAt)) end
 end
 
 function S:processCloseSecureChannel(msg)
@@ -227,9 +227,9 @@ function S:processMessage()
     error(s.BadTcpMessageTypeInvalid)
   end
 
-  if dbgOn then traceD(fmt("%s Processing message ID: %s", self.logId, msg.requestId)) end
+  if dbgOn then traceD(fmt("%s Processing message ID: %s", self.logId, msg.RequestId)) end
 
-  local i = msg.type
+  local i = msg.TypeId
   -- Generating of error response only on encoding/decoding errors
   -- Processing of a valid request can cause only service fault response.
   -- In case of service fault return code will be Good, but response header will contain
@@ -282,14 +282,14 @@ function S:processRequest(msg, type, service, reqName)
   local dbgOn = self.trace.dbgOn
   local errOn = self.trace.errOn
 
-  local request = msg.body
+  local request = msg.Body
   -- Decode request
-  if dbgOn then traceD(fmt("%s Processing %s request handle %d", self.logId, reqName, request.requestHeader.requestHandle)) end
+  if dbgOn then traceD(fmt("%s Processing %s request handle %d", self.logId, reqName, request.RequestHeader.RequestHandle)) end
 
   local suc
   local result
   -- check token
-  suc, result = pcall(self.setToken, self, msg.secureHeader.tokenId)
+  suc, result = pcall(self.setToken, self, msg.SecureHeader.TokenId)
   if suc then
     suc, result = pcall(service, self.services, request, self)
   end
@@ -300,7 +300,7 @@ function S:processRequest(msg, type, service, reqName)
     local response = self.encoder:createResponse(type, self:fillResponseParams(msg, 0), result)
     self.encoder:message(response)
   else
-    if errOn then traceE(fmt("%s Failed call %s: %s", self.logId, reqName, result)) end
+    if errOn then traceE(fmt("%s Failed to call %s: %s", self.logId, reqName, result)) end
     if dbgOn then traceD(fmt("%s Encoding %s service fault: %s", self.logId, reqName, result)) end
     self:responseServiceFault(msg, result)
   end
@@ -308,12 +308,12 @@ end
 
 function S.fillResponseParams(_, msg, statusCode)
   return {
-    requestId = msg.requestId,
-    channelTokenId = msg.secureHeader.tokenId,
-    channelId = msg.channelId,
-    requestHandle = msg.body.requestHeader.requestHandle,
-    requestCreatedAt = socket.gettime(),
-    serviceResult = statusCode or s.Good
+    RequestId = msg.RequestId,
+    ChannelTokenId = msg.SecureHeader.TokenId,
+    ChannelId = msg.ChannelId,
+    RequestHandle = msg.Body.RequestHeader.RequestHandle,
+    RequestCreatedAt = compat.gettime(),
+    ServiceResult = statusCode or s.Good
   }
 end
 
@@ -325,7 +325,7 @@ end
 
 function S:setToken(tokenId)
   local errOn = self.trace.errOn
-  local time = socket.gettime()
+  local time = compat.gettime()
   self:cleanupExpredTokens(time)
 
   local token = self.tokens[tokenId]
@@ -368,11 +368,12 @@ function S:getLocalPolicy()
 end
 
 
-local function newConnection(config, services, sock)
-  assert(config ~= nil)
-  assert(services ~= nil)
-  assert(sock ~= nil)
+local function newConnection(config, services, sock, model)
+  assert(config)
+  assert(services)
+  assert(sock)
   assert(config.bufSize >= 8192)
+  assert(model)
 
   local securePolicies = {}
   local nonePolicyEnabled = false
@@ -401,14 +402,16 @@ local function newConnection(config, services, sock)
 
   local security = securePolicy(secureConfig)
 
+  local hasChunks = true
+
   channelsNum = channelsNum + 1
   local c = {
     channelId = channelsNum,
     sock = sock,
     tokens = {},
     services = services,
-    decoder = decoder.new(config, security, sock),
-    encoder = encoder.new(config, security, sock),
+    decoder = decoder.new(config, security, sock, hasChunks, model),
+    encoder = encoder.new(config, security, sock, hasChunks, model),
     state = State.New,
     config = config,
     nonePolicyEnabled = nonePolicyEnabled,
