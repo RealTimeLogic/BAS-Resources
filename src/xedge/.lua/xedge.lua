@@ -1155,7 +1155,7 @@ local commands={
       cmd:abort()
    end,
    startApp=function(cmd,d)
-      local ioname,x="disk"
+      local ioname,x=mako and "home" or "disk"
       local dio,zipname=ba.openio(ioname),d.name
       local dname=zipname and zipname:match"(.-)%.zip$"
       if not dname or (dio:stat(dname) and "false" == d.deploy) then
