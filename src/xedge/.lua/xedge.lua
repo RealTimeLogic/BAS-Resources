@@ -500,7 +500,7 @@ local function manageApp(name,isStartup) -- start/stop/restart
 	 if #dom > 0 then
 	    dir=ba.create.domainresrdr(dom,appc.priority or 0,io)
 	 else
-	    dir=ba.create.resrdr(#dn > 1 and dn or nil,appc.priority or 0,io)
+	    dir=ba.create.resrdr(#dn > 0 and dn or nil,appc.priority or 0,io)
 	 end
 	 env.dir=dir
 	 dir:setfunc(function(_ENV,pn)
@@ -1200,6 +1200,7 @@ local commands={
 	    if x and "table" == type(api) then
 	       nc.name = "string" == type(api.name) and api.name or name
 	       nc.running,nc.autostart = api.autostart,api.autostart
+	       nc.dirname = "string" == type(api.dirname) and api.dirname
 	    else
 	       err=appIniErr(name,"string" == type(api) or "failed")
 	       api={}
