@@ -121,6 +121,14 @@ local function filePath(path,file)
    return #path > 0 and path.."/"..file or file
 end
 
+local function setSecH(dir)
+   dir:header{
+      ["x-xss-protection"]="1; mode=block",
+      ["x-frame-options"]="SAMEORIGIN",
+      ["x-content-type"]="nosniff",
+   }
+end
+
 -- A recursive directory iterator
 local function recDirIter(io,curPath,onDir)
    local name
@@ -502,6 +510,7 @@ local function manageApp(name,isStartup) -- start/stop/restart
 	 else
 	    dir=ba.create.resrdr(#dn > 0 and dn or nil,appc.priority or 0,io)
 	 end
+	 setSecH(dir)
 	 env.dir=dir
 	 dir:setfunc(function(_ENV,pn)
 	    if pn:find"%.x?lua$" then
@@ -850,6 +859,7 @@ function xedge.init(cfg,aio,rtld) -- cfg from Xedge config file
 
    -- rtld set if mako
    local resrdr=ba.create.resrdr(not rtld and "rtl" or nil,0,aio)
+   setSecH(resrdr)
    resrdr:lspfilter{io=aio}
    if rtld then
       rtld:insert(resrdr,true) -- Mako

@@ -696,6 +696,11 @@ local function newWFS(name,priority,io,lockdir,maxuploads,maxlocks)
    end
 
    resrdr=ba.create.resrdr(name,priority,io)
+   resrdr:header{
+      ["x-xss-protection"]="1; mode=block",
+      ["x-frame-options"]="SAMEORIGIN",
+      ["x-content-type"]="nosniff",
+   }
    resrdr:setfunc(service)
    dav=ba.create.dav(name,priority,io,lockdir,maxuploads,maxlocks)
 
