@@ -917,7 +917,7 @@ function inittree() {
       if("net/" == selpn) {
 	folder.resolve();
 	logErr("Cannot open the uninitialized NET IO.\n");
-	log("However, you may right click 'net' and create a network app.\n");
+	log("However, you may right click 'net' and create a network app. See the <a target='_blank' href='https://realtimelogic.com/articles/Using-the-NetIO-Network-File-System-Client-on-an-Embedded-Device'>NetIo Tutorial</a> for details.\n");
       }
       else {
 	getDirList(selpn, (list)=>{

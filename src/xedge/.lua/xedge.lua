@@ -532,7 +532,7 @@ local function manageApp(name,isStartup) -- start/stop/restart
 	    if cnt > 100 then sendErr("Too many files in application '%s' (%s)",name,appc.url) break end
 	 end
       end
-   elseif err then
+   elseif err and (not appc or not appc.url:find"^https?://") then
       terminateApp(name)
    else
       appc.running=false
