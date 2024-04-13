@@ -193,6 +193,14 @@ const appFormObj = [
 	placeholder: "Enter the path to the apps's root directory",
     },
     {
+	el: "input",
+	type: "text",
+	label: "startprio",
+	name: "Startup Priority",
+	description: "Set optional startup priority if the app must start before another app; Max priority is 0",
+	placeholder: "Enter optional startup priority",
+    },
+    {
 	el:"input",
 	type: "checkbox",
 	class:"switch",
@@ -260,6 +268,7 @@ function appCfg(pn,cfg,isNewNet) {
 	elems.AppCfgAutostart.prop("checked", cfg.autostart);
 	elems.AppCfgName.val(cfg.name);
 	elems.AppCfgURL.val(cfg.url);
+	elems.startprio.val(isNaN(cfg.startprio) ? "" : cfg.startprio+"");
 	if(undefined !== cfg.dirname) {
 	    elems.AppCfgLspApp.prop("checked", true);
 	    elems.AppCfgDirName.val(cfg.dirname);
@@ -287,6 +296,13 @@ function appCfg(pn,cfg,isNewNet) {
 	    running:elems.AppCfgRunning.prop("checked"),
 	    autostart:elems.AppCfgAutostart.prop("checked")
 	};
+	let startprio=elems.startprio.val().trim();
+	if(startprio.length > 0) {
+	  startprio=parseInt(startprio)
+	  if(isNaN(startprio) || startprio < 0)
+	    return alertErr("Invalid Startup Priority");
+	  ncfg.startprio=startprio
+	}
 	if(elems.AppCfgLspApp.prop("checked")) {
 	    ncfg.dirname=elems.AppCfgDirName.val().trim();
 	    let dn=elems.AppCfgDomainName.val().trim();

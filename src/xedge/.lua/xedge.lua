@@ -556,7 +556,8 @@ local function newAppCfg(cfg)
 end
 
 local function newOrUpdateApp(cfg,ion,url) -- On new/update cfg file
-   local nc={name=cfg.name,url=cfg.url,running=cfg.running or false,autostart=cfg.autostart,dirname=cfg.dirname,domainname=cfg.domainname}
+   local nc={name=cfg.name,url=cfg.url,running=cfg.running or false,
+      autostart=cfg.autostart,startprio=cfg.startprio,dirname=cfg.dirname,domainname=cfg.domainname}
    if cfg.dirname then nc.priority=cfg.priority or 0 end
    if not nc.url then nc.url=url end
    local start=true -- or restart
@@ -822,11 +823,16 @@ local function init(cfg)
 	 for name,data in pairs(encodedStr2Tab(cfg.userdb,"userdb")) do userdb[name]=data end
 	 xedge.cfg.userdb=cfg.userdb
       end
+      local alist={}
       for name,appc in pairs(cfg.apps) do
 	 appc.name=name
 	 appsCfg[name]=appc
-	 manageApp(name,true)
+	 tinsert(alist,appc)
       end
+      table.sort(alist, function(a,b)
+	 return (a.startprio == nil and 100 or a.startprio) < (b.startprio == nil and 100 or b.startprio)
+       end)
+      for _,appc in ipairs(alist) do manageApp(appc.name,true) end
    end)
    if not ok then
       sendCfgCorrupt(err)
@@ -1211,6 +1217,7 @@ local commands={
 	       nc.name = "string" == type(api.name) and api.name or name
 	       nc.running,nc.autostart = api.autostart,api.autostart
 	       nc.dirname = "string" == type(api.dirname) and api.dirname
+	       nc.startprio=api.startprio
 	    else
 	       err=appIniErr(name,"string" == type(api) or "failed")
 	       api={}
