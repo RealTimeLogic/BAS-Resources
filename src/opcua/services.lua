@@ -5,6 +5,9 @@ local createCert = ua.crypto.createCert
 local securePolicy = require("opcua.binary.crypto.policy")
 local Q = require("opcua.binary.queue")
 local BinaryDecoder = require("opcua.binary.decoder")
+local address_space = require("opcua.address_space")
+local srvObject = require("opcua.server_object")
+
 
 local s = ua.StatusCode
 local t = ua.Tools
@@ -54,8 +57,11 @@ local Svc = {}
 Svc.__index = Svc
 
 function Svc:start()
-  self.nodeset = require("opcua.address_space")
-  self.srvObject = require("opcua.server_object")
+  self.nodeset = address_space()
+  self.srvObject = srvObject()
+  if self.srvObject.start == nil then
+    ua.debug()
+  end
   return self.srvObject:start(self.config, self)
 end
 
@@ -126,12 +132,13 @@ function Svc:addEndpointDescriptions(endpointUrl, transportProfileUri, policy, e
   for _,p in ipairs(self.config.userIdentityTokens) do
     tins(tokenPolicies, {PolicyId=p.policyId, SecurityPolicyUri=p.securityPolicyUri, TokenType=p.tokenType, IssuedTokenType=p.issuedTokenType, IssuerEndpointUrl=p.issuerEndpointUrl})
   end
-  for _,mode in ipairs(policy.securityMode) do
+
+  if string.find(endpointUrl, "http://") or string.find(endpointUrl, "https://") then
     local endpoint = {
       EndpointUrl = endpointUrl,
       ServerCertificate = der,
-      SecurityMode = mode,
-      SecurityPolicyUri = policy.securityPolicyUri,
+      SecurityMode = ua.Types.MessageSecurityMode.None,
+      SecurityPolicyUri = ua.Types.SecurityPolicy.None,
       Server = self:getServerDescription(),
       UserIdentityTokens = tokenPolicies,
       TransportProfileUri = transportProfileUri,
@@ -139,24 +146,40 @@ function Svc:addEndpointDescriptions(endpointUrl, transportProfileUri, policy, e
     }
 
     tins(endpoints, endpoint)
+  else
+    for _,mode in ipairs(policy.securityMode) do
+      local endpoint = {
+        EndpointUrl = endpointUrl,
+        ServerCertificate = der,
+        SecurityMode = mode,
+        SecurityPolicyUri = policy.securityPolicyUri,
+        Server = self:getServerDescription(),
+        UserIdentityTokens = tokenPolicies,
+        TransportProfileUri = transportProfileUri,
+        SecurityLevel = 0 -- TODO
+      }
+
+      tins(endpoints, endpoint)
+    end
   end
 end
 
 function Svc:listEndpoints()
   local endpoints = {}
   for _,endpoint in ipairs(self.config.endpoints) do
-    for _,policy in ipairs(self.config.securePolicies) do
-
-      local endpointUrl = endpoint.endpointUrl
-      if string.find(endpointUrl, "opc.tcp") == 1 then
+    local endpointUrl = endpoint.endpointUrl
+    if string.find(endpointUrl, "opc.tcp") == 1 then
+      for _,policy in ipairs(self.config.securePolicies) do
         self:addEndpointDescriptions(endpoint.endpointUrl, ua.Types.TranportProfileUri.TcpBinary, policy, endpoints)
-      elseif string.find(endpointUrl, "http://") or string.find(endpointUrl, "https://") then
-        self:addEndpointDescriptions(endpoint.endpointUrl, ua.Types.TranportProfileUri.HttpsBinary, policy, endpoints)
-        self:addEndpointDescriptions(endpoint.endpointUrl, ua.Types.TranportProfileUri.HttpsJson, policy, endpoints)
-      else
-        error("Unsupported endpoint uri scheme: ".. endpointUrl)
       end
+    elseif string.find(endpointUrl, "http://") or string.find(endpointUrl, "https://") then
+      local policy = {}
+      self:addEndpointDescriptions(endpoint.endpointUrl, ua.Types.TranportProfileUri.HttpsBinary, policy, endpoints)
+      self:addEndpointDescriptions(endpoint.endpointUrl, ua.Types.TranportProfileUri.HttpsJson, policy, endpoints)
+    else
+      error("Unsupported endpoint uri scheme: ".. endpointUrl)
     end
+
   end
   return endpoints
 end
@@ -747,6 +770,7 @@ function Svc:read(req, channel)
   local session = self:checkSession(req, channel)
   local sessionId = session.sessionId
 
+  if dbgOn then traceD(fmt("Services:Read(%s) | Reading %s attributes", sessionId, #req.NodesToRead)) end
   if req.NodesToRead == nil or #req.NodesToRead == 0 then
     if infOn then traceI(fmt("Services:Read(%s) | Empty request received", sessionId)) end
     error(BadNothingToDo)
@@ -757,10 +781,10 @@ function Svc:read(req, channel)
     local val = {}
     local node = self.nodeset:getNode(r.NodeId)
     if node == nil then
-      if infOn then traceI(fmt("Services:Read(%s) | Unknown node id %s", sessionId, r.NodeId)) end
+      if dbgOn then traceD(fmt("Services:Read(%s) | Unknown node id %s", sessionId, r.NodeId)) end
       val.StatusCode = BadNodeIdUnknown
     else
-      if infOn then traceI(fmt("Services:Read(%s) | Node id '%s' attribute %d ", sessionId, r.NodeId, r.AttributeId)) end
+      if dbgOn then traceD(fmt("Services:Read(%s) | Node id '%s' attribute %d ", sessionId, r.NodeId, r.AttributeId)) end
       local suc,result = pcall(attrs.getAttributeValue, node.attrs, r.AttributeId, self.nodeset)
       if not suc then
         val.StatusCode = result
@@ -772,7 +796,7 @@ function Svc:read(req, channel)
       end
     end
 
-    if val.StatusCode ~= Good and dbgOn then
+    if dbgOn and val.StatusCode ~= Good then
       traceD(fmt("Services:Read(%s) | StatusCode %d", sessionId, val.StatusCode))
     end
 

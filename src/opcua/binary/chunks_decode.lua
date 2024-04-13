@@ -151,7 +151,7 @@ local function new(config, security, sock, hasChunks, model)
       end
     end,
 
-    receiveChunk = function(self)
+    receiveChunk = function(self, sz)
       local dbgOn = self.logging.dbgOn
       local errOn = self.logging.errOn
 
@@ -165,7 +165,6 @@ local function new(config, security, sock, hasChunks, model)
       q:clear()
 
       if not self.hasChunks then
-        local sz = 1
         if self.partBuf then
           sz = #self.partBuf - self.partSize
         end
@@ -283,14 +282,14 @@ local function new(config, security, sock, hasChunks, model)
       end
 
       if qlen == 0 then
-        self:receiveChunk()
+        self:receiveChunk(len)
         q:popFront(len, tgt)
         return
       end
 
       if qlen > 0 then
         q:popFront(qlen, tgt)
-        self:receiveChunk()
+        self:receiveChunk(len - qlen)
         local qi = 1
         for pos = qlen+1,len do
           tgt[pos] = q[qi]

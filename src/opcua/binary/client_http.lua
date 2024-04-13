@@ -35,8 +35,10 @@ local function createSocket(url, transportProfile, config)
   local mimetype
   if transportProfile == ua.Types.TranportProfileUri.HttpsBinary then
     mimetype = "application/opcua+uabinary"
+    -- mimetype = "application/octet-stream"
   elseif transportProfile == ua.Types.TranportProfileUri.HttpsJson then
     mimetype = "application/opcua+uajson"
+    -- mimetype = "application/json"
   else
     error(fmt("Unsupported HTTP transport profile: %s", transportProfile))
   end
@@ -63,6 +65,7 @@ local function createSocket(url, transportProfile, config)
 
       if dbgOn then ua.Tools.printTable("http.client | header", self.op.header, traceD) end
 
+      self.op.size = #data
       http:request(self.op)
       local ok,err = http:write(tostring(data))
       if not ok then
@@ -118,10 +121,9 @@ local function createSocket(url, transportProfile, config)
 end
 
 function C:coRun(endpointUrl, transportProfile, connectCallback, messageCallback)
-  self.thread = ba.thread.create()
   self.connectCallback = connectCallback
   self.messageCallback = messageCallback
-  self.thread:run(function()
+  self.thread = ba.thread:run(function()
     self:connectServer(endpointUrl, transportProfile, connectCallback)
   end)
 end
@@ -206,7 +208,7 @@ function C:sendMessage(msg, sync)
     return result
   end
 
-  c.thread:run(function()
+  ba.thread.run(function()
     local suc, result = pcall(c.enc.message, c.enc, msg)
     if suc then
       suc, result = pcall(c.dec.message, c.dec)
@@ -219,7 +221,7 @@ function C:sendMessage(msg, sync)
     end
 
     if err == BadCommunicationError then
-      c.connectCallback(result, err)
+      return processConnect(err, c.connectCallback)
     else
       c.messageCallback(result, err) -- result is a message
     end
