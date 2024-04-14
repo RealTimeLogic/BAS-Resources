@@ -379,7 +379,9 @@ local function export(self, output)
   }
 
   output('#include <stddef.h>')
+  output('#ifndef OPCUA_TYPES_H')
   output('#include "opcua_types.h"')
+  output('#endif')
   saveNodeIds(self, context, output)
   saveNodes(self, context, output)
 end

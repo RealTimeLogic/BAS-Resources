@@ -104,14 +104,25 @@ function S:responseServiceFault(msg, faultCode)
   self.encoder:message(response)
 end
 
-local function createSocket()
+local function createSocket(config)
   local out = {
     send = function(self, data)
       self.data = tostring(data)
     end,
 
     receive = function(self)
-      return self.readData()
+      local dbgOn = config.logging.socket.infOn
+      local errOn = config.logging.socket.errOn
+      local data, err = self.readData()
+      if err then
+        if errOn then traceE(fmt("http.server | Read error %s ", err)) end
+        error(s.BadCommunicationError)
+      end
+      if dbgOn then
+        traceD(fmt("http.server | Received %d bytes", #data))
+      end
+
+      return data
     end,
 
     getData = function(self)
@@ -182,6 +193,19 @@ function S:processHttp(request, response)
     self.decoder = dec
   elseif encoding == "application/opcua+uajson" then
     if dbgOn then traceD(string.format("%s JSON encoding", self.logId)) end
+    sock.json = function()
+      local jparser = ba.json.parser()
+      for data in request:rawrdr() do
+        local ok,t=jparser:parse(data)
+        if t then
+          return t
+        end
+        if not ok then
+          break
+        end
+      end
+      error(s.BadDecodingError)
+    end
     self.encoder = JsonMessageEncoder.new(self.config, self.security, sock, hasChunks, self.model)
     self.decoder = JsonMessageDecoder.new(self.config, self.security, sock, hasChunks, self.model)
   else
@@ -190,15 +214,23 @@ function S:processHttp(request, response)
   end
 
   sock.readData = request:rawrdr()
-  self:processData(securityPolicyUri)
+
+  if dbgOn then traceD(string.format("%s Processing data", self.logId)) end
+  local suc, resp = pcall(self.processData, self, securityPolicyUri)
+  if not suc then
+    if errOn then traceE(string.format("%s Error %s", self.logId, resp)) end
+    response:senderror(500)
+    return
+  end
 
   local str = sock:getData()
 
-  if infOn then traceI(string.format("%s Sending %d data", self.logId, #str)) end
+  if dbgOn then traceD(string.format("%s Sending %d data", self.logId, #str)) end
   response:setstatus(200)
   response:setcontenttype(encoding)
   response:setcontentlength(#str)
   response:send(str)
+  response:flush()
   if infOn then traceI(string.format("%s %d bytes sent", self.logId, #str)) end
 end
 
@@ -235,7 +267,7 @@ local function newConnection(config, services, model)
   local security = securePolicy(secureConfig)
 
   local c = {
-    sock = createSocket(),
+    sock = createSocket(config),
     security = security,
     services = services,
     config = config,

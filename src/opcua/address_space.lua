@@ -1,13 +1,11 @@
 local ns0 = require("opcua_ns0")
-local n = require("opcua.node_set")
-
 local address_space = {}
 function address_space:getNode(nodeId)
   assert(self ~= nil)
   assert(type(nodeId) == 'string')
 
   -- get node from ns0
-  local node1 = n[nodeId]
+  local node1 = self.n[nodeId]
   local node = ns0[nodeId]
   if node == nil then
     return node1
@@ -31,7 +29,15 @@ end
 function address_space:saveNode(node)
   assert(self ~= nil)
   local id = node.attrs[1]
-  n[id] = node
+  self.n[id] = node
 end
 
-return address_space
+local function create()
+  local space ={
+    n = {}
+  }
+  setmetatable(space, {__index = address_space})
+  return space
+end
+
+return create

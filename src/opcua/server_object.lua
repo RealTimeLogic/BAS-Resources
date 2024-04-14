@@ -113,4 +113,10 @@ function Srv:start(config, services)
   if dbgOn then traceD("services | Server object started sucessfully") end
 end
 
-return Srv
+local function create()
+  local srv = {}
+  setmetatable(srv, {__index = Srv})
+  return srv
+end
+
+return create

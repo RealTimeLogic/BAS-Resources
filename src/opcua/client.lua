@@ -222,27 +222,23 @@ function C:processOpenSecureChannelResponse(response)
   self.services:setSecureMode(self.securityMode)
   self.services:setNonces(self.channelNonce, serverNonce)
 
+  if infOn then traceI(fmt("services | newChannelID %s, tokenID=%s", response.SecurityToken.ChannelId, response.SecurityToken.TokenId)) end
+
   self.services.enc:setChannelId(response.SecurityToken.ChannelId)
   self.services.enc:setTokenId(response.SecurityToken.TokenId)
   local timeoutMs = response.SecurityToken.RevisedLifetime
-  if infOn then traceI(fmt("services | secure channel token timeout %s", timeoutMs)) end
+  self.timeoutMs = timeoutMs
+  if infOn then traceI(fmt("services | secure channel token lifetime %s ms", timeoutMs)) end
   timeoutMs = timeoutMs * 3 / 4
   if self.channelTimer == nil then
     self.channelTimer = compat.timer(function()
-      if infOn then traceI("services | renewing secure channel token") end
-      local _, err = self:renewSecureChannel(timeoutMs, function (_, err)
-        if err == nil then
-          if infOn then traceI("Secure channel renewed") end
-        else
-          if infOn then traceI(fmt("Failed to renew secure channel: %s", err)) end
-        end
-      end)
-      return err == nil
+      self.needRenewChannel = true
+      return true
     end)
-    if infOn then traceI(fmt("services | set timer for renewing secure channel token: %s ms", timeoutMs)) end
+    if infOn then traceI(fmt("services | set timer for renewing secure channel: %s ms", timeoutMs)) end
     self.channelTimer:set(timeoutMs)
   else
-    if infOn then traceI(fmt("services | reset timer for renewing secure channel token: %s ms", timeoutMs)) end
+    if infOn then traceI(fmt("services | reset timer for renewing secure channel: %s ms", timeoutMs)) end
     self.channelTimer:reset(timeoutMs)
   end
 end
@@ -347,7 +343,7 @@ function C:renewSecureChannel(timeoutMs, callback)
   end
 
   if self.policy then
-    self.channelNonce = self.policy.genNonce()
+    self.channelNonce = self.policy:genNonce()
   end
 
   local request, err = self.services:createRequest(MessageId.OPEN_SECURE_CHANNEL_REQUEST)
@@ -362,13 +358,37 @@ function C:renewSecureChannel(timeoutMs, callback)
   return self:execRequest(request, callback)
 end
 
+function C:checkSecureChannel()
+  if not self.needRenewChannel then
+    return
+  end
+
+  local infOn = self.config.logging.services.infOn
+  local errOn = self.config.logging.services.errOn
+
+  if infOn then traceI("services | renewing secure channel token") end
+  local _, err = self:renewSecureChannel(self.timeoutMs)
+  if err ~= nil then
+    if errOn then traceE(fmt("Failed to renew secure channel: %s", err)) end
+    return err
+  end
+
+  self.needRenewChannel = false
+end
+
+
 function C:createSession(name, timeoutMs, callback)
   local infOn = self.config.logging.services.infOn
 
-  if infOn then traceI(fmt("services | Creating session '%s' timeout '%s'", name, timeoutMs)) end
+  if infOn then traceI(fmt("services | Creating session '%s' lifetime '%s' ms", name, timeoutMs)) end
 
   if not self:connected() then
     return nil, BadNotConnected
+  end
+
+  local err = self:checkSecureChannel()
+  if err then
+    return nil, err
   end
 
   local nonce = self.policy:genNonce(32)
@@ -422,7 +442,8 @@ function C:createSession(name, timeoutMs, callback)
   end
 
   self.sessionNonce = nonce
-  local request, err = self.services:createRequest(MessageId.CREATE_SESSION_REQUEST, sessionParams)
+  local request
+  request, err = self.services:createRequest(MessageId.CREATE_SESSION_REQUEST, sessionParams)
   if err then return nil, err end
 
   return self:execRequest(request, callback)
@@ -475,6 +496,11 @@ function C:activateSession(params, token, token2, callback)
 
   if self.session == nil then
     return nil, BadSessionIdInvalid
+  end
+
+  local err = self:checkSecureChannel()
+  if err then
+    return nil, err
   end
 
   local tokenPolicy
@@ -571,7 +597,8 @@ function C:activateSession(params, token, token2, callback)
 
   activateParams.ClientSoftwareCertificates = {}
 
-  local request, err = self.services:createRequest(MessageId.ACTIVATE_SESSION_REQUEST, activateParams)
+  local request
+  request, err = self.services:createRequest(MessageId.ACTIVATE_SESSION_REQUEST, activateParams)
   if err then return nil, err end
 
   return self:execRequest(request, callback)
@@ -594,6 +621,11 @@ function C:browse(params, callback)
 
   if not self:connected() then
     return nil, BadNotConnected
+  end
+
+  local err = self:checkSecureChannel()
+  if err then
+    return nil, err
   end
 
   local request = {
@@ -624,7 +656,6 @@ function C:browse(params, callback)
     request.RequestedMaxReferencesPerNode = 1000
   end
 
-  local err
   request, err = self.services:createRequest(MessageId.BROWSE_REQUEST, request)
   if err then return request, err end
 
@@ -643,6 +674,11 @@ function C:read(params, callback)
 
   if not self:connected() then
     return nil, BadNotConnected
+  end
+
+  local err = self:checkSecureChannel()
+  if err then
+    return nil, err
   end
 
   local readParams = {}
@@ -681,7 +717,8 @@ function C:read(params, callback)
     end
   end
 
-  local request, err = self.services:createRequest(MessageId.READ_REQUEST, readParams)
+  local request
+  request, err = self.services:createRequest(MessageId.READ_REQUEST, readParams)
   if err then return nil, err end
 
   return self:execRequest(request, callback)
@@ -692,7 +729,13 @@ function C:write(nodes, callback)
     return nil, BadNotConnected
   end
 
-  local request, err = self.services:createRequest(MessageId.WRITE_REQUEST, nodes)
+  local err = self:checkSecureChannel()
+  if err then
+    return nil, err
+  end
+
+  local request
+  request, err = self.services:createRequest(MessageId.WRITE_REQUEST, nodes)
   if err then return nil, err end
   return self:execRequest(request, callback)
 end
@@ -703,7 +746,13 @@ function C:addNodes(params, callback)
     return nil, BadNotConnected
   end
 
-  local request, err = self.services:createRequest(MessageId.ADD_NODES_REQUEST, params)
+  local err = self:checkSecureChannel()
+  if err then
+    return nil, err
+  end
+
+  local request
+  request, err = self.services:createRequest(MessageId.ADD_NODES_REQUEST, params)
   if err then return nil, err end
   return self:execRequest(request, callback)
 end
@@ -713,7 +762,13 @@ function C:createSubscription(sub, callback)
     return nil, BadNotConnected
   end
 
-  local request, err = self.services:createRequest(MessageId.CREATE_SUBSCRIPTION_REQUEST, sub)
+  local err = self:checkSecureChannel()
+  if err then
+    return nil, err
+  end
+
+  local request
+  request, err = self.services:createRequest(MessageId.CREATE_SUBSCRIPTION_REQUEST, sub)
   if err then return nil, err end
   return self:execRequest(request, callback)
 end
@@ -723,7 +778,13 @@ function C:translateBrowsePaths(browsePaths, callback)
     return nil, BadNotConnected
   end
 
-  local request, err = self.services:createRequest(MessageId.TRANSLATE_BROWSE_PATHS_TO_NODE_IdS_REQUEST,browsePaths)
+  local err = self:checkSecureChannel()
+  if err then
+    return nil, err
+  end
+
+  local request
+  request, err = self.services:createRequest(MessageId.TRANSLATE_BROWSE_PATHS_TO_NODE_IdS_REQUEST,browsePaths)
   if err then return nil, err end
   return self:execRequest(request, callback)
 end
@@ -740,10 +801,16 @@ function C:closeSession(callback)
     DeleteSubscriptions = true
   }
 
+  local err = self:checkSecureChannel()
+  if err then
+    return nil, err
+  end
+
   self.userIdentityTokens = nil
   self.sessionNonce = nil
 
-  local request,err = self.services:createRequest(MessageId.CLOSE_SESSION_REQUEST, closeSessionParams)
+  local request
+  request,err = self.services:createRequest(MessageId.CLOSE_SESSION_REQUEST, closeSessionParams)
   if err then return nil, err end
   return self:execRequest(request, callback)
 end
@@ -771,6 +838,7 @@ function C:closeSecureChannel(callback)
     if infOn then traceI("services | Stop channel refresh timer") end
     self.channelTimer:cancel()
     self.channelTimer = nil
+    self.needRenewChannel = false
   end
 
   local request, err = self.services:createRequest(MessageId.CLOSE_SECURE_CHANNEL_REQUEST)
@@ -789,7 +857,13 @@ function C:findServers(params, callback)
     params = nil
   end
 
-  local request, err = self.services:createRequest(MessageId.FIND_SERVERS_REQUEST)
+  local err = self:checkSecureChannel()
+  if err then
+    return nil, err
+  end
+
+  local request
+  request, err = self.services:createRequest(MessageId.FIND_SERVERS_REQUEST)
   if err then return nil, err end
   if params then
     request.EndpointUrl = params.EndpointUrl
@@ -810,7 +884,14 @@ function C:getEndpoints(params, callback)
     callback = params
     params = nil
   end
-  local request, err = self.services:createRequest(MessageId.GET_ENDPOINTS_REQUEST, params)
+
+  local err = self:checkSecureChannel()
+  if err then
+    return nil, err
+  end
+
+  local request
+  request, err = self.services:createRequest(MessageId.GET_ENDPOINTS_REQUEST, params)
   if err then return nil, err end
   request.LocaleIds = {}
   request.ProfileUris = {}
@@ -840,6 +921,7 @@ local function NewUaClient(clientConfig, sock, model)
   end
 
   local c = {
+    needRenewChannel = false,
     config = clientConfig,
     security = securePolicy(clientConfig),
     requests = {},

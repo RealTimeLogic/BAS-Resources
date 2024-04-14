@@ -19,10 +19,13 @@ end
 function ch:message()
   local infOn = self.logging.infOn
   if infOn then traceI("json | Receiving message") end
-
-  local str = self.sock:receive()
-  self.data:clear()
-  self.data:pushBack(str)
+  if self.sock.json then
+    self.JsonDecoder.stack = {self.sock:json()}
+  else
+    local str = self.sock:receive()
+    self.data:clear()
+    self.data:pushBack(str)
+  end
   local msg = self.Model:DecodeExtensionObject()
   if infOn then traceI("json | Message decoded") end
   return msg
