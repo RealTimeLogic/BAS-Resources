@@ -104,6 +104,7 @@ local function sndCosock(sock,self)
       assert(bta)
       if not self.sock:write(bta) then
 	 self.connected = false
+         self.sock:close()
 	 return
       end
       sndQT[sndQTail]=nil
@@ -281,12 +282,12 @@ local function coSmqConnect(sock,self,data)
 	       self.connected=true
 	       self.tid2topicT[etid]="self"
 	       self.topic2tidT.self = etid
+	       self.sndCosock=ba.socket.event(sndCosock,self)
 	       if self.disconnectCnt > 0 and self.onreconnect then
 		  self.onreconnect(etid,rnd,ip)
 	       elseif self.onconnect then
 		  self.onconnect(etid,rnd,ip)
 	       end
-	       self.sndCosock=ba.socket.event(sndCosock,self)
 	       coSmqRun(self)
 	       return
 	    end
