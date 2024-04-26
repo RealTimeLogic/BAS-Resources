@@ -56,7 +56,7 @@ const respForm=[
 
 ideCfgCB.push(function (mlist) {
   mlist.append($('<li>').text("App Upload").on("click", () => {
-    logR('\nDrag and drop an application (zip file) to install!\n');
+    logR('\nDrag and drop an <a target="_blank" href="https://realtimelogic.com/articles/Mastering-Xedge-Application-Deployment-From-Installation-to-Creation">application (zip file)</a> to install!\n');
     $('head').append(`
 <style>
   #FMWUpdate {width:100%;height:100%;background-color:rgba(0,0,0,0.5);padding:20px;}

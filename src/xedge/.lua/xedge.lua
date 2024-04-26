@@ -124,7 +124,6 @@ end
 local function setSecH(dir)
    dir:header{
       ["x-xss-protection"]="1; mode=block",
-      ["x-frame-options"]="SAMEORIGIN",
       ["x-content-type"]="nosniff",
    }
 end
