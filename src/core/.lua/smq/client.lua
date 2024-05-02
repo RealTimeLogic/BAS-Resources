@@ -104,7 +104,7 @@ local function sndCosock(sock,self)
       assert(bta)
       if not self.sock:write(bta) then
 	 self.connected = false
-         self.sock:close()
+	 self.sock:close()
 	 return
       end
       sndQT[sndQTail]=nil
@@ -194,17 +194,17 @@ local function msgPublish(self,data)
    return true
 end
 
-local function msgDisconnect(self,data)
+local function msgDisconnect(self)
    return false,"Disconnect request"
 end
 
-local function msgPing(self,data)
+local function msgPing(self)
    sendMsg(self,createMsg(3,MsgPong))
    return true
 end
 
-local function msgPong(self,data)
-   sendMsg(self,createMsg(3,MsgPing))
+local function msgPong(self)
+   self.pongReceived=true
    return true
 end
 
@@ -235,21 +235,49 @@ local recMsgT={
    [MsgCreateSubAck] = msgCreateSubAck
 }
 
+local function pingTimer(self)
+   local ping,pong,recCnt=self.opt.ping*1000,self.opt.pong*1000,0
+   while true do
+      self.pongReceived=false
+      if recCnt == self.recCnt then
+	 sendMsg(self,createMsg(3,MsgPing))
+	 self.pingTimer:set(pong)
+	 coroutine.yield(true)
+	 if not self.pongReceived then
+	    self.sock:close()
+	    self.pingTimer:cancel()
+	    return
+	 end
+	 self.pingTimer:set(ping)
+      end
+      recCnt = self.recCnt
+      coroutine.yield(true)
+   end
+end
+
 local function coSmqRun(self)
    local sock,data,rem,err=self.sock
+   self.pongReceived,self.recCnt=true,0
+   self.pingTimer=ba.timer(function() pingTimer(self) end)
+   self.pingTimer:set(self.opt.ping*1000)
    while self.connected do
       data,rem=smqRec(sock,data)
-      if not data then err=rem break end
+      if not data then
+	 err=self.pongReceived and rem or "pong"
+	 break
+      end
+      self.recCnt=self.recCnt+1
       local func = recMsgT[data:byte(3)]
       if not func then err = "protocolerror" break end
       ok,err=func(self,data)
       if not ok then break end
       data = rem -- remainder, if any
    end
+   self.pingTimer:cancel()
    self.etid=nil
    self.disconnectCnt=self.disconnectCnt+1
    self.connected=false
-   if not self.disconnected and onclose(self,err,true) then
+   if not self.disconnected and onclose(self,err,"sysshutdown" ~= err) then
       self.connectTime=nil
       if "sysshutdown" ~= err then startSMQ(self) end
    end
@@ -401,6 +429,7 @@ end
 function C:close()
    if not self.disconnected then
       self.disconnected=true
+      if self.pingTimer then self.pingTimer:cancel() end
       if self.sock then
 	 sendMsg(self,createMsg(3,MsgDisconnect))
 	 self.sock:close()
@@ -575,6 +604,8 @@ local function create(url,opt)
    end
    opt=opt or {}
    opt.timeout = opt.timeout or 5000
+   opt.ping=opt.ping or 120
+   opt.pong=opt.pong or 10
    opt.url=url
    local self=initSelf{
       disconnectCnt=0,
