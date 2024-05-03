@@ -452,7 +452,7 @@ function C:publish(data,topic,subtopic)
 	 self:create(topic,function(ok,_,t)
 	    if not ok then log("pub failed",topic) return end
 	    tid=t
-	    if stid then self:publish(data,tid,stid) end
+	    if stid then self:publish(data,tid,subtopic) end
 	 end)
       end
    elseif "number" == type(topic) then
@@ -466,7 +466,7 @@ function C:publish(data,topic,subtopic)
 	 self:createsub(subtopic,function(ok,_,t)
 	    if not ok then log("pub failed",subtopic) return end
 	    stid=t
-	    if tid then self:publish(data,tid,stid) end
+	    if tid then self:publish(data,topic,stid) end
 	 end)
       end
    else
