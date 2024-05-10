@@ -13,7 +13,7 @@ local openid -- Single Sign On settings, a table used by the ms-sso module, set 
 local authRealm="Xedge"
 local ios=ba.io()
 local nodisk=false -- if no DiskIo
-local errorh,loadPlugins -- funcs
+local loadPlugins -- funcs
 local confKey -- xedge.conf AES key
 local gc=collectgarbage
 local maxHash=pcall(function() ba.crypto.hash("sha512") end) and "sha512" or "sha256"
@@ -234,20 +234,21 @@ local function lsPlugins(ext)
    return rsp
 end
 
+local function sendErr(...)
+   return xedge.elog({flush=true, subject="Xedge: error"},...)
+end
+xedge.sendErr=sendErr
 
 local elogInit --Func below called once by xedge.init
 do -- elog
-   local tlConnected=false
-   local msglist={}
-   local msize=0
-   local timer,flushing
+   local busy,tlConnected,msglist,msize,timer,flushing=false,false,{},0
    local function flush(op, send2log)
+      if busy then return end
       flushing=false
       if timer then
 	 timer:cancel()
 	 timer=nil
       end
-      msize=0
       local data=table.concat(msglist,"\n")
       if #data > 0 then
 	 msglist={}
@@ -255,8 +256,19 @@ do -- elog
 	    log("%s",data)
 	 else
 	    op=op or {}
-	    op.body=data
-	    ba.thread.run(function() sendmail(op) end)
+	    op.body,busy=data,true
+	    local send
+	    send=function()
+	       xedge.sendmail(op, function(ok,err)
+		  if not ok and "cannotconnect" == err and (#data+msize) < xedge.cfg.elog.maxbuf then
+		     ba.timer(send):set(10000,true)
+		  else
+		     msize=0
+		     busy=false
+		  end
+	       end)
+	    end
+	    send()
 	 end
       end
    end
@@ -289,16 +301,15 @@ do -- elog
       return log(fmt,...)
    end
    local orgErrh
-   errorh=function(emsg, env)
-      local cfg=xedge.cfg.elog
+   local function errorh(emsg, env)
+      local cfg,e=xedge.cfg.elog
       if cfg.enablelog and cfg.smtp and not tlConnected then
-	 local e
 	 if env and env.request then
 	    e=sfmt("LSP Err: %s\nURL: %s\n", emsg, env.request:url())
 	 else
 	    e=sfmt("Lua Err: %s\n", emsg)
 	 end
-	 xedge.elog({flush=true, subject="Xedge: Lua error"},"%s",e)
+	 sendErr("%s",e)
       end
       ba.thread.run(function() xedgeEvent("error",emsg) end)
       orgErrh(emsg, env)
@@ -327,11 +338,6 @@ do -- elog
       end)
    end
 end -- elog
-
-local function sendErr(...)
-   return xedge.elog({flush=true, subject="Xedge: error"},...)
-end
-xedge.sendErr=sendErr
 
 do
    local ev=require"EventEmitter".create()
@@ -400,7 +406,6 @@ local function loadAndRunLua(io,fn,env)
       if ok then return true end
    end
    sendErr("%s %s failed:\n\t%s",f and "Running" or "Compiling",io:realpath(fn),err or "?")
-   errorh(err)
    gc()
    gc()
 end
@@ -412,7 +417,6 @@ local function runOnUnload(pn,env,appenv)
    if type(func) == "function" then
       local ok, err = xpcall(func,errh)
       if not ok then sendErr("Stopping '%s' failed: %s",pn,err or "?") end
-      errorh(err)
    end
    local level=0
    local function close(tab)
@@ -557,13 +561,12 @@ end
 local function newOrUpdateApp(cfg,ion,url) -- On new/update cfg file
    local nc={name=cfg.name,url=cfg.url,running=cfg.running or false,
       autostart=cfg.autostart,startprio=cfg.startprio,dirname=cfg.dirname,domainname=cfg.domainname}
-   if cfg.dirname then nc.priority=cfg.priority or 0 end
+   if cfg.dirname then nc.priority=cfg.priority and tonumber(cfg.priority) or 0 end
    if not nc.url then nc.url=url end
    local start=true -- or restart
    if appsCfg[ion] then -- update
       local oc=appsCfg[ion] -- original config
       local aio=apps[ion].io
-      -- no: if aio:stat(oc.url) then nc.url=oc.url end -- keep org.
       if nc.name~=ion then -- renamed
 	 terminateApp(ion, true)
 	 newAppCfg(nc)
@@ -835,7 +838,6 @@ local function init(cfg)
    end)
    if not ok then
       sendCfgCorrupt(err)
-      errorh(err)
    end
    return tpm()
 end
@@ -957,8 +959,8 @@ local acmeCmd={
    end
 }
 
-function xedge.ha1(name,pwd)
-   return ba.crypto.hash"md5"(name)":"(authRealm)":"(pwd)(true,"hex")
+function xedge.ha1(name,pwd,realm)
+   return ba.crypto.hash"md5"(name)":"(realm or authRealm)":"(pwd)(true,"hex")
 end
 
 -- Table 2 String. Designed for comparing two tables as strings.
@@ -973,6 +975,13 @@ local function appIniErr(name,err)
    return sfmt("%s./config failed: %s",name,err)
 end
 
+local function execConfig(io)
+   if io:stat".config" then
+      local ok,x=pcall(function() return io:dofile".config" end)
+      if ok and "table" == type(x) then return x end
+      return nil,x
+   end
+end
 
 -- Used by command.lsp via xedge.command()
 local commands={
@@ -1210,17 +1219,15 @@ local commands={
 	 end
 	 local nc={name=name,url=sfmt("%s/%s",ioname,name)}
 	 err=nil
-	 if io:stat".config" then
-	    x,api=pcall(function() return io:dofile".config" end)
-	    if x and "table" == type(api) then
-	       nc.name = "string" == type(api.name) and api.name or name
-	       nc.running,nc.autostart = api.autostart,api.autostart
-	       nc.dirname = "string" == type(api.dirname) and api.dirname
-	       nc.startprio=api.startprio
-	    else
-	       err=appIniErr(name,"string" == type(api) or "failed")
-	       api={}
-	    end
+	 api,x=execConfig(io)
+	 if api then
+	    nc.name = "string" == type(api.name) and api.name or name
+	    nc.running,nc.autostart = api.autostart,api.autostart
+	    nc.dirname = "string" == type(api.dirname) and api.dirname
+	    nc.startprio=api.startprio
+	 else
+	    if x then err=appIniErr(name,"string" == type(x) or "failed") end
+	    api={}
 	 end
 	 local newApp=true
 	 local url=sfmt("%s/%s",ioname,zipname)
@@ -1252,9 +1259,64 @@ local commands={
 	 end
 	 cmd:json{ok=not err,upgrade=not newApp,err=err,info=info or ""}
       end
-      cmd:json{ok=true,err=sfmt("Cannot open %s: %s",zipname,err)}
+      cmd:json{ok=false,err=sfmt("Cannot open %s: %s",zipname,err)}
    end
 }
+
+local function findapp(name)
+   local appc=appsCfg[name]
+   if appc then return appc end
+   for _,cfg in pairs(appsCfg) do if cfg.url == name then return cfg end end
+   return nil,"notfound"
+end
+
+local function startOrStopApp(running,name,p)
+   local appc,err=findapp(name)
+   if appc then
+      if running~=appc.running then
+	 appc.running=running
+	 manageApp(appc.name)
+	 if p then xedge.saveCfg() end
+	 return true
+      end
+      return false
+   end
+   return nil,err
+end
+function xedge.startapp(name,p) return startOrStopApp(true,name,p) end
+function xedge.stopapp(name,p) return startOrStopApp(false,name,p) end
+local function doUpgradeOrCfg(name,start,doCfg)
+   local appc,ok,x
+   appc,x=findapp(name)
+   if appc then
+      local io,ion,pn=fn2info(appc.url, true)
+      if io then
+	 io,x=ba.mkio(io, pn)
+	 if io then
+	    ok,x=execConfig(io)
+	    if doCfg then return ok,x end 
+	    local start=appc.running or start
+	    xedge.stopapp(appc.name)
+	    if ok and ok.upgrade then
+	       ok,x=pcall(function() return ok.upgrade(io) end)
+	    end
+	    if not ok and x then
+	       x=appIniErr(appc.url,x)
+	       log("%s",x)
+	    end
+	    if start then appc.autostart=true xedge.startapp(name,true) end
+	    return x or true
+	 end
+      end
+   end
+   return nil,x
+end
+function xedge.upgradeapp(name,start)
+   return doUpgradeOrCfg(name,start)
+end
+function xedge.getappcfg(name)
+   return doUpgradeOrCfg(name,nil,true)
+end
 
 -- Used by command.lsp
 function xedge.command(cmd)

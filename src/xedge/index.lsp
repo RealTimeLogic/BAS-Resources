@@ -21,11 +21,11 @@
     </div>
     <div id="right-pane">
       <div id="editorpane">
-        <div id="tabheader"><div id="IdeCfg" class="menuicon"></div></div>
-        <div id="editors"></div>
+	<div id="tabheader"><div id="IdeCfg" class="menuicon"></div></div>
+	<div id="editors"></div>
       </div>
       <div id="logpane">
-        <iframe id="tracelogger" src="tracelogger/?embedded="></iframe>
+	<iframe id="tracelogger" src="tracelogger/?embedded="></iframe>
       </div>
     </div>
   </div>

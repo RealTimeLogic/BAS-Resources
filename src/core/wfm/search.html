@@ -36,9 +36,9 @@ $(function() {
       var pn=$(this).text();
       var pos = pn.lastIndexOf('/');
       if(pos  == pn.length-1)  //If dir
-         parent.window.location.href=pn;
+	 parent.window.location.href=pn;
       else
-         parent.window.location.href=pn.substr(0,pos+1);
+	 parent.window.location.href=pn.substr(0,pos+1);
    };
 
    function addTxt(pn) {
@@ -56,36 +56,36 @@ $(function() {
 
    function contSearcing() {
       while(stack.length != 0 && ajaxCnt < 2) {
-         search(stack.pop());
+	 search(stack.pop());
       }
       if(stack.length == 0 && ajaxCnt == 0)
-         stopSearching();
+	 stopSearching();
    }
 
    function search(path) {
       ajaxCnt++;
       searchTxtElem.html(searchCnt+" : "+path);
       $.getJSON(path+"?cmd=lj", function(resp) {
-         if(isSearching) {
-            for(var i=0 ; i < resp.length; searchCnt++,i++) {
-               var n = resp[i].n;
-               var pn = path+n;
-               if(resp[i].s < 0) {
-                  pn += "/";
-                  if(ajaxCnt > 2)
-                     stack.push(pn);
-                  else
-                     search(pn);
-                  if(doDirs && n.indexOf(searchTxt) >= 0)
-                     addTxt(pn);
-               }
-               else if(doFiles && n.indexOf(searchTxt) >= 0)
-                  addTxt(pn);
-            }
-            contSearcing();
-         }
-         if(ajaxCnt > 0)
-            ajaxCnt--;
+	 if(isSearching) {
+	    for(var i=0 ; i < resp.length; searchCnt++,i++) {
+	       var n = resp[i].n;
+	       var pn = path+n;
+	       if(resp[i].s < 0) {
+		  pn += "/";
+		  if(ajaxCnt > 2)
+		     stack.push(pn);
+		  else
+		     search(pn);
+		  if(doDirs && n.indexOf(searchTxt) >= 0)
+		     addTxt(pn);
+	       }
+	       else if(doFiles && n.indexOf(searchTxt) >= 0)
+		  addTxt(pn);
+	    }
+	    contSearcing();
+	 }
+	 if(ajaxCnt > 0)
+	    ajaxCnt--;
       });
    }
 
@@ -93,20 +93,20 @@ $(function() {
       stack=[];
       ajaxCnt=0;
       if(isSearching) 
-         stopSearching();
+	 stopSearching();
       else {
-         searchTxt = $.trim($("#SearchData").val());
-         if(searchTxt.length == 0 || (!doDirs && !doFiles)) {
-            searchList.html('<b style="color:red">You must specify a search criteria and have at least one of "Files" or "Dirs" selected.</b>');
-            return;
-         }
-         searchList.html("");
-         $(this).attr("value", "Stop");
-         isSearching=true;
-         searchCnt=0;
-         //Timer needed for AJAX with no response i.e. errors.
-         contSearcingId=setInterval(contSearcing,300);
-         search(parent.window.location.pathname);
+	 searchTxt = $.trim($("#SearchData").val());
+	 if(searchTxt.length == 0 || (!doDirs && !doFiles)) {
+	    searchList.html('<b style="color:red">You must specify a search criteria and have at least one of "Files" or "Dirs" selected.</b>');
+	    return;
+	 }
+	 searchList.html("");
+	 $(this).attr("value", "Stop");
+	 isSearching=true;
+	 searchCnt=0;
+	 //Timer needed for AJAX with no response i.e. errors.
+	 contSearcingId=setInterval(contSearcing,300);
+	 search(parent.window.location.pathname);
       }
    });
    $("#DoDirs").click(function() {

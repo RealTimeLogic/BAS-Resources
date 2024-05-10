@@ -322,7 +322,7 @@ local function coSmqConnect(sock,self,data)
 	    err=serveECodes[status]
 	 end
       else
-	 err,canreconnect="nonsmq",false
+	 err,canreconnect="nonsmq",true
       end
    end
    if "sysshutdown" == err then canreconnect = false end
@@ -401,6 +401,7 @@ local C={} -- SMQ Client
 C.__index=C
 
 local function createTopic(self,topic,top2tidT,ackCBT,msg,onack)
+   if not self.connected then return false end
    onack=onack or function() end
    local tid=top2tidT[topic]
    if tid then
@@ -416,14 +417,15 @@ local function createTopic(self,topic,top2tidT,ackCBT,msg,onack)
       end
       tinsert(arr,onack)
    end
+   return true
 end
 
 function C:create(topic,onack)
-   createTopic(self,topic,self.topic2tidT,self.topicAckCBT,MsgCreate,onack)
+   return createTopic(self,topic,self.topic2tidT,self.topicAckCBT,MsgCreate,onack)
 end
 
 function C:createsub(topic,onack)
-   createTopic(self,topic,self.subtopic2tidT,self.subtopicAckCBT,MsgCreateSub,onack)
+   return createTopic(self,topic,self.subtopic2tidT,self.subtopicAckCBT,MsgCreateSub,onack)
 end
 
 function C:close()
@@ -446,6 +448,7 @@ end
 
 function C:publish(data,topic,subtopic)
    local tid,stid
+   if not self.connected then return false end
    if "string" == type(topic) then
       tid=self.topic2tidT[topic]
       if not tid then
@@ -489,7 +492,6 @@ function C:subscribe(topic,subtopic,settings)
    if not settings and "table" == type(subtopic) then
       settings,subtopic=subtopic,nil
    end
-
    local function subscribe()
       local function topicAck(ok,_,tid)
 	 if settings.onack then settings.onack(ok,topic,tid,subtopic,stid) end
