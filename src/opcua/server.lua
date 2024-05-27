@@ -2,6 +2,7 @@ local ua = require("opcua.api")
 local types = require("opcua.types")
 
 local traceI = ua.trace.inf
+local traceE = ua.trace.err
 local fmt = string.format
 
 local S = {}
@@ -132,10 +133,19 @@ end
 
 function S.new(config, model)
   if not config then
+    config = {
+      bufSize = 16384,
+      securePolicies ={
+        {
+          securityPolicyUri = "http://opcfoundation.org/UA/SecurityPolicy#None"
+        }
+      }
+    }
+
     local ip = "localhost"
     local s,err = ba.socket.connect("8.8.8.8",53)
-    if config.logging.services.infOn then
-      traceI(fmt("opcua.server | Failed to detect local ip: %s", err))
+    if err then
+      traceE(fmt("opcua.server | Failed to detect local ip: %s", err))
     end
 
     if s then
@@ -144,15 +154,7 @@ function S.new(config, model)
       s:close()
     end
 
-    config = {
-      bufSize = 16384,
-      endpointUrl="opc.tcp://"..ip..":4841",
-      securePolicies ={
-        {
-          securityPolicyUri = "http://opcfoundation.org/UA/SecurityPolicy#None"
-        }
-      }
-    }
+    config.endpointUrl="opc.tcp://"..ip..":4841"
   end
 
   local uaConfig = require("opcua.config")

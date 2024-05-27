@@ -36,8 +36,9 @@ local ua = {
   Version = require("opcua.version"),
   StatusCode = require("opcua.status_codes"),
   NodeId = require("opcua.node_id"),
-  Types = require("opcua.types"),
+  Types = types,
   Tools = tools,
+  Init = require("opcua.init"),
 
   trace = {
     dbg = function(msg) traceLog("[DBG] ", msg) end,  -- Debug loging print
@@ -73,10 +74,19 @@ local ua = {
     }
   end,
 
-  newFolderParams = function(parentNodeId, browseName, displayName, newNodeId)
-    if type(displayName) == "string" then
-      displayName = {Text=displayName}
+  newFolderParams = function(parentNodeId, name, newNodeId)
+    local displayName
+    local browseName
+    if type(name) == "table" then
+      displayName = name.DisplayName
+      browseName = name.BrowseName
+    elseif type(name) == "string" then
+      displayName = {Text=name}
+      browseName = {Name=name, ns=name.ns or 0}
+    else
+      error(0x80620000) -- BadNodeAttributesInvalid
     end
+
     checkCommonAttributes(parentNodeId, browseName, displayName, newNodeId)
 
     local params = {
@@ -102,10 +112,19 @@ local ua = {
     return params
   end,
 
-  newVariableParams = function(parentNodeId, browseName, displayName, dataValue, newNodeId)
-    if type(displayName) == "string" then
-      displayName = {Text=displayName}
+  newVariableParams = function(parentNodeId, name, dataValue, newNodeId)
+    local displayName
+    local browseName
+    if type(name) == "table" then
+      displayName = name.DisplayName
+      browseName = name.BrowseName
+    elseif type(name) == "string" then
+      displayName = {Text=name}
+      browseName = {Name=name, ns=name.ns or 0}
+    else
+      error(0x80620000) -- BadNodeAttributesInvalid
     end
+
     checkCommonAttributes(parentNodeId, browseName, displayName, newNodeId)
 
     if not tools.dataValueValid(dataValue) then

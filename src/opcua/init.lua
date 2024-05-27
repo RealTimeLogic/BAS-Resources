@@ -1,4 +1,5 @@
-local ua = require("opcua.api")
+local types = require("opcua.types")
+local tools = require("opcua.binary.tools")
 
 local function writeFile(io, filePath, content)
    local file,e,res
@@ -81,11 +82,11 @@ local function initialize(config, certType, hostname, applicationName, applicati
    config.applicationUri = applicationUri
    config.securePolicies ={
      { -- 1
-       securityPolicyUri = ua.Types.SecurityPolicy.None,
+       securityPolicyUri = types.SecurityPolicy.None,
      },
      { -- #2
-        securityPolicyUri = ua.Types.SecurityPolicy.Basic128Rsa15,
-        securityMode = ua.Types.MessageSecurityMode.SignAndEncrypt,
+        securityPolicyUri = types.SecurityPolicy.Basic128Rsa15,
+        securityMode = types.MessageSecurityMode.SignAndEncrypt,
         certificate = basic128rsa15CrtPath,
         key = basic128rsa15KeyPath,
      }
@@ -115,7 +116,7 @@ local function initialize(config, certType, hostname, applicationName, applicati
   local function appendConfig(str)
     resultConfig = resultConfig..str
   end
-  ua.Tools.printTable(nil, config, appendConfig)
+  tools.printTable(nil, config, appendConfig)
   if err then error(err) end
   err = writeFile(io, configPath, resultConfig)
   if err then error(err) end
