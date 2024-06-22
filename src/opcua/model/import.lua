@@ -13,41 +13,73 @@ local HasSubtype <const> = "i=45"
 
 local tins = table.insert
 
-local dbg = false
+local dbg = nil
 
-local function getBaseDatatype(dataTypeId, nodes, enc)
-  if enc[dataTypeId] then
-    return dataTypeId
-  end
+local Model <const> = {}
 
+local encodeTypes = {
+  ["i=1"] = "i=1",
+  ["i=2"] = "i=2",
+  ["i=3"] = "i=3",
+  ["i=4"] = "i=4",
+  ["i=5"] = "i=5",
+  ["i=6"] = "i=6",
+  ["i=7"] = "i=7",
+  ["i=8"] = "i=8",
+  ["i=9"] = "i=9",
+  ["i=10"] = "i=10",
+  ["i=11"] = "i=11",
+  ["i=13"] = "i=13",
+  ["i=12"] = "i=12",
+  ["i=14"] = "i=14",
+  ["i=15"] = "i=15",
+  ["i=16"] = "i=16",
+  ["i=17"] = "i=17",
+  ["i=18"] = "i=18",
+  ["i=19"] = "i=19",
+  ["i=20"] = "i=20",
+  ["i=21"] = "i=21",
+  ["i=22"] = "i=22",
+  ["i=23"] = "i=23",
+  ["i=25"] = "i=25",
+  ["i=29"] = "i=29",
+}
+
+function Model.getBaseDatatype(self, dataTypeId)
+  local nodes = self.Nodes
   local curDataTypeId = dataTypeId
   while curDataTypeId do
     local node <const> = nodes[curDataTypeId]
     if not node then
-      error("No node for id: " .. dataTypeId)
+      error("No node for id: " .. curDataTypeId)
     end
-    curDataTypeId = nil
+    if node.attrs[AttributeId.NodeClass] ~= NodeClass.DataType then
+      error("Node is not a data type: " .. curDataTypeId)
+    end
+    if node.attrs[AttributeId.IsAbstract] == nil then
+      error("No IsAbstract attribute for node: " .. curDataTypeId)
+    end
+
+    if encodeTypes[curDataTypeId] then
+      return encodeTypes[curDataTypeId]
+    end
+
+    local parentTypeId = nil
     for _, ref in pairs(node.refs) do
       -- Find reference to base data type
       if ref.type == HasSubtype and not ref.isForward then
-
-        -- Check if base data type has encoder
-        local targetDataTypeId = ref.target
-        if enc[targetDataTypeId] then
-          return targetDataTypeId
-        end
-
-        -- Go up the inheritance tree
-        local parentNode <const> = nodes[targetDataTypeId]
-        if not parentNode then
-          error("No node for id: " .. targetDataTypeId)
-        end
-
-        curDataTypeId = targetDataTypeId
+        parentTypeId = ref.target
+        break
       end
     end
+
+    if not parentTypeId then
+      encodeTypes[curDataTypeId] = curDataTypeId
+      return curDataTypeId
+    end
+
+    curDataTypeId = parentTypeId
   end
-  error("Cannof find base datatype" .. dataTypeId)
 end
 
 local function encodeStructure(model, enc, struct, dataTypeId)
@@ -80,6 +112,9 @@ local function encodeStructure(model, enc, struct, dataTypeId)
       enc:endArray()
     else
       if dbg then print("encoding field: " .. field.Name) end
+      if type(encF) == "string" then
+        error("No encoder for node: " .. field.Name)
+      end
       encF(model, enc, val, dataType)
     end
     enc:endField(field.Name)
@@ -263,21 +298,19 @@ Decoder["i=28"] = "error" -- UInteger
 Decoder["i=29"] = Decoder.uint32 -- Enumeration
 
 
-local Model <const> = {}
-
-function Model.fillEncodingNodes(model)
-  for dataTypeId, node in pairs(model.Nodes) do
+function Model:fillEncodingNodes()
+  for dataTypeId, node in pairs(self.Nodes) do
     if node.attrs[AttributeId.NodeClass] ~= NodeClass.DataType then
       goto continue
     end
 
     -- Search function for encoding base type node
-    local baseId = getBaseDatatype(dataTypeId, model.Nodes, model.Encoder)
-    local baseEncF = model.Encoder[baseId]
+    local baseId = self:getBaseDatatype(dataTypeId)
+    local baseEncF = self.Encoder[baseId]
     if not baseEncF then
       error("No encoder for type: " .. dataTypeId)
     end
-    local baseDecF = model.Decoder[baseId]
+    local baseDecF = self.Decoder[baseId]
     if not baseDecF then
       error("No decoder for type: " .. dataTypeId)
     end
@@ -288,8 +321,8 @@ function Model.fillEncodingNodes(model)
       end
     end
 
-    model.Encoder[dataTypeId] = baseEncF
-    model.Decoder[dataTypeId] = baseDecF
+    self.Encoder[dataTypeId] = baseEncF
+    self.Decoder[dataTypeId] = baseDecF
 
     -- Search IDs for encoding extention objects: binary, xml etc.
     -- Each extension object contains body in a some format. Each
@@ -302,18 +335,18 @@ function Model.fillEncodingNodes(model)
     for _, ref in pairs(node.refs) do
       if ref.type == HasEncoding and ref.isForward then
         local targetId = ref.target
-        local encodingNode = model.Nodes[targetId];
+        local encodingNode = self.Nodes[targetId];
         local encoding = encodingNode.attrs[AttributeId.BrowseName]
         if encoding.Name == "Default Binary" then
           node.binaryId = targetId
-          model.ExtObjects[targetId] = {
+          self.ExtObjects[targetId] = {
             DataTypeId = dataTypeId,
             Type = "binary"
           }
         end
         if encoding.Name == "Default JSON" then
           node.jsonId = targetId
-          model.ExtObjects[targetId] = {
+          self.ExtObjects[targetId] = {
             DataTypeId = dataTypeId,
             Type = "json"
           }
@@ -383,6 +416,7 @@ end
 
 Model.LoadXml = require("opcua.model.load_xml")
 Model.ExportC = require("opcua.model.export_c")
+Model.ExportJS = require("opcua.model.export_js")
 Model.Validate = require("opcua.model.validate")
 
 Model.Encoder = {}

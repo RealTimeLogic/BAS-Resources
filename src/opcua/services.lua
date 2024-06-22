@@ -348,7 +348,7 @@ function Svc:activateSession(req, channel)
   end
 
   if infOn then
-    traceI(fmt("Services:activateSession(%s) | Token policy id: '%s', encryption algorith: '%s'",
+    traceI(fmt("Services:activateSession(%s) | Token policy id: '%s', encryption algorithm: '%s'",
       sessionId, token.Body.PolicyId, token.Body.EncryptionAlgorithm))
   end
 
@@ -358,6 +358,10 @@ function Svc:activateSession(req, channel)
   end
 
   if token.Body.EncryptionAlgorithm then
+    if infOn then
+      traceI(fmt("Services:activateSession(%s) | Decrypting user token with security policy '%s'",
+        sessionId, tokenPolicy.securityPolicyUri))
+    end
     encryption = securePolicy(self.config)
     authPolicy = encryption(tokenPolicy.securityPolicyUri)
     if authPolicy.aEncryptionAlgorithm ~= token.Body.EncryptionAlgorithm then
@@ -1301,9 +1305,7 @@ function Svc:startSessionCleanup()
 
   local timer = compat.timer(function()
     self:cleanupSessions()
-    if self.sessionTimer then
-      self.sessionTimer:set(10000)
-    end
+    return true
   end)
   self.sessionTimer = timer
   timer:set(10000)
