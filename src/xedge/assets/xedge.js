@@ -505,7 +505,7 @@ function initEditor() {
 	});
     }
     catch(e){
-	log("Cannot load resources from CDN\n");
+      logErr("Cannot load the Monaco Editor; <a target='_blank' href='https://realtimelogic.com/ba/doc/en/Xedge.html#monaco'>Help</a>\n")
     }
     let loaderScript = document.createElement('script');
     loaderScript.src = 'https://unpkg.com/monaco-editor@0.36.1/min/vs/loader.js';
