@@ -4,12 +4,39 @@ local sso=xedge.sso
 local hasUserDb=xedge.hasUserDb()
 
 ------------------------------------------------------------
-local function emitLogin(err)
+local function doIdErr(secretErr)
+?>
+<div class="center">
+   <div class="alert"><p>Login failed: <?lsp=secretErr?></p></div>
+   <form method="post" class="form" style="width:100%;">
+     <div class="frow">
+      <input name="secret" type="text" placeholder="Enter new client secret value" />
+     </div>
+     <div class="frow"><input type="submit" value="Save"/></div>
+   </form>
+</div>
+<?lsp
+end
+
+------------------------------------------------------------
+local function emitLogin(err,ssoErrCodes)
+   local secretErr
+   if ssoErrCodes then
+      -- https://learn.microsoft.com/en-us/entra/identity-platform/reference-error-codes
+      local idErrs={
+	 [7000215]="The client secret key is invalid/unknown",
+	 [7000222]="The client secret key has expired"
+      }
+      for _,code in ipairs(ssoErrCodes) do
+	 secretErr=idErrs[code]
+	 if secretErr then doIdErr(secretErr) return end
+      end
+   end
 ?>
 <div class="center">
   <?lsp if err then ?>
    <div class="alert"><p>Login failed: <?lsp=err?></p></div>
-  <?lsp end if hasUserDb then ?>
+  <?lsp end if hasUserDb and not ssoErrCodes then ?>
    <form method="post" class="form" style="width:100%;">
      <input type="hidden" name="locallogin"/>
      <div class="frow">
@@ -22,7 +49,7 @@ local function emitLogin(err)
    </form>
   <?lsp
   end
-  if hasUserDb and sso then response:write'<div class="or">- OR -</div>' end
+  if hasUserDb and sso and not ssoErrCodes then response:write'<div class="or">- OR -</div>' end
   if sso then
   ?>
 <button id="sso" type="submit">
@@ -50,13 +77,21 @@ if not xedge.authenticator then
 end
 
 local data=request:data()
+local trim=xedge.trim
+for k,v in pairs(data) do data[k]=trim(v) end
 
 local action
 if request:method() == "POST" then
    local function tooMany() emitLogin("Too many authenticated users") end
-   if data.locallogin then
+   if data.secret then
+      if xedge.ssoSetSecret(data.secret) then
+	 action=function() emitLogin(nil,{}) end
+      else
+	 action=function() doIdErr("Invalid secret") end
+      end
+   elseif data.locallogin then
       if hasUserDb then
-	 local uname,pwd=xedge.trim(data.username),xedge.trim(data.password)
+	 local uname,pwd=data.username,data.password
 	 local ha1,maxusers,recycle=xedge.authuser:getpwd(uname)
 	 if ha1 and ha1 == xedge.ha1(uname,pwd) then
 	    if request:login(uname,maxusers,recycle) then
@@ -71,7 +106,7 @@ if request:method() == "POST" then
 	 action=emitOK -- fail
       end
    elseif sso then -- SSO resp and we have sso
-      local header,payload = sso.login(request)
+      local header,payload,ecodes = sso.login(request)
       if header then
 	 if request:login(payload.preferred_username,2,false) then
 	    action = function() emitOK(payload) end
@@ -79,7 +114,7 @@ if request:method() == "POST" then
 	    action = tooMany
 	 end
       else
-	 action = function() emitLogin(payload) end -- Payload is now 'err'
+	 action = function() emitLogin(payload,ecodes or {}) end -- Payload is now 'err'
       end
    else
       action=emitOK -- fail
@@ -114,26 +149,37 @@ end
 <script src="../jquery.js"></script>
 <script>
 function authenticated() {
-    if(window.opener) {
-	if(window.opener.authenticated)
-	    window.opener.authenticated();
-	window.close();
+  if(window.opener) {
+    if(window.opener.authenticated) {
+      try {window.opener.authenticated();}
+      catch(e) {}
     }
-    else if(window.top && window.top.login)
-	window.top.login();
-    else
-	location.href="../";
+    window.close();
+  }
+  else if(window.top && window.top.login)
+    window.top.login();
+  else
+    location.href="../";
 };
 $(function(){
-   $("#sso").click(function() {
-	let width = 500;
-	let height = 600;
-	let left = (screen.width / 2) - (width / 2);
-	let top = (screen.height / 2) - (height / 2);
-	let options = 'toolbar=no, location=no, directories=no, status=no, menubar=no, scrollbars=yes, resizable=yes, copyhistory=no, ' +
-	    'width=' + width + ', height=' + height + ', top=' + top + ', left=' + left;
-	window.open("./?sso=", 'Sign in with Microsoft', options);
-   });
+  let w=null;
+  $("#sso").click(function() {
+    if(w) return;
+    let width = 500;
+    let height = 600;
+    let left = (screen.width / 2) - (width / 2);
+    let top = (screen.height / 2) - (height / 2);
+    let options = 'toolbar=no, location=no, directories=no, status=no, menubar=no, scrollbars=yes, resizable=yes, copyhistory=no, ' +
+      'width=' + width + ', height=' + height + ', top=' + top + ', left=' + left;
+    w=window.open("./?sso=", 'Sign in with Microsoft', options);
+    let i = setInterval(function() {
+      if(w.closed) {
+	clearInterval(i);
+	w=null;
+	window.top.location.reload();
+      }
+    },1000);
+  });
 });
 </script>
 </head>

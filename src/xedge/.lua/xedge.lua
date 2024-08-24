@@ -9,7 +9,7 @@ local jencode,jdecode=ba.json.encode,ba.json.decode
 local startAcmeDns -- func
 local xedgeEvent -- = _XedgeEvent
 local smtp -- smtp settings, a table, used by sendmail
-local openid -- Single Sign On settings, a table used by the ms-sso module, set by openidDec
+local openid -- SSO settings, a table used by the ms-sso module, set by openidDec
 local authRealm="Xedge"
 local ios=ba.io()
 local nodisk=false -- if no DiskIo
@@ -845,9 +845,20 @@ end
 local function openidDec() -- Decode encoded SSO JSON settings
    xedge.sso=nil
    openid=encodedStr2Tab(xedge.cfg.openid,"openid")
-   pcall(function()
-      xedge.sso=require"ms-sso".init(openid)
-   end)
+   xedge.sso=require"ms-sso".init(openid)
+end
+
+function xedge.ssoSetSecret(secret)
+   if openid then
+      oldsec=openid.client_secret
+      openid.client_secret=secret
+      if require"ms-sso".validate(openid) then
+	 xedge.cfg.openid=tab2EncodedStr(openid)
+	 xedge.saveCfg()
+	 return true
+      end
+      openid.client_secret=oldsec
+   end
 end
 
 function xedge.init(cfg,aio,rtld) -- cfg from Xedge config file
@@ -1123,10 +1134,15 @@ local commands={
 	 if old ~= new or not openid then
 	    if d.tenant and d.client_id and d.client_secret then
 	       if #d.tenant > 20 and #d.client_id > 20 and #d.client_secret > 10 then
-		  xedge.cfg.openid=tab2EncodedStr(d)
-		  xedge.saveCfg()
-		  openidDec()
-		  installAuth()
+		  local ok,err,desc=require"ms-sso".validate(d)
+		  if ok then
+		     xedge.cfg.openid=tab2EncodedStr(d)
+		     xedge.saveCfg()
+		     openidDec()
+		     installAuth()
+		  else
+		     rsp.ok,rsp.err=false,(desc or err)
+		  end
 	       elseif #d.client_secret==0 then
 		  d.client_secret=nil
 		  xedge.cfg.openid=tab2EncodedStr(d)
@@ -1134,8 +1150,7 @@ local commands={
 		  xedge.saveCfg()
 		  installAuth()
 	       else
-		  rsp.ok=false
-		  rsp.err="Invalid data"
+		  rsp.ok,rsp.err=false,"Invalid data"
 	       end
 	    end
 	 end
