@@ -757,7 +757,6 @@ end
 local installAuth -- function is: installOrSetAuth() or setdb()
 local function installOrSetAuth()
    if not next(xcfg.userdb) and not sso then return end
-trace"install"
    local ju=ba.create.jsonuser()
    local function setdb()
       if next(xcfg.userdb) then
@@ -1117,11 +1116,9 @@ local commands={
       local ecfg=xcfg.elog
       local id=xcfg.openid
       d.cmd=nil
-      trace(next(d))
       if next(d) then -- not empty
 	 local old=t2s(id)
 	 local new=t2s(d)
-	 trace(old ~= new,old,new)
 	 if old ~= new or not id then
 	    if d.tenant and d.client_id and d.client_secret then
 	       if #d.tenant > 20 and #d.client_id > 20 and #d.client_secret > 10 then
