@@ -738,7 +738,7 @@ startAcmeDns=function(warn)
    assert(portal,"ACME security module not intalled")
    local s <close> = ba.socket.connect(portal,443)
    if s then
-      if os.time() < xedge.compileTime then
+      if (os.time()+86400) < xedge.compileTime then
 	 if warn then xedge.log"System time is in the past!" end
       else
 	 local ad=require"acme/dns"

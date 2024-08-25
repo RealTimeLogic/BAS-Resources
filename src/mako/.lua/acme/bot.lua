@@ -183,7 +183,7 @@ end
 local systemDateChecked
 local function systemDateOK()
    local bv,lv,date=ba.version()
-   local time=os.time()
+   local time=os.time()+86400
    if time < ba.parsedate("Mon, "..date:gsub("^(%w+)%s*(%w+)","%2 %1")) then
       if not systemDateChecked then
 	 systemDateChecked=true
@@ -191,6 +191,8 @@ local function systemDateOK()
       end
       acme.checkCert(false)
       return false
+   else
+      acme.checkCert(true)
    end
 end
 
