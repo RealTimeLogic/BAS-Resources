@@ -1,7 +1,6 @@
 <?lsp
 
-local sso=xedge.sso
-local hasUserDb=xedge.hasUserDb()
+local hasUserDb,sso=xedge.hasUserDb()
 
 ------------------------------------------------------------
 local function doIdErr(secretErr)

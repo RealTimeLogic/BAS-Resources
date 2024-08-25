@@ -1,5 +1,5 @@
 
 -- .preload for the LSP Application Manager
 
-io:dofile(".lua/xedge.lua", _ENV)()
+setkey,xinit=io:dofile(".lua/xedge.lua", _ENV)
 io:dofile(".lua/Xedge4Mako.lua", _ENV)

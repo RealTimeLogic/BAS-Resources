@@ -5,14 +5,12 @@ local function deferred()
    local xc = require"loadconf".xedge or {}
 
    -- Global set by xedge.lua
-   local cfg=xedge.cfg
    local cfgio = xc.ioname and ba.openio(xc.ioname) or ba.openio"home"
    local cfgname = xc.path or "xedge.conf"
 
-   -- Set the xedge.saveCfg callback
-   function xedge.saveCfg()
+   local function saveCfg(cfg)
       if not cfgio then return end
-      local ok,err= rw.json(cfgio, cfgname, cfg)
+      local ok,err= rw.file(cfgio, cfgname, cfg)
       if not ok then
 	 log("Cannot save %s: %s",cfgio:realpath(cfgname),err)
       end
@@ -30,15 +28,19 @@ local function deferred()
    xedge.tldir:unlink()
 
    -- Load and start apps in config file
-   local cfg,err=rw.json(cfgio,cfgname)
+   local cfg,err=rw.file(cfgio,cfgname)
    log("Configuration file: %s: %s",
        cfgio:realpath(cfgname), cfg and "loaded" or err)
-   cfg = cfg or {apps={}}
-   xedge.init(cfg,io,mako.rtldir)
+
+   setkey("qwerty") -- PATCH fixme
+   setkey(true)
+
+   xinit(saveCfg,cfg,io,mako.rtldir)
    if mako.udb and not xedge.authenticator then
       xedge.appsd:setauth(ba.create.authenticator(mako.udb()))
    end
    onunload=xedge.onunload
+   setkey,xinit=nil,nil
 end
 dir:unlink()
 dir=nil
