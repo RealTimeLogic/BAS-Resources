@@ -13,7 +13,14 @@
   <script src="assets/xedge.js"></script>
 </head>
 <body>
-<?lsp response:include"assets/loader.html" ?>
+<?lsp 
+ local hasUserDb,sso=xedge.hasUserDb()
+ if (hasUserDb or sso) and request:user() and not request:session().xadmin then
+    request:logout()
+    response:sendredirect"/rtl/"
+ end
+ response:include"assets/loader.html"
+?>
   <div id="container">
     <div id="TreeDia"></div>
     <div id="left-pane">

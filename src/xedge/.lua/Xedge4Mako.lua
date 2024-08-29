@@ -4,17 +4,8 @@ local function deferred()
    -- Fetch Xedge Config (xc) from mako.conf
    local xc = require"loadconf".xedge or {}
 
-   -- Global set by xedge.lua
    local cfgio = xc.ioname and ba.openio(xc.ioname) or ba.openio"home"
-   local cfgname = xc.path or "xedge.conf"
-
-   local function saveCfg(cfg)
-      if not cfgio then return end
-      local ok,err= rw.file(cfgio, cfgname, cfg)
-      if not ok then
-	 log("Cannot save %s: %s",cfgio:realpath(cfgname),err)
-      end
-   end
+   local cfgname = xc.path or "xcfg.bin"
 
    if mako.tldir then
       local t=mako.tldir
@@ -28,19 +19,26 @@ local function deferred()
    xedge.tldir:unlink()
 
    -- Load and start apps in config file
-   local cfg,err=rw.file(cfgio,cfgname)
-   log("Configuration file: %s: %s",
-       cfgio:realpath(cfgname), cfg and "loaded" or err)
+   local function fRwCfgFile(cdata)
+      if cdata then
+         local ok,err=rw.file(cfgio, cfgname, ba.json.encode(cdata))
+         if not ok then
+            log("Cannot save %s: %s",cfgio:realpath(cfgname),err)
+         end
+         return ok
+      end
+      local cdata,err=rw.file(cfgio,cfgname)
+      log("Configuration file: %s: %s",
+          cfgio:realpath(cfgname), cdata and "loaded" or err)
+      return cdata and ba.json.decode(cdata)
+   end
 
-   setkey("qwerty") -- PATCH fixme
-   setkey(true)
+   xinit(io,fRwCfgFile,mako.rtldir)
+   xinit=nil
 
-   xinit(saveCfg,cfg,io,mako.rtldir)
    if mako.udb and not xedge.authenticator then
       xedge.appsd:setauth(ba.create.authenticator(mako.udb()))
    end
-   onunload=xedge.onunload
-   setkey,xinit=nil,nil
 end
 dir:unlink()
 dir=nil
