@@ -33,21 +33,19 @@ local function tpm(gpkey,upkey)
    function t.jwtsign(k,...) return tpmJwtsign("#"..k,...) end
    function t.keyparams(k,...) return tpmKeyparams("#"..k,...) end
    function t.sharkcert(k,...) return tpmSharkcert("#"..k,...) end
-   function t.sharkcert(k,...) return tpmSharkcert("#"..k,...) end
    function t.globalkey(n,l) return PBKDF2(maxHash,"#"..n,gpkey,5,l) end
    function t.uniquekey(n,l) return PBKDF2(maxHash,"#"..n,upkey,5,l) end
    ba.tpm=t
 end
 
-local klist,gseed={}
+local klist{}
 return function(x)
    if true == x then
       local hf=ba.crypto.hash(maxHash)
       for _,k in ipairs(klist) do hf(k) end
-      tpm(ba.crypto.hash(maxHash)(gseed)(true),hf(true))
+      tpm(ba.crypto.hash(maxHash)(klist[1])(true),hf(true))
       klist=nil
       return
    end
-   if not gseed then gseed=x end
    table.insert(klist,x)
 end

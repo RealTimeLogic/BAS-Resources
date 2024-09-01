@@ -20,7 +20,6 @@ cd XedgeBuild || exit /b 3
 xcopy ..\..\src\core . /eq || exit /b 4
 xcopy ..\..\src\xedge . /eq || exit /b 5
 xcopy ..\..\src\mako\.lua\acme .lua\acme  /eq || exit /b 6
-copy  ..\..\src\misc\tpm.lua .lua > nul || exit /b 11
 
 choice /C YN /M "Do you want to include OPC-UA "
 if errorlevel 2 goto NoOPCUA

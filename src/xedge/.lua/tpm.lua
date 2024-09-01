@@ -1,5 +1,5 @@
 local maxHash=pcall(function() ba.crypto.hash("sha512") end) and "sha512" or "sha256"
-return function(pmkey)
+return function(gpkey,upkey)
    assert(nil==ba.tpm)
    local keys={}
    local createkey,createcsr,sharkcert=ba.create.key,ba.create.csr,ba.create.sharkcert
@@ -7,7 +7,7 @@ return function(pmkey)
    local jwtsign=require"jwt".sign
    local function tpmGetKey(kname)
       local key=keys[kname]
-      if not key then error(sfmt("ECC key %s not found",tostring(kname)), 3) end
+      if not key then error(sfmt("ECC key %s not found",tostring(kname)),3) end
       return key
    end
    local function tpmJwtsign(kname,...) return jwtsign(tpmGetKey(kname),...) end
@@ -19,20 +19,14 @@ return function(pmkey)
       if op.key and op.key ~= "ecc" then error("TPM can only create ECC keys",2) end
       local newOp={}
       for k,v in pairs(op) do newOp[k]=v end
-      newOp.rnd=PBKDF2(maxHash, kname, pmkey, 5, 1024)
+      newOp.rnd=PBKDF2(maxHash,kname,upkey,5,1024)
       local key=createkey(newOp)
       keys[kname]=key
       return true
    end
    local function tpmHaskey(kname) return keys[kname] and true or false end
    local function tpmSharkcert(kname,certdata) return sharkcert(certdata,tpmGetKey(kname)) end
-   require"acme/engine".setTPM{
-      jwtsign=tpmJwtsign,
-      keyparams=tpmKeyparams,
-      createcsr=tpmCreatecsr,
-      createkey=tpmCreatekey,
-      haskey=tpmHaskey
-   }
+   require"acme/engine".setTPM{jwtsign=tpmJwtsign,keyparams=tpmKeyparams,createcsr=tpmCreatecsr,createkey=tpmCreatekey,haskey=tpmHaskey}
    local t={}
    function t.haskey(k) return tpmHaskey("#"..k) end
    function t.createkey(k,...) return tpmCreatekey("#"..k,...) end
@@ -40,6 +34,8 @@ return function(pmkey)
    function t.jwtsign(k,...) return tpmJwtsign("#"..k,...) end
    function t.keyparams(k,...) return tpmKeyparams("#"..k,...) end
    function t.sharkcert(k,...) return tpmSharkcert("#"..k,...) end
+   function t.globalkey(n,l) return PBKDF2(maxHash,"#"..n,gpkey,5,l) end
+   function t.uniquekey(n,l) return PBKDF2(maxHash,"#"..n,upkey,5,l) end
    ba.tpm=t
    return function(op,certdata)
       local n=op.keyname

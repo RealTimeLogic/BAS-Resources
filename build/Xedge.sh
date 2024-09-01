@@ -56,8 +56,6 @@ if [ -d "../../../lua-protobuf" ]; then
     cp ../../../lua-protobuf/protoc.lua .lua || exit 1
     cp ../../../lua-protobuf/serpent.lua .lua || exit 1
     cp ../../src/sparkplug/* .lua || exit 1
-    cp  ../../src/misc/tpm.lua .lua || exit 1
-
 else
     echo "../../../lua-protobuf not found; Not Including lua-protobuf and Sparkplug"
 fi
