@@ -38,7 +38,7 @@ local function tpm(gpkey,upkey)
    ba.tpm=t
 end
 
-local klist{}
+local klist={}
 return function(x)
    if true == x then
       local hf=ba.crypto.hash(maxHash)
