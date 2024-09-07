@@ -1,5 +1,4 @@
 <?lsp
-
 local hasUserDb,sso=xedge.hasUserDb()
 
 ------------------------------------------------------------
@@ -94,6 +93,7 @@ if request:method() == "POST" then
 	 local ha1,maxusers,recycle=xedge.authuser:getpwd(uname)
 	 if ha1 and ha1 == xedge.ha1(uname,pwd) then
 	    if request:login(uname,maxusers,recycle) then
+	       request:session().xadmin=true
 	       action=emitOK
 	    else
 	       action = tooMany
@@ -108,6 +108,7 @@ if request:method() == "POST" then
       local header,payload,ecodes = sso.login(request)
       if header then
 	 if request:login(payload.preferred_username,2,false) then
+	    request:session().xadmin=true
 	    action = function() emitOK(payload) end
 	 else
 	    action = tooMany
@@ -120,7 +121,7 @@ if request:method() == "POST" then
    end
 else
    if request:user() then
-      action=emitOK
+      action=(hasUserDb or sso) and not request:session().xadmin and emitLogin or emitOK
    elseif data.sso and sso then
       sso.sendredirect(request)
    elseif hasUserDb or sso then

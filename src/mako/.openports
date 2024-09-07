@@ -1,3 +1,4 @@
+if 1==#mako.argv and "-"~=mako.argv[1]:sub(1,1) then return end
 local iovm = ba.openio("vm")
 local fmt=string.format
 local function print(msg) tracep(false,5,msg) end

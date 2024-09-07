@@ -18,7 +18,7 @@ del README.md
 del .config
 rmdir /s /q .certificate
 
-set /p "userResponse=Do you want to minify the js and css files (require node and npm) (y/n)? "
+set /p "Do you want to minify the JS and CSS files (requires Node and npm) (y/n)? "
 if /i "%userResponse%"=="y" (
    where /q npm
     if ERRORLEVEL 1 (

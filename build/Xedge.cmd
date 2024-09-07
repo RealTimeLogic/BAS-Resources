@@ -74,7 +74,7 @@ if exist "..\..\..\lua-protobuf" (
    echo ..\..\..\lua-protobuf not found; Not Including lua-protobuf and Sparkplug
 )
 
-choice /C YN /M "Do you want to minify the js and css files (require node and npm) "
+choice /C YN /M "Do you want to minify the JS and CSS files (requires Node and npm) (y/n)? "
 if errorlevel 2 goto NoMinify
 if errorlevel 1 goto YesMinify
 
