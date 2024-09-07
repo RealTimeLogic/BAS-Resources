@@ -17,7 +17,7 @@ rm -f README.md
 rm -f .config
 rm -rf /s /q .certificate
 
-read -p "Do you want to minify the js and css files (require node and npm) (y/n)? "  userResponse
+read -p "Do you want to minify the JS and CSS files (requires Node and npm) (y/n)? "  userResponse
 if [ "$userResponse" = "y" ]; then
    if ! command -v npm> /dev/null 2>&1; then
        echo "npm not found in the path. Skipping minification."
