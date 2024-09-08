@@ -884,7 +884,7 @@ local function connect2addr(self,opt)
       self.addr, opt.port or (opt.shark and 8883 or 1883), opt)
    if not sock then return nil,err end
    if opt.shark and not opt.nocheck then
-      local trusted,status = sock:trusted(addr)
+      local trusted,status = sock:trusted(self.addr)
       if not trusted then return nil, status end
    end
    return sock
