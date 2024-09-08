@@ -815,7 +815,7 @@ function C:subscribe(topic,onsuback,opt,prop)
    local qos=opt.qos or 0
    qos=qos&3
    local subOptions = retainhandling | retain | nolocal | qos
-   local pi=sendSubOrUnsub(self,topic,onsub,prop,subOptions)
+   local pi=sendSubOrUnsub(self,topic,onsuback,prop,subOptions)
    self.subackQT[pi]={topic=topic,onsuback=onsuback,onpub=opt.onpub,subid=prop.zz_subid}
    return self.connected
 end
