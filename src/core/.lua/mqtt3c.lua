@@ -211,7 +211,7 @@ function C:subscribe(topic,callback,opt)
    if not opt and "table" == callback then
       opt,callback=callback,nil
    end
-   if opt and "function" == type(opt.onpub) then self.onpubT[topic]=onpub end
+   if opt and "function" == type(opt.onpub) then self.onpubT[topic]=opt.onpub end
    return subOrUnsub(self,topic,callback,true)
 end
 
