@@ -643,15 +643,15 @@ local function onErrStatus(self,etype,code)
 end
 
 local function coMqttRun(self)
-   local ok,etype,status,valT
+   local ok,etype,status
    while self.connected do
       local cpt,bta=mqttRec(self)
       if not cpt then status=bta break end
       local func = recCpT[cpt&0xF0]
       if not func then etype,status="mqtt","protocolerror" break end
-      ok,etype,status,valT=func(self,bta,cpt)
+      ok,etype,status=func(self,bta,cpt)
       if not ok then break end
-      etype,status,valT=nil,nil,nil
+      etype,status=nil,nil
    end
    local lasterror=self.lasterror
    self.connected,self.lasterror,self.recOverflowData=false,nil,nil
@@ -666,7 +666,7 @@ local function coMqttRun(self)
 	 etype="sock"
       end
    end
-   if not self.disconnected and onErrStatus(self,etype,status,valT) then
+   if not self.disconnected and onErrStatus(self,etype,status) then
       self.connectTime=nil
       if "sysshutdown" ~= status then
 	 startMQTT(self,encConnect(self,false))
