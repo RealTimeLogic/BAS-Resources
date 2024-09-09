@@ -548,7 +548,7 @@ local function sendMsgWithTid(self,msg,tid)
    sendMsg(self,bta)
 end
 
-local function getTid(topic)
+local function getTid(self, topic)
    local tid
    if "string" == type(topic) then
       tid=self.topic2tidT[topic]
@@ -561,7 +561,7 @@ end
 
 
 function C:unsubscribe(topic)
-   local tid=getTid(topic)
+   local tid=getTid(self, topic)
    if self.onMsgCBT[tid] then
       self.onMsgCBT[tid]=nil
       sendMsgWithTid(self,MsgUnsubscribe,tid)
@@ -569,7 +569,7 @@ function C:unsubscribe(topic)
 end
 
 function C:observe(topic,onchange)
-   local tid=getTid(topic)
+   local tid=getTid(self, topic)
    if tid ~= self.etid and not self.observeT[tid] then
       self.observeT[tid] = onchange;
       sendMsgWithTid(self,MsgObserve,tid);
@@ -577,7 +577,7 @@ function C:observe(topic,onchange)
 end
 
 function C:unobserve(topic)
-   local tid=getTid(topic)
+   local tid=getTid(self, topic)
    if self.observeT[tid] then
       self.observeT[tid]=nil;
       sendMsgWithTid(self,MsgUnobserve,tid);
