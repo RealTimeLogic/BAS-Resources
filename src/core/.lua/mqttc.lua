@@ -643,15 +643,15 @@ local function onErrStatus(self,etype,code)
 end
 
 local function coMqttRun(self)
-   local ok,etype,status,valT
+   local ok,etype,status
    while self.connected do
       local cpt,bta=mqttRec(self)
       if not cpt then status=bta break end
       local func = recCpT[cpt&0xF0]
       if not func then etype,status="mqtt","protocolerror" break end
-      ok,etype,status,valT=func(self,bta,cpt)
+      ok,etype,status=func(self,bta,cpt)
       if not ok then break end
-      etype,status,valT=nil,nil,nil
+      etype,status=nil,nil
    end
    local lasterror=self.lasterror
    self.connected,self.lasterror,self.recOverflowData=false,nil,nil
@@ -666,7 +666,7 @@ local function coMqttRun(self)
 	 etype="sock"
       end
    end
-   if not self.disconnected and onErrStatus(self,etype,status,valT) then
+   if not self.disconnected and onErrStatus(self,etype,status) then
       self.connectTime=nil
       if "sysshutdown" ~= status then
 	 startMQTT(self,encConnect(self,false))
@@ -815,7 +815,7 @@ function C:subscribe(topic,onsuback,opt,prop)
    local qos=opt.qos or 0
    qos=qos&3
    local subOptions = retainhandling | retain | nolocal | qos
-   local pi=sendSubOrUnsub(self,topic,onsub,prop,subOptions)
+   local pi=sendSubOrUnsub(self,topic,onsuback,prop,subOptions)
    self.subackQT[pi]={topic=topic,onsuback=onsuback,onpub=opt.onpub,subid=prop.zz_subid}
    return self.connected
 end
@@ -884,7 +884,7 @@ local function connect2addr(self,opt)
       self.addr, opt.port or (opt.shark and 8883 or 1883), opt)
    if not sock then return nil,err end
    if opt.shark and not opt.nocheck then
-      local trusted,status = sock:trusted(addr)
+      local trusted,status = sock:trusted(self.addr)
       if not trusted then return nil, status end
    end
    return sock
