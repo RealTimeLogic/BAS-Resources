@@ -1,17 +1,5 @@
-local sfind=string.find
-local fmt=string.format
-local gsub=string.gsub
-local match=string.match
-local tinsert=table.insert
-local tconcat=table.concat
-local urlencode=ba.urlencode
-local slower=string.lower
-local tonumber=tonumber
-local ba=ba
-local jEnc=ba.json.encode
-local type=type
-local _G=_G
-local _ENV={}
+local fmt,gsub,match,tinsert,tconcat,urlencode,tonumber=string.format,string.gsub,string.match,table.insert,table.concat,ba.urlencode,tonumber
+local ba,jEnc,type,_G,_ENV=ba,ba.json.encode,type,_G,{}
 
 local xssfilt
 do
@@ -63,20 +51,15 @@ end
 local menubuts=
 [[<span id='menulinks'><a id='RefreshB' href='./' title='Refresh'></a><a id='NewFolderB' href='./?cmd=mkdir' title='Create a new directory'></a><a id='UploadB' href='./?cmd=upload' title='Upload a file from your drive to the remote drive'></a><a id='NewWindowB' href='./' target='_blank' title='Open New Window'></a><a id='SearchB' href='#' title='Search for resources'></a>]]
 
-function add2menubuts(data)
-   menubuts=menubuts..data
-end
-
 local hdavbut=
 [[<a href='#' id='WebDAVB' title='WebDAV session URL'></a>]]
 
 local header4=
 [[</span></div><span id='navlink'>Path: ]]
 
-function manageMicrosoftClient(cmd,rel)
+local function manageMicrosoftClient()
    return false
 end
-local manageMicrosoftClient=manageMicrosoftClient
 
 
 local function trim(s)

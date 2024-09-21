@@ -2,7 +2,7 @@ require"wfs" -- Install function ba.create.wfs
 
 local function trim(s) return s:gsub("^%s*(.-)%s*$", "%1") end
 local production=true -- Let's Encrypt
-local sfind,ssub,sbyte,sfmt=string.find,string.sub,string.byte,string.format
+local sfind,ssub,sfmt=string.find,string.sub,string.format
 local tinsert=table.insert
 local dtraceback=debug and debug.traceback or function(e) return e end
 local jencode,jdecode=ba.json.encode,ba.json.decode
@@ -36,7 +36,7 @@ local rw=require"rwfile"
 pcall(function() xedge.portal=require"acme/dns".token().info() end)
 
 local fakeTime=(function()
-   local bv,lv,date=ba.version()
+   local _,_,date=ba.version()
    local tm=ba.parsedate("Mon, "..date:gsub("^(%w+)%s*(%w+)","%2 %1"))
    xedge.compileTime=tm
    return function() tm=tm+1 return tm end
@@ -302,8 +302,8 @@ local function fn2info(fn, noapp)
 end
 
 local function noopIO(cfg)
-   local function files(fn)
-      local fname, isdir, mtime, size=".appcfg", false, fakeTime(), #cfg
+   local function files()
+      local fname=".appcfg"
       local function read() return false end
       local function name() return fname end
       local function stat() return {name=fname,isdir=false,mtime=fakeTime(),size=#cfg} end
@@ -347,7 +347,7 @@ local function runOnUnload(pn,env,appenv)
    local function close(tab)
       if level > 10 then return end
       level=level+1
-      for k,v in pairs(tab) do
+      for _,v in pairs(tab) do
 	 if "table" == type(v) then
 	    if v.close then
 	       pcall(function() v:close() end)
@@ -418,7 +418,7 @@ local function manageApp(name,isStartup) -- start/stop/restart
    local err
    local appc=appsCfg[name]
    assert(appc)
-   local io,ion,pn=fn2info(appc.url, true)
+   local io,_,pn=fn2info(appc.url, true)
    if io then io,err=ba.mkio(io, pn) end
    if not io then
       err=sendErr("Opening app '%s' (%s) failed: %s ",name,appc.url,err or "invalid URL")
@@ -440,8 +440,8 @@ local function manageApp(name,isStartup) -- start/stop/restart
 	 end
 	 setSecH(dir)
 	 env.dir=dir
-	 dir:setfunc(function(_ENV,pn)
-	    if pn:find"%.x?lua$" then
+	 dir:setfunc(function(_ENV,n)
+	    if n:find"%.x?lua$" then
 	       response:senderror(403, "XLua files cannot be opened using the browser.")
 	       return true
 	    end
@@ -491,7 +491,6 @@ local function newOrUpdateApp(cfg,ion,url) -- On new/update cfg file
    local start=true -- or restart
    if appsCfg[ion] then -- update
       local oc=appsCfg[ion] -- original config
-      local aio=apps[ion].io
       if nc.name~=ion then -- renamed
 	 terminateApp(ion, true)
 	 newAppCfg(nc)
@@ -516,7 +515,6 @@ end
 ----------------------------------------------------------------
 
 local function open(fn, mode)
-   local fp
    local io,ion,pn=fn2info(fn)
    if not io then return nil,"notfound" end
    local cfgIx=fn:find"%.appcfg$"
@@ -536,7 +534,7 @@ local function open(fn, mode)
       return {read=read,write=write,seek=x,flush=x,close=x}
    end
    if not pn then return nil,"notfound" end
-   fp,err=io:open(pn, mode)
+   local fp,err=io:open(pn, mode)
    if not fp then return nil,err end
    local function read(maxsize) return fp:read(maxsize) end
    local function write(data) return fp:write(data) end
@@ -562,11 +560,10 @@ local function open(fn, mode)
 end
 
 local function files(fn)
-   local cfg
+   local cfg,name
    local io,ion,pn=fn2info(fn)
    if not io then
       if 0 == #fn or "." == fn then
-	 local name,io
 	 local function appRead()
 	    name,io=next(apps,name)
 	    return name and true or false
@@ -589,7 +586,7 @@ local function files(fn)
    local iter
    pcall(function()iter=io:files(pn or "",true)end)
    if not iter then return nil,"notfound" end
-   local fname, isdir, mtime, size=true
+   local fname,isdir,mtime,size=true
    local function read()
       if not fname or cfg then return false end
       fname, isdir, mtime, size=iter()
@@ -604,9 +601,8 @@ local function files(fn)
       end
       return true
    end
-   local function name() return fname end
-   local function stat() return {name=name,isdir=isdir,mtime=mtime,size=size} end
-   return {read=read,name=name,stat=stat}
+   local function stat() return {name=fname,isdir=isdir,mtime=mtime,size=size} end
+   return {read=read,name=function() return fname end,stat=stat}
 end
 
 local function stat(fn)
@@ -621,13 +617,13 @@ local function stat(fn)
 end
 
 local function mkdir(fn)
-   local io,ion,pn=fn2info(fn)
+   local io,_,pn=fn2info(fn)
    if not io or not pn then return nil,"noaccess" end
    return io:mkdir(pn)
 end
 
 local function rmdir(fn)
-   local io,ion,pn=fn2info(fn)
+   local io,_,pn=fn2info(fn)
    if not io or not pn then return nil,"notfound" end
    return io:rmdir(pn)
 end
@@ -704,12 +700,12 @@ local function installOrSetAuth()
    end
    if not setdb() then return false end
    installAuth=setdb
-   local function loginresponse(_ENV, authinfo)
+   local function loginresponse(_ENV,_)
       response:senderror(401)
    end
    local auth=ba.create.authenticator(ju,{
       response=loginresponse,type="form",realm=authRealm})
-   local az=ba.create.authorizer(function(u,m,r,s) return s.xadmin end)
+   local az=ba.create.authorizer(function(_,_,_,s) return s.xadmin end)
    xedge.authenticator=auth
    xedge.authuser=ju
    log"Installing authenticator"
@@ -752,7 +748,7 @@ end
 
 function xedge.ssoSetSecret(secret)
    if xcfg.openid then
-      oldsec=xcfg.openid.client_secret
+      local oldsec=xcfg.openid.client_secret
       xcfg.openid.client_secret=secret
       if require"ms-sso".validate(xcfg.openid) then
 	 saveCfg()
@@ -764,14 +760,14 @@ end
 
 local function xinit(aio,rwCfgFile,rtld)
    saveCfg = rwCfgFile and function() rwCfgFile(xcfg) end or function() end
-   cfg=rwCfgFile and rwCfgFile() or {apps={}}
+   local cfg=rwCfgFile and rwCfgFile() or {apps={}}
    ios=ba.io()
    ios.vm=nil
    -- Remove virtual disks from windows to prevent DAV lock if url=localhost
    local t={}
    for name,io in pairs(ios) do
       local xio
-      local type,plat=io:resourcetype()
+      local _,plat=io:resourcetype()
       if "windows" == plat and not io:realpath"" then xio=ba.mkio(io,"/c/") end
       t[name]=xio or io
    end
@@ -897,7 +893,7 @@ local commands={
       if not dio then cmd:json{err="No IO"} end
       f(cmd,data)
    end,
-   getconfig=function(cmd,data)
+   getconfig=function(cmd,_)
       local cfg={apps=appsCfg}
       cmd:json{ok=true,config=ba.b64urlencode(jencode(cfg))}
    end,
@@ -910,7 +906,6 @@ local commands={
 	    log("Received invalid browser localStorage")
 	 end
       end
-      local ios=ba.io()
       ios.vm=nil
       local t={}
       for name in pairs(ios) do tinsert(t, name) end
@@ -975,7 +970,7 @@ local commands={
    end,
    run=function(cmd,data)
       if data.fn then
-	 local io,ion,pn=fn2info(data.fn)
+	 local _,ion,pn=fn2info(data.fn)
 	 local app=apps[ion]
 	 if app and appsCfg[ion].running then manageXLuaFile(pn,app) end
 	 cmd:json{ok=true}
@@ -1013,14 +1008,13 @@ local commands={
 	    end
 	 end
       else
-	 for k,v in pairs(smtp or {}) do rsp[k]=smtp[k] end
-	 for k,v in pairs(ecfg or {}) do rsp[k]=ecfg[k] end
+	 for k in pairs(smtp or {}) do rsp[k]=smtp[k] end
+	 for k in pairs(ecfg or {}) do rsp[k]=ecfg[k] end
       end
       cmd:json(rsp)
    end,
    openid=function(cmd,d)
       local rsp={ok=true}
-      local ecfg=xcfg.elog
       local id=xcfg.openid
       d.cmd=nil
       if next(d) then -- not empty
@@ -1101,7 +1095,7 @@ local commands={
 	    if io:stat(dname) then return true end
 	    return io:mkdir(dname)
 	 end
-	 local api,io,name,info={}
+	 local api,io,name,info
 	 if "false" == d.deploy then
 	    x,err=mkdir(dio,dname)
 	    if x then io,err=ba.mkio(dio,dname) end
@@ -1199,13 +1193,13 @@ local function doUpgradeOrCfg(name,start,doCfg)
    local appc,ok,x
    appc,x=findapp(name)
    if appc then
-      local io,ion,pn=fn2info(appc.url, true)
+      local io,_,pn=fn2info(appc.url, true)
       if io then
 	 io,x=ba.mkio(io, pn)
 	 if io then
 	    ok,x=execConfig(io)
-	    if doCfg then return ok,x end 
-	    local start=appc.running or start
+	    if doCfg then return ok,x end
+	    start=appc.running or start
 	    xedge.stopapp(appc.name)
 	    if ok and ok.upgrade then
 	       ok,x=pcall(function() return ok.upgrade(io) end)

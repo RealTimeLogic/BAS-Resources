@@ -2,16 +2,16 @@ local commands=...
 
 local function senderror(cmd,msg)
    cmd:setheader("X-Error",msg)
-   cmd:senderror(503, msg)
+   cmd:senderror(400, msg)
    cmd:abort()
 end
 
 function commands.uploadfw(cmd)
    cmd:allow{"PUT"}
    local fn = cmd:header"X-File-Name"
-   if not fn then cmd:senderror(400) cmd:abort() end
+   if not fn then senderror(cmd,"") end
    local n,ext=fn:match"(.-)%.([^%./]+)$"
-   if not n or not ext then cmd:senderror(400,"Invalid file name") cmd:abort() end
+   if not n or not ext then senderror(cmd,"Invalid file name") end
    ext=ext:lower()
    if "zip" == ext then
       local rsp
@@ -23,7 +23,7 @@ function commands.uploadfw(cmd)
 	 local upgrade = io:stat(fn) and true or false
 	 local fp,err = io:open(fn,"w")
 	 if fp then
-	    local ok,err
+	    local ok
 	    for data in cmd:rawrdr(4096) do
 	       ok,err=fp:write(data)
 	       if not ok then break end

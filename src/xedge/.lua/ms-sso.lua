@@ -1,6 +1,6 @@
 local fmt,jdecode=string.format,ba.json.decode
 local msKeysT,http,openidT,downloadKeysTimer={},require"httpm".create{trusted=true}
-local function log(fmt,...) xedge.elog({ts=true},"SSO: "..fmt,...) end
+local function log(x,...) xedge.elog({ts=true},"SSO: "..x,...) end
 
 local aesencode,aesdecode=(function()
    local aeskey=ba.aeskey(32)
@@ -19,8 +19,8 @@ local function downloadKeys()
    local t,err=http:json(url,{})
    if t then
       msKeysT={}
-      for _,t in ipairs(t and t.keys or {}) do
-	 msKeysT[t.kid] = {n=d(t.n),e=d(t.e)}
+      for _,x in ipairs(t and t.keys or {}) do
+	 msKeysT[x.kid] = {n=d(x.n),e=d(x.e)}
       end
       return true
    end
@@ -29,7 +29,8 @@ end
 
 local function startKeysDownload()
    if (os.time()+86400) < xedge.compileTime then
-      local cb=function()
+      local cb
+      cb=function()
 	 xedge.event("sntp",cb,true)
 	 ba.thread.run(function() startKeysDownload() end)
       end
@@ -83,9 +84,9 @@ local function init(idT)
    local function loginCallback(cmd)
       local err,ecodes,rspT -- string,array,table
       local data=cmd:data()
-      local code,state=data.code,data.state
+      local code=data.code
       if code then
-	 local status,data = http:post(fmt("%s%s%s",
+	 local status,d = http:post(fmt("%s%s%s",
 	   "https://login.microsoftonline.com/",idT.tenant,"/oauth2/v2.0/token"),
 	   {
 	      client_id=idT.client_id,
@@ -94,7 +95,7 @@ local function init(idT)
 	      redirect_uri=getRedirUri(cmd),
 	      grant_type="authorization_code"
 	   })
-	 rspT = jdecode(data)
+	 rspT = jdecode(d)
 	 if status == 200 and rspT and rspT.id_token and rspT.access_token then
 	    local header,payload=jwtDecode(rspT.id_token,idT.tenant ~= "common")
 	    if header then
@@ -105,15 +106,16 @@ local function init(idT)
 		     return header,payload,rspT.access_token
 		  end
 		  err='Invalid "aud" (Application ID)'
+	       else
+		  err="Login session expired"
 	       end
-	       err="Login session expired"
 	    else
 	       err=payload
 	    end
 	 elseif rspT and rspT.error_description then
 	    err=rspT.error_description
 	 else
-	    log("Error response %d, %s",status, tostring(data))
+	    log("Error response %d, %s",status, tostring(d))
 	 end
       elseif data.error_description then
 	 err=data.error_description

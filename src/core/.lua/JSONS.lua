@@ -1,7 +1,4 @@
-local trem=table.remove
-local tins=table.insert
-local jenc=ba.json.encode
-
+local trem,jenc=table.remove,ba.json.encode
 local JSONS={}
 JSONS.__index = JSONS
 
@@ -60,8 +57,6 @@ return {
       if "table" == type(cfg) then
 	 o._mxs = cfg.maxsize
 	 o._bincb = cfg.bincb
-      else
-	 o._mxs = maxsize -- backw. comp.
       end
       o._size=0
       o._data={}

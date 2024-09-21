@@ -1,14 +1,12 @@
 -- SMQ Lua client; Copyright Real Time Logic.
 local fmt=string.format
 local btaCreate,btah2n=ba.bytearray.create,ba.bytearray.h2n
-local sbyte,ssub=string.byte,string.sub
 local tinsert,tconcat=table.insert,table.concat
 local sn2h=ba.socket.n2h
 local jenc,jdec=ba.json.encode,ba.json.decode
 
 local MsgInit <const> = 1
 local MsgConnect <const> = 2
-local MsgConnack <const> = 3
 local MsgSubscribe <const> = 4
 local MsgSubscribeAck <const> = 5
 local MsgCreate <const> = 6
@@ -55,12 +53,6 @@ end
 local function argchk(argno,exp,got,level)
    if exp ~= type(got) then error(fmtArgErr(argno,exp,got),level or 3) end
 end
-
-local function typeChk(name,typename,val,level)
-   if type(val) == typename then return end
-   error(fmt("%s: expected %s, got %s",name,typename,type(val)),level or 3)
-end
-
 
 local function smqRec(sock,data,tmo)
    local err
@@ -158,7 +150,7 @@ local function onclose(self,err,canreconnect,msg)
    return reconn
 end
 
-local function msgAck(self,data,tid2top,top2tid,ackCBT)
+local function msgAck(_,data,tid2top,top2tid,ackCBT)
    local accepted=data:byte(4) == 0 and true or false
    local tid=sn2h(4,data,5)
    local topic=data:sub(9,-1)
@@ -194,7 +186,7 @@ local function msgPublish(self,data)
    return true
 end
 
-local function msgDisconnect(self)
+local function msgDisconnect()
    return false,"Disconnect request"
 end
 
@@ -256,7 +248,7 @@ local function pingTimer(self)
 end
 
 local function coSmqRun(self)
-   local sock,data,rem,err=self.sock
+   local sock,data,rem,ok,err=self.sock
    self.pongReceived,self.recCnt=true,0
    self.pingTimer=ba.timer(function() pingTimer(self) end)
    self.pingTimer:set(self.opt.ping*1000)
@@ -374,7 +366,7 @@ startSMQ=function(self,defer)
 end
 
 
-local function connect2url(self,opt,callback)
+local function connect2url(_,opt,callback)
    local http = require"http".create(opt)
    http:timeout(opt.timeout)
    local h = opt.header or {}
@@ -505,8 +497,8 @@ function C:subscribe(topic,subtopic,settings)
 	    if not t then t = {subtops={}} self.onMsgCBT[tid] = t end
 	    if "json" == settings.datatype then
 	       local onmsg2=onmsg
-	       onmsg=function(data,ptid,tid,subtid)
-		  onmsg2(jdec(data) or data,ptid,tid,subtid)
+	       onmsg=function(data,ptid,id,subtid)
+		  onmsg2(jdec(data) or data,ptid,id,subtid)
 	       end
 	    end
 	    if(stid) then

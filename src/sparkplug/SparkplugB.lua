@@ -1,13 +1,12 @@
 -- Sparkplug B client. Copyright Real Time Logic
-local fmt,slower=string.format,string.lower
-local tinsert,tpack=table.insert,table.pack
+local fmt,slower,tinsert=string.format,string.lower,table.insert
 local PayloadNS <const> = ".org.eclipse.tahu.protobuf.Payload"
 
 local pb=(function()
    local fp <close> = ba.openio"vm":open".lua/sparkplug_b.proto"
-   local ok,pb = pcall(require,"pb")
+   local ok,pb,protoc = pcall(require,"pb")
    assert(ok, "\nThe lua protobuf C module is not included in the server")
-   local ok,protoc = pcall(require,"protoc")
+   ok,protoc = pcall(require,"protoc")
    assert(ok, "\nThe Lua module 'protoc' is not included in the server's resource file")
    assert(fp, "\nsparkplug_b.proto not found")
    assert(protoc:load(fp:read"*a"), "Cannot parse .lua/sparkplug_b.proto")
@@ -220,7 +219,7 @@ local function encode(pl,level)
    encMetrics(pl.metrics,"metrics",level and (level+1) or 4)
    local b,e=pb.encode(PayloadNS,pl)
    if not b or 0==#b then
-      trace("PB enc warning:", err or "encoded payload len is zero\n",ba.json.encode(pl))
+      trace("PB enc warning:", e or "encoded payload len is zero\n",ba.json.encode(pl))
    end
    return b
 end
@@ -246,7 +245,7 @@ local function decTemplate(vT)
    vT.isDefinition,vT.is_definition=vT.is_definition,nil
    decMetrics(vT.metrics)
    if vT.parameters then
-      for ix,p in ipairs(vT.parameters) do
+      for _,p in ipairs(vT.parameters) do
 	 p.type,p.value,p[p.value]=RDataTypes[p.type],p[p.value],nil
       end
    end
@@ -257,7 +256,7 @@ local function decDataset(dsT)
    end
    local rows={}
    for rix,row in ipairs(dsT.rows) do
-      for cix,v in ipairs(row.elements) do
+      for _,v in ipairs(row.elements) do
 	 v.value,v[v.value]=v[v.value],nil
       end
       rows[rix]=row.elements
@@ -397,7 +396,7 @@ local nodeCtrl={
 }
 
 -- NCMD
-local function manageNCmd(self,iter,pl)
+local function manageNCmd(self,_,pl)
    pl=decodePl(self,pl,"NCMD")
    if pl then
       local ms={}
@@ -427,7 +426,7 @@ local function manageDCmd(self,iter,pl)
 end
 
 -- STATE
-local function manageState(self,iter,pl,groupID)
+local function manageState(self,_,pl,groupID)
    self._ev:emit("state",groupID,pl)
 end
 

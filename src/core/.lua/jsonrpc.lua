@@ -2,8 +2,8 @@ local json = ba.json
 local fmt, strmatch = string.format, string.match
 local tconcat, tinsert = table.concat, table.insert
 
-local assert,error,type,pairs,ipairs,next,pcall,setmetatable =
-      assert,error,type,pairs,ipairs,next,pcall,setmetatable
+local assert,error,type,pairs,next,pcall,setmetatable =
+      assert,error,type,pairs,next,pcall,setmetatable
 
 local unpack,deflate=table.unpack,ba.deflate
 

@@ -163,7 +163,6 @@ local function configure(email,domains,op)
    for _,dn in ipairs(domains) do
       newDomsT[dn]=oldDomsT[dn] or "" -- renew-date or new
    end
-   local oldDomsT=jfile"domains" or {}
    if optionT.cleanup then
       for dn in pairs(oldDomsT) do
 	 if not newDomsT[dn] then
@@ -182,7 +181,7 @@ end
 
 local systemDateChecked
 local function systemDateOK()
-   local bv,lv,date=ba.version()
+   local _,_,date=ba.version()
    local time=os.time()+86400
    if time < ba.parsedate("Mon, "..date:gsub("^(%w+)%s*(%w+)","%2 %1")) then
       if not systemDateChecked then
@@ -224,7 +223,7 @@ local function forceRenew()
 end
 
 local function revokeCert(domain, rspCB, op)
-   local key,cert=getCert(domain)
+   local _,cert=getCert(domain)
    if cert then
       acme.revoke(jfile"account", cert, rspCB, op)
    else

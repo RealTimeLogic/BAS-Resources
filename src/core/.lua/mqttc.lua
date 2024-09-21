@@ -8,24 +8,23 @@ local tinsert,tsort=table.insert,table.sort
 
 local startMQTT -- forward decl
 
-local MQTT_CONNECT     = 0x01 << 4
-local MQTT_CONNACK     = 0x02 << 4
-local MQTT_PUBLISH     = 0x03 << 4
-local MQTT_PUBACK      = 0x04 << 4
-local MQTT_PUBREC      = 0x05 << 4
-local MQTT_PUBREL      = 0x06 << 4
-local MQTT_PUBCOMP     = 0x07 << 4
-local MQTT_SUBSCRIBE   = 0x08 << 4
-local MQTT_SUBACK      = 0x09 << 4
-local MQTT_UNSUBSCRIBE = 0x0a << 4
-local MQTT_UNSUBACK    = 0x0b << 4
-local MQTT_PINGREQ     = 0x0c << 4
-local MQTT_PINGRESP    = 0x0d << 4
-local MQTT_DISCONNECT  = 0x0e << 4
--- local MQTT_AUTH  = 0x0f << 4
+local MQTT_CONNECT    =0x01<<4
+local MQTT_CONNACK    =0x02<<4
+local MQTT_PUBLISH    =0x03<<4
+local MQTT_PUBACK     =0x04<<4
+local MQTT_PUBREC     =0x05<<4
+local MQTT_PUBREL     =0x06<<4
+local MQTT_PUBCOMP    =0x07<<4
+local MQTT_SUBSCRIBE  =0x08<<4
+local MQTT_SUBACK     =0x09<<4
+local MQTT_UNSUBSCRIBE=0x0a<<4
+local MQTT_UNSUBACK   =0x0b<<4
+local MQTT_PINGREQ    =0x0c<<4
+local MQTT_PINGRESP   =0x0d<<4
+local MQTT_DISCONNECT =0x0e<<4
 
 local function fmtArgErr(argno,exp,got)
-   return fmt("bad argument #%d (%s expected, got %s)", argno,exp,type(got))
+   return fmt("bad argument #%d (%s expected, got %s)",argno,exp,type(got))
 end
 
 local function argchk(argno,exp,got,level)
@@ -34,7 +33,7 @@ end
 
 local function typeChk(name,typename,val,level)
    if type(val) == typename then return end
-   error(fmt("%s: expected %s, got %s",name,typename,type(val)), level or 3)
+   error(fmt("%s: expected %s, got %s",name,typename,type(val)),level or 3)
 end
 
 local function copyTab(t)
@@ -50,16 +49,16 @@ local function copy2Tab(to,from)
 end
 
 local function getPacketId(self)
-   local id = self.packetId
+   local id=self.packetId
    id=id+1
-   self.packetId = id < 0xFFFF and id or 1
+   self.packetId=id < 0xFFFF and id or 1
    return self.packetId
 end
 
 local function getSubscriptionId(self)
-   local id = self.subscriptionId
+   local id=self.subscriptionId
    id=id+1
-   self.subscriptionId = id < 268435455 and id or 1
+   self.subscriptionId=id < 268435455 and id or 1
    return self.subscriptionId
 end
 
@@ -77,8 +76,8 @@ end
 
 local function sortCosQT(qosQT)
    local sortT={}
-   for k,v in pairs(qosQT) do tinsert(sortT,v) end
-   tsort(sortT, function(a,b) return a.counter < b.counter end)
+   for _,v in pairs(qosQT) do tinsert(sortT,v) end
+   tsort(sortT,function(a,b) return a.counter < b.counter end)
    return sortT
 end
 
@@ -87,17 +86,17 @@ local function encVBInt(bta,ix,len)
    if bta then
       local digit
       while true do
-	 digit = len % 0x80
-	 len = len // 0x80
+	 digit=len % 0x80
+	 len=len // 0x80
 	 if len == 0 then break end
-	 bta[ix] = digit | 0x80
+	 bta[ix]=digit | 0x80
 	 ix=ix+1
       end
-      bta[ix] = digit
+      bta[ix]=digit
       return ix+1
    end
    while true do
-      len = len // 0x80
+      len=len // 0x80
       if len == 0 then break end
       ix=ix+1
    end
@@ -142,17 +141,17 @@ end
 
 
 local encPropT={
-   payloadformatindicator={1,encByte}, --Payload Format Indicator
-   messageexpiryinterval={2,enc4BInt}, --Message Expiry Interval
-   contenttype={3,encString}, -- Content Type
-   responsetopic={8,encString}, --Response Topic
-   correlationdata={9,encBinData}, -- Correlation Data
-   zz_subid={11,encVBInt}, --Subscription Identifier (private)
-   sessionexpiryinterval={17,enc4BInt}, --Session Expiry Interval
-   requestprobleminformation={23,encByte}, --Request Problem Information
-   willdelayinterval={24,enc4BInt}, --Will Delay Interval
-   requestresponseinformation={25,encByte}, --Request Response Information
-   ["$reason"]={31,encString}, --Reason String
+   payloadformatindicator={1,encByte},--Payload Format Indicator
+   messageexpiryinterval={2,enc4BInt},--Message Expiry Interval
+   contenttype={3,encString},-- Content Type
+   responsetopic={8,encString},--Response Topic
+   correlationdata={9,encBinData},-- Correlation Data
+   zz_subid={11,encVBInt},--Subscription Identifier (private)
+   sessionexpiryinterval={17,enc4BInt},--Session Expiry Interval
+   requestprobleminformation={23,encByte},--Request Problem Information
+   willdelayinterval={24,enc4BInt},--Will Delay Interval
+   requestresponseinformation={25,encByte},--Request Response Information
+   ["$reason"]={31,encString},--Reason String
    -- 38 User Property
    maximumpacketsize={39,enc4BInt} --Maximum Packet Size
 }
@@ -169,17 +168,17 @@ local function encProp(bta,ix,name,val)
    return encString(bta,ix,val) -- ret ix
 end
 
-local function encPropT(bta,ix,propT)
+local function encPropTab(bta,ix,propT)
    if not propT then return ix end
    for name,val in pairs(propT) do
-      ix = encProp(bta,ix,name,val)
+      ix=encProp(bta,ix,name,val)
    end
    return ix
 end
 
 
-local function checkWill(w, level)
-   w.qos = w.qos or 0
+local function checkWill(w,level)
+   w.qos=w.qos or 0
    typeChk("opt.will", "table",w,level)
    typeChk("opt.will.topic", "string",w.topic,level)
    if w.prop then typeChk("opt.will.prop", "table",w.prop,level) end
@@ -187,34 +186,34 @@ local function checkWill(w, level)
 end
 
 
-local function encConnect(self, cleanStart)
-   local opt = self.opt
+local function encConnect(self,cleanStart)
+   local opt=self.opt
    local prop=self.prop
    local w -- will
    if not prop.sessionexpiryinterval or prop.sessionexpiryinterval==0 then
       cleanStart=true
    end
    -- Calculate total packet len
-    -- 10 = 2+4+1+1+2: protlen+'MQTT'+version+flags+keepalive
+    -- 10=2+4+1+1+2: protlen+'MQTT'+version+flags+keepalive
    local wPropLen
    local ix=encString(nil,10,opt.clientidentifier)
-   local propLen=encPropT(nil,0,prop)
+   local propLen=encPropTab(nil,0,prop)
    ix=encVBInt(nil,ix+propLen,propLen)
    if opt.will then
       w=opt.will
       checkWill(w,5)
-      wPropLen=encPropT(nil,0,w.prop)
+      wPropLen=encPropTab(nil,0,w.prop)
       ix=encVBInt(nil,ix+wPropLen,wPropLen)
       ix=encString(nil,ix,w.topic)
       ix=encString(nil,ix,w.payload or "")
    end
    if opt.username then
       typeChk("opt.username", "string",opt.username,4)
-      ix=encString(nil,ix, opt.username)
+      ix=encString(nil,ix,opt.username)
    end
    if opt.password then
       typeChk("opt.password", "string",opt.password,4)
-      ix=encString(nil,ix, opt.password)
+      ix=encString(nil,ix,opt.password)
    end
    -- Create and format packet
    local packetLen=ix
@@ -229,22 +228,22 @@ local function encConnect(self, cleanStart)
    if w then
       flags=flags |
 	    (w.retain and 0x20 or 0) |
-	    (w.qos << 2) |
+	    (w.qos<<2) |
 	    0x04
    end
    ix=encByte(bta,ix,flags)
    ix=enc2BInt(bta,ix,opt.keepalive)
    ix=encVBInt(bta,ix,propLen)
-   ix=encPropT(bta,ix,prop)
+   ix=encPropTab(bta,ix,prop)
    ix=encString(bta,ix,opt.clientidentifier)
    if w then -- Will
       ix=encVBInt(bta,ix,wPropLen)
-      ix=encPropT(bta,ix,w.prop)
+      ix=encPropTab(bta,ix,w.prop)
       ix=encString(bta,ix,w.topic)
       ix=encBinData(bta,ix,w.payload)
    end
-   if opt.username then ix=encString(bta,ix, opt.username) end
-   if opt.password then ix=encString(bta,ix, opt.password) end
+   if opt.username then ix=encString(bta,ix,opt.username) end
+   if opt.password then ix=encString(bta,ix,opt.password) end
 
    if (ix-1) ~= ba.bytearray.size(bta) then
       error(fmt("ix~=bta size: %d ~= %d",ix-1,ba.bytearray.size(bta)))
@@ -282,11 +281,11 @@ end
 
 
 -- Decode utf8 string
-local function decString(bta,ix,str)
+local function decString(bta,ix)
    local len=btan2h(bta,ix,2)
    ix=ix+2
    local endIx=ix+len
-   return bta2string(bta,ix,endIx-1), endIx
+   return bta2string(bta,ix,endIx-1),endIx
 end
 
 
@@ -294,29 +293,29 @@ end
 local decBinData=decString
 
 local decPropT={
-   [1]={"payloadformatindicator", decByte},
-   [2]={"messageexpiryinterval", dec4BInt},
-   [3]={"contenttype", decString},
-   [8]={"responsetopic", decString},
-   [9]={"correlationdata", decBinData},
-   [11]={"subscriptionidentifier", decVBInt},
-   [17]={"sessionexpiryinterval", dec4BInt},
-   [18]={"assignedclientidentifier", decString},
-   [19]={"serverkeepalive", dec2BInt},
-   [21]={"authenticationmethod", decString},
-   [22]={"authenticationdata", decBinData},
-   [26]={"responseinformation", decString},
-   [28]={"serverreference",	decString},
-   [31]={"reasonstring", decString},
-   [33]={"receivemaximum", dec2BInt},
-   [34]={"topicaliasmaximum", dec2BInt},
-   [35]={"topicalias", dec2BInt},
-   [36]={"maximumqos", decByte},
-   [37]={"retainavailable", decByte},
-   [39]={"maximumpacketsize", dec4BInt},
-   [40]={"wildcardsubscriptionavailable", decByte},
-   [41]={"subscriptionidentifieravailable", decByte},
-   [42]={"sharedsubscriptionavailable", decByte},
+   [1]={"payloadformatindicator",decByte},
+   [2]={"messageexpiryinterval",dec4BInt},
+   [3]={"contenttype",decString},
+   [8]={"responsetopic",decString},
+   [9]={"correlationdata",decBinData},
+   [11]={"subscriptionidentifier",decVBInt},
+   [17]={"sessionexpiryinterval",dec4BInt},
+   [18]={"assignedclientidentifier",decString},
+   [19]={"serverkeepalive",dec2BInt},
+   [21]={"authenticationmethod",decString},
+   [22]={"authenticationdata",decBinData},
+   [26]={"responseinformation",decString},
+   [28]={"serverreference",decString},
+   [31]={"reasonstring",decString},
+   [33]={"receivemaximum",dec2BInt},
+   [34]={"topicaliasmaximum",dec2BInt},
+   [35]={"topicalias",dec2BInt},
+   [36]={"maximumqos",decByte},
+   [37]={"retainavailable",decByte},
+   [39]={"maximumpacketsize",dec4BInt},
+   [40]={"wildcardsubscriptionavailable",decByte},
+   [41]={"subscriptionidentifieravailable",decByte},
+   [42]={"sharedsubscriptionavailable",decByte},
 }
 
 
@@ -342,7 +341,7 @@ local function decodePropT(bta,propLen,ix)
       local sIx=ix
       ix=decodeProp(bta,ix,propT)
       if not ix then return nil,1 end
-      propLen = propLen - (ix - sIx)
+      propLen=propLen - (ix - sIx)
    end
    if propLen == 0 then return propT,ix end
    return nil,ix -- prot err
@@ -354,37 +353,37 @@ local function mqttRec(self)
    local sock=self.sock
    local data,msg,err
    if self.recOverflowData then
-      data = self.recOverflowData
+      data=self.recOverflowData
       self.recOverflowData =nil
    else
       data=""
    end
-   local mult,len,ix = 1,0,1
+   local mult,len,ix=1,0,1
    repeat
-      ix = ix + 1
+      ix=ix + 1
       while #data < ix do
-	 msg,err = sock:read()
+	 msg,err=sock:read()
 	 if not msg then return nil,err end
-	 data = data..msg
+	 data=data..msg
       end
-      local digit = sbyte(data,ix)
-      len = len + (digit & 0x7F) * mult
-      mult = mult * 0x80
+      local digit=sbyte(data,ix)
+      len=len + (digit & 0x7F) * mult
+      mult=mult * 0x80
    until digit < 0x80
-   local cpt = sbyte(data,1)
+   local cpt=sbyte(data,1)
    local bta
    if len > 0 then
       bta=btaCreate(len)
       local overflow=btaCopy(bta,1,data,ix+1,-ix-1)
       local plen=#data-ix
       while plen < len do
-	 data,err = sock:read()
+	 data,err=sock:read()
 	 if not data then return nil,err end
 	 overflow=btaCopy(bta,1+plen,data)
-	 plen = plen+#data
+	 plen=plen+#data
       end
       if overflow > 0 then
-	 self.recOverflowData = ssub(data, #data-overflow+1)
+	 self.recOverflowData=ssub(data,#data-overflow+1)
       end
    end
    return cpt,bta
@@ -401,7 +400,7 @@ local function sndCosock(sock,self)
       local bta=sndQT[sndQTail]
       assert(bta)
       if not self.sock:write(bta) then
-	 self.connected = false
+	 self.connected=false
 	 return
       end
       sndQT[sndQTail]=nil
@@ -413,11 +412,11 @@ end
 
 -- Queue at head and enable 'sndCosock()', which may already be
 -- enabled and that is OK.
-local function sendMsg(self, bta)
+local function sendMsg(self,bta)
    local sndQHead=self.sndQHead
    assert(nil == self.sndQT[sndQHead])
    self.sndQT[sndQHead]=bta
-   self.sndQHead = sndQHead+1
+   self.sndQHead=sndQHead+1
    self.sndQElems=self.sndQElems+1
    if self.connected then self.sndCosock:enable() end
 end
@@ -425,7 +424,7 @@ end
 
 local function sendPing(self)
    local pingCounter=self.pingCounter
-   pingCounter = pingCounter+1
+   pingCounter=pingCounter+1
    if pingCounter == 2 then
       local bta=btaCreate2(0)
       bta[1]=MQTT_PINGREQ
@@ -453,13 +452,13 @@ end
 
 -- used by recPuback,recPubrec,recPubrel,recPubcomp
 local function decAck(bta)
-   local reason = btaSize(bta) == 2 and 0 or bta[3]
+   local reason=btaSize(bta) == 2 and 0 or bta[3]
    return btan2h(bta,1,2),reason
 end
 
 local function recPublish(self,bta,cpt)
    local propT,pid
-   local topic,ix=decString(bta, 1)
+   local topic,ix=decString(bta,1)
    if topic then
       local qos=(cpt>>1)&3
       if qos > 0 then pid,ix=dec2BInt(bta,ix) end
@@ -482,8 +481,7 @@ local function recPublish(self,bta,cpt)
 end
 
 local function recPuback(self,bta)
-   local pid,reason=decAck(bta)
-    -- Add log
+   local pid=decAck(bta)
    self.sndQosQT[pid]=nil
    return true
 end
@@ -491,7 +489,6 @@ end
 local function recPubrec(self,bta)
    local qT=self.sndQosQT
    local pid,reason=decAck(bta)
-    -- Add log
    if reason < 0x80 then
       reason=qT[pid] and 0 or 146
       bta=sendAckResp(self,MQTT_PUBREL|2,pid,reason)
@@ -506,21 +503,19 @@ end
 
 local function recPubrel(self,bta)
    local pid,reason=decAck(bta)
-   -- Add log if not self.recQosQT[pid]
    self.recQosQT[pid]=nil
    sendAckResp(self,MQTT_PUBCOMP,pid,reason)
    return true
 end
 
 local function recPubcomp(self,bta)
-   local pid,reason=decAck(bta)
-   -- Add log if not self.sndQosQT[pid]
+   local pid=decAck(bta)
    self.sndQosQT[pid]=nil
    return true
 end
 
-local function removeOnpubInfo(self, topic)
-   local subid = self.topicT[topic]
+local function removeOnpubInfo(self,topic)
+   local subid=self.topicT[topic]
    if subid then
       self.topicT[topic]=nil
       self.onpubT[subid]=nil
@@ -530,14 +525,14 @@ end
 local function recSuback(self,bta)
    local pi,ix=dec2BInt(bta,1)
    local propT
-   propT,ix = decodePropT(bta,decVBInt(bta,ix))
+   propT,ix=decodePropT(bta,decVBInt(bta,ix))
    if not propT then return nil,"mqtt","protocolerror" end
    local reason=bta[ix]
-   local t = self.subackQT[pi]
+   local t=self.subackQT[pi]
    self.sndQosQT[pi]=nil
    if t then
       self.subackQT[pi]=nil
-      removeOnpubInfo(self, t.topic) -- dups, if any
+      removeOnpubInfo(self,t.topic) -- dups, if any
       if t.onsuback then t.onsuback(t.topic,reason,propT) end
       if reason < 0x80 then
 	 if t.onpub then
@@ -545,8 +540,6 @@ local function recSuback(self,bta)
 	    self.topicT[t.topic]=t.subid
 	 end
       end
-   else
-      --Add log
    end
    return true
 end
@@ -555,31 +548,29 @@ end
 local function recUnsuback(self,bta)
    local pi,ix=dec2BInt(bta,1)
    local propT
-   propT,ix = decodePropT(bta,decVBInt(bta,ix))
+   propT,ix=decodePropT(bta,decVBInt(bta,ix))
    if not propT then return nil,"mqtt","protocolerror" end
    local reason=bta[ix]
-   local t = self.subackQT[pi]
+   local t=self.subackQT[pi]
    self.sndQosQT[pi]=nil
    if t then
       self.subackQT[pi]=nil
-      removeOnpubInfo(self, t.topic) -- dups, if any
+      removeOnpubInfo(self,t.topic) -- dups, if any
       if t.onunsubscribe then t.onunsubscribe(t.topic,reason,propT) end
-   else
-      --Add log
    end
    return true
 end
 
-local function recPingresp(self,bta)
+local function recPingresp(self)
    self.pingCounter=0
    return true
 end
 
-local function recDisconnect(self,bta)
-   local propT,ix = decodePropT(bta,decVBInt(bta,2))
+local function recDisconnect(_,bta)
+   local propT=decodePropT(bta,decVBInt(bta,2))
    if propT then
-      local statusT={reasoncode=bta[1], properties=propT}
-      return nil,"mqtt","disconnect", statusT
+      local statusT={reasoncode=bta[1],properties=propT}
+      return nil,"mqtt","disconnect",statusT
    end
    return nil,"mqtt","protocolerror"
 end
@@ -619,15 +610,15 @@ local function restoreQueues(self,session)
       copy2Tab(self.topicT,t.topicT)
       local qT=self.recQosQT
       if next(qT) then -- if not empty
-	 for _,t in pairs(sortCosQT(qT)) do sendMsg(self, t.bta) end
+	 for _,x in pairs(sortCosQT(qT)) do sendMsg(self,x.bta) end
       end
       qT=self.sndQosQT
       if next(qT) then -- if not empty
-	 for _,t in pairs(sortCosQT(qT)) do
-	    local bta=t.bta
+	 for _,x in pairs(sortCosQT(qT)) do
+	    local bta=x.bta
 	    local cpt=bta[1]
 	    if (cpt & 0xF0) == MQTT_PUBLISH then bta[1]=cpt|0x08 end  --DUP flag
-	    sendMsg(self, bta)
+	    sendMsg(self,bta)
 	 end
       end
    end
@@ -637,7 +628,7 @@ end
 local function onErrStatus(self,etype,code)
    local reconn=self.onstatus(etype,code)
    if reconn then
-      self.reconTimeout = "number" == type(reconn) and reconn
+      self.reconTimeout="number" == type(reconn) and reconn
    end
    return reconn
 end
@@ -647,7 +638,7 @@ local function coMqttRun(self)
    while self.connected do
       local cpt,bta=mqttRec(self)
       if not cpt then status=bta break end
-      local func = recCpT[cpt&0xF0]
+      local func=recCpT[cpt&0xF0]
       if not func then etype,status="mqtt","protocolerror" break end
       ok,etype,status=func(self,bta,cpt)
       if not ok then break end
@@ -656,9 +647,8 @@ local function coMqttRun(self)
    local lasterror=self.lasterror
    self.connected,self.lasterror,self.recOverflowData=false,nil,nil
    if self.pingTimer then self.pingTimer:cancel() end
-   resetQueues(self, true)
+   resetQueues(self,true)
    if not etype then
-      local lasterror=self.lasterror
       if lasterror then
 	 etype,status=lasterror.etype,lasterror.status
       else
@@ -681,18 +671,18 @@ local function coMqttConnect(sock,self,conbta)
    if cpt then
       local perr=true
       if (cpt&0xF0) == MQTT_CONNACK then
-	 local ackProp = #bta > 2 and decodePropT(bta,decVBInt(bta,3))
+	 local ackProp=#bta > 2 and decodePropT(bta,decVBInt(bta,3))
 	 if ackProp then
 	    perr=false
 	    local session=(bta[1] & 1) == 1 and true or false
 	    local reason=bta[2]
 	    reconnect=self.onstatus("mqtt","connect",{
-	       sessionpresent=session,reasoncode=reason, properties=ackProp})
+	       sessionpresent=session,reasoncode=reason,properties=ackProp})
 	    if reason < 128 and reconnect then
 	       local opt=self.opt
 	       if ackProp.serverkeepalive and
 		  ackProp.serverkeepalive ~= opt.keepalive then
-		  opt.keepalive = ackProp.serverkeepalive
+		  opt.keepalive=ackProp.serverkeepalive
 	       end
 	       if opt.keepalive ~= 0 then
 		  self.pingCounter=0
@@ -702,7 +692,7 @@ local function coMqttConnect(sock,self,conbta)
 	       local prop=self.prop
 	       if ackProp.sessionexpiryinterval and
 		  ackProp.sessionexpiryinterval ~= prop.sessionexpiryinterval then
-		  prop.sessionexpiryinterval = ackProp.sessionexpiryinterval
+		  prop.sessionexpiryinterval=ackProp.sessionexpiryinterval
 	       end
 	       self.connected=true
 	       restoreQueues(self,session)
@@ -724,7 +714,7 @@ local function coMqttConnect(sock,self,conbta)
    end
 end
 
-local function coSockConnect(cosock,self,conbta)
+local function coSockConnect(_,self,conbta)
    self.connectTime=ba.clock()//1000
    local sock,err=self.connect(self,self.opt)
    if self.disconnected then
@@ -747,53 +737,53 @@ local C={} -- MQTT Client
 C.__index=C
 
 function C:publish(topic,msg,opt,prop)
-   local opt=opt or {}
+   opt=opt or {}
    local qos=opt.qos or 0
-   qos=(qos&3) << 1
+   qos=(qos&3)<<1
    local retain=opt.retain and 1 or 0
    -- Calc
-   local propLen=encPropT(nil,0,prop)
+   local propLen=encPropTab(nil,0,prop)
    local ix=encVBInt(nil,(qos>0 and 3 or 1) + propLen,propLen)
-   ix=encString(nil, ix, topic)
-   packetLen = ix+#msg-1
+   ix=encString(nil,ix,topic)
+   local packetLen=ix+#msg-1
    -- Create
    local bta=btaCreate2(packetLen)
    bta[1]=MQTT_PUBLISH | qos | retain
    ix=encVBInt(bta,2,packetLen)
-   ix=encString(bta, ix, topic)
+   ix=encString(bta,ix,topic)
    if qos>0 then
       local pi=getPacketId(self)
       ix=enc2BInt(bta,ix,pi)
       insertSndQosT(self,pi,bta)
    end
    ix=encVBInt(bta,ix,propLen)
-   ix=encPropT(bta,ix,prop)
+   ix=encPropTab(bta,ix,prop)
    bta[ix]=msg
-   sendMsg(self, bta)
+   sendMsg(self,bta)
    return self.connected
 end
 
 
-local function sendSubOrUnsub(self,topic,onack,prop,subOptions)
+local function sendSubOrUnsub(self,topic,prop,subOptions)
    local pi=getPacketId(self)
    -- Calc size
    local ix=subOptions and 2 or 1
-   local propLen=encPropT(nil,0,prop)
-   local ix=encVBInt(nil,ix+propLen,0)
-   ix=enc2BInt(nil,ix, pi)
+   local propLen=encPropTab(nil,0,prop)
+   ix=encVBInt(nil,ix+propLen,0)
+   ix=enc2BInt(nil,ix,pi)
    ix=encString(nil,ix,topic)
    --Encode
    local packetLen=ix-1
    local bta=btaCreate2(packetLen)
    ix=encByte(bta,1,(subOptions and MQTT_SUBSCRIBE or MQTT_UNSUBSCRIBE) | 2)
    ix=encVBInt(bta,ix,packetLen)
-   ix=enc2BInt(bta,ix, pi)
+   ix=enc2BInt(bta,ix,pi)
    ix=encVBInt(bta,ix,propLen)
-   ix=encPropT(bta,ix,prop)
+   ix=encPropTab(bta,ix,prop)
    ix=encString(bta,ix,topic)
    if subOptions then encByte(bta,ix,subOptions) end -- subscribe
    insertSndQosT(self,pi,bta)
-   sendMsg(self, bta)
+   sendMsg(self,bta)
    return pi
 end
 
@@ -804,25 +794,25 @@ function C:subscribe(topic,onsuback,opt,prop)
       opt=onsuback
       onsuback=nil
    end
-   opt = opt or {}
+   opt=opt or {}
    prop=copyTab(prop)
    if opt.onpub then
-      prop.zz_subid = getSubscriptionId(self)
+      prop.zz_subid=getSubscriptionId(self)
    end
    local retain=opt.retainaspublished==true and 8 or 0
-   local retainhandling=0~=retain and ((opt.retainhandling or 0) << 4) or 0
-   local nolocal = opt.nolocal and 4 or 0
+   local retainhandling=0~=retain and ((opt.retainhandling or 0)<<4) or 0
+   local nolocal=opt.nolocal and 4 or 0
    local qos=opt.qos or 0
    qos=qos&3
-   local subOptions = retainhandling | retain | nolocal | qos
-   local pi=sendSubOrUnsub(self,topic,onsuback,prop,subOptions)
+   local subOptions=retainhandling | retain | nolocal | qos
+   local pi=sendSubOrUnsub(self,topic,prop,subOptions)
    self.subackQT[pi]={topic=topic,onsuback=onsuback,onpub=opt.onpub,subid=prop.zz_subid}
    return self.connected
 end
 
 
 function C:unsubscribe(topic,onunsubscribe,prop)
-   local pi=sendSubOrUnsub(self,topic,onunsubscribe,prop)
+   local pi=sendSubOrUnsub(self,topic,prop)
    self.subackQT[pi]={topic=topic,onunsubscribe=onunsubscribe}
    return self.connected
 end
@@ -851,7 +841,7 @@ C.__close=C.close
 
 
 function C:setwill(w)
-   checkWill(w, 3)
+   checkWill(w,3)
    self.opt.will=w
 end
 
@@ -863,9 +853,9 @@ end
 startMQTT=function(self,conbta,defer)
    local function conn() ba.socket.event(coSockConnect,self,conbta) end
    if self.connectTime then
-      local timeout = self.reconTimeout or 5
-      local delta = ba.clock()//1000 - self.connectTime
-      if delta > 0 and delta < timeout then timeout = timeout - delta end
+      local timeout=self.reconTimeout or 5
+      local delta=ba.clock()//1000 - self.connectTime
+      if delta > 0 and delta < timeout then timeout=timeout - delta end
       if timeout > 0 then
 	 ba.timer(conn):set(timeout*1000,true)
 	 return
@@ -881,16 +871,16 @@ end
 local function connect2addr(self,opt)
    if not opt.timeout then opt.timeout=5000 end
    local sock,err=ba.socket.connect(
-      self.addr, opt.port or (opt.shark and 8883 or 1883), opt)
+      self.addr,opt.port or (opt.shark and 8883 or 1883),opt)
    if not sock then return nil,err end
    if opt.shark and not opt.nocheck then
-      local trusted,status = sock:trusted(self.addr)
-      if not trusted then return nil, status end
+      local trusted,status=sock:trusted(self.addr)
+      if not trusted then return nil,status end
    end
    return sock
 end
 
-local function create(addr, onstatus, onpub, opt, prop)
+local function create(addr,onstatus,onpub,opt,prop)
    if "function" ~= type(addr) and "string" ~= type(addr) then
       error(fmtArgErr(1,"string | function",addr),2)
    end
@@ -916,9 +906,9 @@ local function create(addr, onstatus, onpub, opt, prop)
       packetId=0,subscriptionId=0,
       sndQT={},sndQHead=1,sndQTail=1,sndQElems=0,
       onstatus=onstatus,onpub=onpub,opt=opt,
-      connect = "function" == type(addr) and addr or connect2addr
+      connect="function" == type(addr) and addr or connect2addr
    }
-   self.recbta = not (opt.recbta==false) -- default true
+   self.recbta=opt.recbta~=false -- default true
    resetQueues(self)
    if "function" == type(addr) then
       self.connect=addr

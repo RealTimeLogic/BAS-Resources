@@ -153,7 +153,7 @@ function H:download(conf,op)
    local data,e1,e2,e3
    local rsize=0
    local ok,fp,func=udconf(self,conf,op,"GET",false)
-   if not ok then return nil,fp,func,size end
+   if not ok then return nil,fp,func end
    ok,e1,e2,e3=self:status()
    if ok ~= 200 then
       if ok then return nil, ok end

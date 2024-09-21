@@ -21,15 +21,16 @@ local function deferred()
    -- Load and start apps in config file
    local function fRwCfgFile(cdata)
       if cdata then
-         local ok,err=rw.file(cfgio, cfgname, ba.json.encode(cdata))
-         if not ok then
-            log("Cannot save %s: %s",cfgio:realpath(cfgname),err)
-         end
-         return ok
+	 local ok,err=rw.file(cfgio, cfgname, ba.json.encode(cdata))
+	 if not ok then
+	    log("Cannot save %s: %s",cfgio:realpath(cfgname),err)
+	 end
+	 return ok
       end
-      local cdata,err=rw.file(cfgio,cfgname)
+      local err
+      cdata,err=rw.file(cfgio,cfgname)
       log("Configuration file: %s: %s",
-          cfgio:realpath(cfgname), cdata and "loaded" or err)
+	  cfgio:realpath(cfgname), cdata and "loaded" or err)
       return cdata and ba.json.decode(cdata)
    end
 

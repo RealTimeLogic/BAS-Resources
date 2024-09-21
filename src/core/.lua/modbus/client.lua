@@ -36,7 +36,7 @@ local dectypeT = {
 	   for i=0,len//8-1 do tinsert(t,fn2h(8,data,10+(i*8))) end
 	   return t
 	  end,
-   string=function(data,len)
+   string=function(data)
 	     return ssub(data,10)
 	  end,
 }
@@ -50,22 +50,22 @@ end
 local enctypeT = {
    word=function(t)
 	   local rsp={}
-	   for k,v in ipairs(t) do tinsert(rsp,h2n(2,v)) end
+	   for _,v in ipairs(t) do tinsert(rsp,h2n(2,v)) end
 	   return tconcat(rsp)
 	end,
    dword=function(t)
 	   local rsp={}
-	   for k,v in ipairs(t) do tinsert(rsp,h2n(4,v)) end
+	   for _,v in ipairs(t) do tinsert(rsp,h2n(4,v)) end
 	   return tconcat(rsp)
 	 end,
    float=function(t)
 	   local rsp={}
-	   for k,v in ipairs(t) do tinsert(rsp,fh2n(4,v)) end
+	   for _,v in ipairs(t) do tinsert(rsp,fh2n(4,v)) end
 	   return tconcat(rsp)
 	 end,
    double=function(t)
 	   local rsp={}
-	   for k,v in ipairs(t) do tinsert(rsp,fh2n(8,v)) end
+	   for _,v in ipairs(t) do tinsert(rsp,fh2n(8,v)) end
 	   return tconcat(rsp)
 	  end,
    string=function(str)
@@ -209,7 +209,7 @@ local function readbytesResp(data,vtype)
    return dectype(data,sbyte(data,9),vtype)
 end
 
-local function retTrueResp(data) return true end
+local function retTrueResp() return true end
 
 -- Manage Response (switch statement)
 local mrespT={
@@ -259,7 +259,7 @@ local function rpcResp(self)
 end
 
 -- Async cosocket
-local function asyncRec(sock, self)
+local function asyncRec(_,self)
    local ok,err
    while true do
       ok,err=rpcResp(self)
@@ -291,7 +291,7 @@ local function asyncRec(sock, self)
    end
 end
 
-local function rpc(self,func,data)
+local function rpc(self,data)
    local ok,err=self.sock:write(data)
    if ok then
       if self.async then
@@ -309,7 +309,7 @@ local function readbits(self,addr,len,func,uid,onresp)
    -- Save len as vtype: ref-L
    uid=ftArgSort(self,tostring(len),uid,onresp,3)
    if len < 1 or len > 2000 then eRange(2000,2,3) end
-   return rpc(self,func,prepheader(self,uid,func,addr,len,6),onresp,readbitsResp)
+   return rpc(self,prepheader(self,uid,func,addr,len,6),onresp,readbitsResp)
 end
 
 
@@ -318,7 +318,7 @@ local function readbytes(self,addr,tlen,func,vtype,uid,onresp)
    uid,vtype=ftArgSort(self,vtype,uid,onresp,3)
    local len = towordlen(tlen,vtype)
    if len < 1 or len > 125 then eRange(fromwordlen(125,vtype),2,3) end
-   return rpc(self,func,prepheader(self,uid,func,addr,len,6))
+   return rpc(self,prepheader(self,uid,func,addr,len,6))
 end
 
 local C={} -- Modbus Client
@@ -340,17 +340,18 @@ end
 -- Write single coil: addr: number, val: boolean
 -- Write multiple coils: addr: number, val: table with booleans
 function C:wcoil(addr,val,uid,onresp)
-   local data,e1,e2
-   local uid=ftArgSort(self,"",uid,onresp,2)
+   local data
+   uid=ftArgSort(self,"",uid,onresp,2)
    if type(val) == "boolean" then
       data=prepheader(self,uid,WRITE_SINGLE_COIL,addr,val and 0xFF00 or 0,6)
-      data,e1,e2 = rpc(self,WRITE_SINGLE_COIL,data)
-   elseif type(val) == "table" then
+      return rpc(self,data)
+   end
+   if type(val) == "table" then
       local len = #val
       if len < 1 or len > 1968 then eRange(1968,2,3) end
       data={}
       local bit,byte = 1,0
-      for k,v in ipairs(val) do
+      for _,v in ipairs(val) do
 	 if v then byte = byte | bit end
 	 bit = bit << 1;
 	 if bit == 256 then tinsert(data,byte) bit,byte = 1,0 end
@@ -358,7 +359,7 @@ function C:wcoil(addr,val,uid,onresp)
       if bit ~= 1 then tinsert(data,byte) end
       data=schar(table.unpack(data))
       data=prepheader(self,uid,WRITE_MULTIPLE_COILS,addr,len,#data+7)..schar(#data)..data
-      return rpc(self,WRITE_MULTIPLE_COILS,data)
+      return rpc(self,data)
    end
    error(fmtArgErr(2,"wcoil","boolean/table",val),2)
 end
@@ -374,7 +375,7 @@ end
 
 function C:wholding(addr,val,vtype,uid,onresp)
    uid,vtype=ftArgSort(self,vtype,uid,onresp,2)
-   local data,e1,e2,len
+   local data,len
    if type(val) == "table" or vtype == "string" then
       len = towordlen(#val,vtype)
       if len < 1 or len > 0x7B then eRange(fromwordlen(0x7B,vtype),2,3) end
@@ -382,19 +383,19 @@ function C:wholding(addr,val,vtype,uid,onresp)
       len = towordlen(1,vtype)
       if len == 1 and type(val) == "number" then
 	 data=prepheader(self,uid,WRITE_SINGLE_REGISTER,addr,val,6)
-	 return rpc(self,WRITE_SINGLE_REGISTER,data)
+	 return rpc(self,data)
       end
       val={val}
    end
    data=prepheader(self,uid,WRITE_MULTIPLE_REGISTERS,addr,len,7+(len*2))
    data = data..schar(len*2)..enctype(val,vtype)
-   return rpc(self,WRITE_MULTIPLE_REGISTERS,data)
+   return rpc(self,data)
 end
 
 
 function C:readwrite(raddr,rlen,waddr,wval,vtype,uid,onresp)
    uid,vtype=ftArgSort(self,vtype,uid,onresp,2)
-   local data,e1,e2,wlen
+   local data,wlen
    rlen = towordlen(rlen,vtype)
    if rlen < 1 or rlen > 0x7D then eRange(fromwordlen(0x7D,vtype),2,3) end
    if type(wval) == "table" or vtype == "string" then
@@ -406,7 +407,7 @@ function C:readwrite(raddr,rlen,waddr,wval,vtype,uid,onresp)
    end
    data=prepheader(self,uid,READ_WRITE_MULTIPLE_REGISTERS,raddr,rlen,11+(wlen*2))
    data=data..h2n(2,waddr)..h2n(2,wlen)..schar(wlen*2)..enctype(wval,vtype)
-   return rpc(self,READ_WRITE_MULTIPLE_REGISTERS,data)
+   return rpc(self,data)
 end
 
 

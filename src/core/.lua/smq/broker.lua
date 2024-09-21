@@ -20,7 +20,7 @@ local function create(op)
 	 setkeepalive=function(time) return hub:setkeepalive(time) end,
 	 shutdown=function(msg,etid) return hub:shutdown(msg,etid) end,
 	 sock2peer=function(sock) return hub:sock2peer(sock) end,
-	 subscribe=function(topic, op) return hub:subscribe(topic, op) end,
+	 subscribe=function(topic, x) return hub:subscribe(topic, x) end,
 	 subtopic2tid=function(tid) return hub:subtopic2tid(tid) end,
 	 subtopics=function() return hub:subtopics() end,
 	 tid2subtopic=function(tid) return hub:tid2subtopic(tid) end,

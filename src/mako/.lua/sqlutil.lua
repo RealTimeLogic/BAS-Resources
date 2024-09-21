@@ -27,7 +27,7 @@ local function select(conn,sql,func)
    local env
    if type(conn) == "function" then env,conn = conn() end
    local cur,err,err2
-   for i=1,3 do
+   for _=1,3 do
       cur,err,err2=conn:execute('SELECT '..sql)
       if cur or err ~="BUSY" then break end
    end
@@ -46,28 +46,28 @@ function _ENV.iter(conn,sql,tab)
    local t,ok,err
    if tab then
       local co = coroutine.create(function()
-         local function execute(cur)
-            t = cur:fetch({},"a")
-            while t do
-               coroutine.yield()
-               t = cur:fetch({},"a")
-            end
-         end
-         ok,err=select(conn,sql,execute)
+	 local function execute(cur)
+	    t = cur:fetch({},"a")
+	    while t do
+	       coroutine.yield()
+	       t = cur:fetch({},"a")
+	    end
+	 end
+	 ok,err=select(conn,sql,execute)
       end)
       return function()
-         coroutine.resume(co)
-         if t then return t end
-         if not ok then return nil,err end
+	 coroutine.resume(co)
+	 if t then return t end
+	 if not ok then return nil,err end
       end
    end
    local co = coroutine.create(function()
       local function execute(cur)
-         t = cur:fetch({})
-         while t do
-            coroutine.yield()
-            t = cur:fetch({})
-         end
+	 t = cur:fetch({})
+	 while t do
+	    coroutine.yield()
+	    t = cur:fetch({})
+	 end
       end
       ok,err=select(conn,sql,execute)
    end)
@@ -79,14 +79,12 @@ function _ENV.iter(conn,sql,tab)
 end
 
 
-local function find(cur) return cur:fetch() end
-function _ENV.find(conn,sql) return select(conn,sql,find) end
+function _ENV.find(conn,sql) return select(conn,sql,function(cur) return cur:fetch() end) end
 function _ENV.findt(conn,sql,t)
-   local function find(cur) return cur:fetch(t or {},"a") end
-   return select(conn,sql,find)
+   return select(conn,sql,function(cur) return cur:fetch(t or {},"a") end)
 end
 
-function dir(n)
+function _ENV.dir(n)
    if not n then return dbdir end
    n=dos2unix(n)
    local st=dio:stat(n)
@@ -97,11 +95,11 @@ function dir(n)
    end
 end
 
-function exist(name)
+function _ENV.exist(name)
    return dio:stat(n2dbn(name)) and true or false
 end
 
-function open(env, name, options)
+function _ENV.open(env, name, options)
    local conn,err
    if "userdata" ~= type(env) then
       options=name
@@ -122,19 +120,19 @@ local function init()
    local _,os=dio:resourcetype()
    if winT[os] then
       dos2unix=function(s)
-         if not s then return "/" end
-         if _G.string.find(s,"^(%w)(:)") then
-            s=_G.string.gsub(s,"^(%w)(:)", "%1",1)
-         end
-         return _G.string.gsub(s,"\\", "/")
+	 if not s then return "/" end
+	 if _G.string.find(s,"^(%w)(:)") then
+	    s=_G.string.gsub(s,"^(%w)(:)", "%1",1)
+	 end
+	 return _G.string.gsub(s,"\\", "/")
       end
    else
       dos2unix=function(x) return x end
    end
    local function mkdbdir(dir)
       if dir then
-         dir=dos2unix(dir.."/data"):gsub("//","/")
-         if dio:stat(dir) or dio:mkdir(dir) then return dir end
+	 dir=dos2unix(dir.."/data"):gsub("//","/")
+	 if dio:stat(dir) or dio:mkdir(dir) then return dir end
       end
    end
    dir(mkdbdir(_G.require"loadconf".dbdir) or mkdbdir(_G.mako.cfgdir) or

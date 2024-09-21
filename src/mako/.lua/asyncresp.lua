@@ -18,28 +18,28 @@ local function create(request)
    if not sock then return nil,data end
    local function rec()
       while true do
-         local d = sock:read()
-         if not d then break end
-         data = data and (data..d) or d
+	 local d = sock:read()
+	 if not d then break end
+	 data = data and (data..d) or d
       end
    end
    sock:event(rec,"s")
    local rspT={}
-   local function write(data)
-      return sock:write(string.format("%x\r\n%s\r\n",#data,data))
+   local function write(d)
+      return sock:write(string.format("%x\r\n%s\r\n",#d,d))
    end
    function rspT.sendHeader(status,hT)
       sendHeader(sock,status,hT)
       rspT.sendHeader=err
       rspT.write=write
    end
-   function rspT.write(data)
+   function rspT.write(d)
       rspT.sendHeader(200)
-      return write(data)
+      return write(d)
    end
    function rspT.close()
       if rspT.write ~= write then
-         rspT.sendHeader(204)
+	 rspT.sendHeader(204)
       end
       sock:write"0\r\n\r\n"
       ba.socket.sock2req(sock,data)

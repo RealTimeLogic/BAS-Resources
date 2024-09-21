@@ -11,9 +11,9 @@ local getTokenRunning=false
 local function getToken()
    getTokenRunning=true
    local http=require"httpc".create(httpOptions)
-   local ok,err = http:request{method="HEAD",trusted=checkCert,url=rtURL,header={
-         ["X-Key"]=zoneKey,
-         ["X-Dev"]=dKey,
+   local _,err = http:request{method="HEAD",trusted=checkCert,url=rtURL,header={
+	 ["X-Key"]=zoneKey,
+	 ["X-Dev"]=dKey,
       }
    }
    local status = http:status()
@@ -22,15 +22,15 @@ local function getToken()
       local token,exp = h['X-RefreshToken'], ba.datetime(h["X-Expires"])
       local now = ba.datetime"NOW"
       if token and exp and exp > now then
-         rToken,rtokenB64 = ba.b64decode(token),token
-         local s = ba.socket.http2sock(http)
-         local ip = s:peername()
-         s:close()
-         serverIp = ip:find("::ffff:",1,true) == 1 and ip:sub(8,-1) or ip
-         for func in pairs(cbFunctionT) do func(rToken,rtokenB64,serverIp) end
-         timer:reset((exp-now)/1000000)
-         getTokenRunning=false
-         return;
+	 rToken,rtokenB64 = ba.b64decode(token),token
+	 local s = ba.socket.http2sock(http)
+	 local ip = s:peername()
+	 s:close()
+	 serverIp = ip:find("::ffff:",1,true) == 1 and ip:sub(8,-1) or ip
+	 for func in pairs(cbFunctionT) do func(rToken,rtokenB64,serverIp) end
+	 timer:reset((exp-now)/1000000)
+	 getTokenRunning=false
+	 return;
       end
       lastEmsg=fmt("Not a valid server: %s", rtURL)
       log.error(lastEmsg)
@@ -39,11 +39,11 @@ local function getToken()
       log.error(lastEmsg)
    else
       if "cannotresolve" == err then
-         lastEmsg = "Cannot connect to "..rtURL
+	 lastEmsg = "Cannot connect to "..rtURL
       else
-         lastEmsg=fmt("Failed %s, invalid HTTP response: %s",
-                      rtURL, err or status)
-         log.error(lastEmsg)
+	 lastEmsg=fmt("Failed %s, invalid HTTP response: %s",
+		      rtURL, err or status)
+	 log.error(lastEmsg)
       end
    end
    getTokenRunning=false

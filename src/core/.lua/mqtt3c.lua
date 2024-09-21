@@ -136,7 +136,7 @@ local function cpUnsuback(self, msg)
    return true
 end
 
-local function cpPingresp(self, msg)
+local function cpPingresp(self)
    self.pingResp=nil
    return true
 end
@@ -198,7 +198,7 @@ function C:publish(topic,msg)
 end
 
 
-local function subOrUnsub(self,topic,callback,sub,opt)
+local function subOrUnsub(self,topic,callback,sub)
    local cpt=schar((sub and MQTT_SUBSCRIBE or MQTT_UNSUBSCRIBE) | 0x02)
    local data = encPacketId(self,callback)..mqttstr(topic)
    if sub then
@@ -323,7 +323,7 @@ end
 local function connectAndRun(self, addr, onstatus, onpub)
    local recon
    local opt=self.opt
-   local function connect()
+   local function conn()
       local ok,err,rcp = _connect(self, addr, onpub, opt)
       if ok then
 	 if onstatus("mqtt","connect", {reasoncode=0,properties={}}) then
@@ -338,7 +338,7 @@ local function connectAndRun(self, addr, onstatus, onpub)
 	 ba.timer(function() connectAndRun(self, addr, onstatus, onpub) end):set(recon*1000,true)
       end
    end
-   ba.socket.event(connect)
+   ba.socket.event(conn)
 end
 
 local function create(addr, onstatus, onpub, opt)

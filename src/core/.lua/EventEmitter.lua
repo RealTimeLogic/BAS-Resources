@@ -6,9 +6,9 @@ local function runCb(self,cb,...)
    local ok,err = pcall(cb,...)
    if not ok then
       if self.reporterr then
-	 self.reporterr(evName,cb,err)
+	 self.reporterr(cb,err)
       else
-	 trace("Event CB err:",evName,cb,err)
+	 trace("Event CB err:",cb,err)
       end
    end
 end
@@ -61,7 +61,7 @@ end
 
 return {
    create=function(self) -- Constructor
-	     local self=setmetatable(self or {},E)
+	     self=setmetatable(self or {},E)
 	     self._evs={}
 	     return self
 	  end

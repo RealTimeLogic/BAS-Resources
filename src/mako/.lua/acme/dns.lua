@@ -1,6 +1,6 @@
 local ab=require"acme/bot"
 local rt=require"acme/rtoken"
-local log=require"acme/log" 
+local log=require"acme/log"
 local abp=ab.priv -- Import private funcs
 local fmt=string.format
 local b64Enc=ba.b64urlencode
@@ -49,7 +49,7 @@ local function setRevConToken()
    end
 end
 
-local function newRefreshToken(rToken,rtokenB64,sIp)
+local function newRefreshToken(rToken,_,sIp)
    refreshToken,serverIp=rToken,sIp
    setRevConToken()
 end
@@ -81,10 +81,10 @@ local function checkAndCfg(level)
       local schar=string.char
       for x in zoneKey:gmatch("%x%x") do table.insert(zkT, schar(tonumber(x,16))) end
       local zkbin=table.concat(zkT)
-      getZoneToken=function(serverIp, refreshToken)
+      getZoneToken=function(ip,token)
 	 local rnd=ba.rndbs(32)
 	 local dk = crypto.PBKDF2("sha256",zoneSecret,zkbin,1000,32)
-	 local token=crypto.hash"sha256"(rnd)(dk)(serverIp)(refreshToken)(true,"binary")
+	 token=crypto.hash"sha256"(rnd)(dk)(ip)(token)(true,"binary")
 	 return token,rnd
       end
    else
@@ -93,7 +93,7 @@ local function checkAndCfg(level)
       getZoneToken=m.token
       serverName,zoneKey=m.info()
       local sbyte=string.byte
-      zoneKey=zoneKey:gsub(".",function(x) return fmt("%02X",sbyte(x)) end) 
+      zoneKey=zoneKey:gsub(".",function(x) return fmt("%02X",sbyte(x)) end)
    end
    if not serverName then error"'servername' not set" end
    commandURL = fmt("https://%s/command.lsp",serverName)
@@ -173,7 +173,7 @@ end
 
 
 local function sockname(http)
-   local ip,port,is6=http:sockname()
+   local ip,_,is6=http:sockname()
    if is6 and ip:find("::ffff:",1,true) == 1 then
       ip=ip:sub(8,-1) -- IPv4-mapped IPv6 address to IPv4
    end
@@ -186,7 +186,7 @@ local function createHttp()
    if not refreshToken then return nil, -1, "No X-RefreshToken" end
    local http=require"httpc".create(httpOptions)
    local function xhttp(command,hT,nolog)
-      local hT=hT or {}
+      hT=hT or {}
       hT['X-Key'] = zoneKey
       local token,hash = calculateSecret()
       if not token then
@@ -225,8 +225,8 @@ local function createHttp()
    return nil,s,e
 end
 
-local function register(http,sockname,subdom,info)
-   local hT={["X-IpAddress"]=sockname,["X-Name"]=subdom,["X-Info"]=info}
+local function register(http,ip,subdom,info)
+   local hT={["X-IpAddress"]=ip,["X-Name"]=subdom,["X-Info"]=info}
    hT=http("Register", hT)
    if hT then
       local devKey,domain=hT['X-Dev'],hT['X-Name']
@@ -239,33 +239,33 @@ local function register(http,sockname,subdom,info)
 end
 
 local function isreg()
-   local cnt,http,wan,sockname=0
+   local cnt,http,wan,sockn=0
    while not http do
       if cnt > 5 then break end
       cnt=cnt+1
-      http,wan,sockname=createHttp()
+      http,wan,sockn=createHttp()
       if not http then ba.sleep(1000) end
    end
-   if not http then return nil,wan,sockname end
+   if not http then return nil,wan,sockn end
    local kT=abp.jfile"devkey"
    if kT and kT.key then
       local hT={["X-Dev"]=kT.key}
       hT=http("IsRegistered",hT,true)
       if hT then
 	 rt.setDKey(kT.key)
-	 return hT["X-Name"],wan,sockname,ab.getemail(),kT.key
+	 return hT["X-Name"],wan,sockn,ab.getemail(),kT.key
       end
    end
-   return false,wan,sockname
+   return false,wan,sockn
 end
 
 local function available(domain)
-   local http,wan,sockname=createHttp()
-   if not http then return nil,wan,sockname end
-   local hT={["X-Name"]=domain}
+   local http,wan,sockn=createHttp()
+   if not http then return nil,wan,sockn end
+   local hT,status,err={["X-Name"]=domain}
    hT,status,err=http("IsAvailable", hT)
    if hT then
-      return (hT["X-Available"] == "yes" and true or false),wan,sockname
+      return (hT["X-Available"] == "yes" and true or false),wan,sockn
    end
    return nil,status,err
 end
@@ -290,7 +290,7 @@ local function activateRevcon()
 	    return true
 	 end
 	 revconTimer=ba.timer(check)
-         revconTimer:set(60000)
+	 revconTimer:set(60000)
       else
 	 abp.error("No ba.revcon(): Reverse Connection not enabled");
       end
@@ -303,20 +303,20 @@ local function auto(email,domain,op)
       abp.error("auto failed: "..tostring(emsg or "?"))
       ba.timer(function() ba.thread.run(function() auto(email,domain,op) end) end):set(60000,true)
    end
-   local http,wan,sockname=createHttp()
-   if wan == sockname then
+   local http,wan,sockn=createHttp()
+   if wan == sockn then
       active=false
       return abp.error(fmt("Public IP address %s equals local IP address",wan))
    elseif not http then
-      abp.error(sockname or "?")
-      return tryagain(sockname)
+      abp.error(sockn or "?")
+      return tryagain(sockn)
    end
    local kT=abp.jfile"devkey"
    if kT and kT.key then
       local hT={["X-Dev"]=kT.key}
       if http("IsRegistered",hT,true) then
 	 rt.setDKey(kT.key)
-	 hT["X-IpAddress"]=sockname
+	 hT["X-IpAddress"]=sockn
 	 local rspHT=http("SetIpAddress",hT,true)
 	 if rspHT then
 	    local regname=rspHT['X-Name']
@@ -329,10 +329,10 @@ local function auto(email,domain,op)
 	    return tryagain("SetIpAddress failed")
 	 end
       else
-	 kT,domain=register(http,sockname,domain,op.info)
+	 kT,domain=register(http,sockn,domain,op.info)
       end
    else
-      kT,domain=register(http,sockname,domain,op.info)
+      kT,domain=register(http,sockn,domain,op.info)
    end
    if kT then
       if op.revcon then activateRevcon() end
@@ -377,10 +377,10 @@ function D.isreg(cb)
    if not ok then return nil,-1,err end
    local function action() cb(isreg()) end
    if type(cb) ~= "function" then
-      local status,wan,sockname,email,key
-      cb=function(st,w,sn,e,k) status,wan,sockname,email,key=st,w,sn,e,k end
+      local status,wan,sockn,email,key
+      cb=function(st,w,sn,e,k) status,wan,sockn,email,key=st,w,sn,e,k end
       action()
-      return status,wan,sockname,email,key
+      return status,wan,sockn,email,key
    end
    ba.thread.run(action)
 end
@@ -391,10 +391,10 @@ function D.available(domain,cb)
    if not ok then return nil,err end
    local function action() cb(available(domain)) end
    if type(cb) ~= "function" then
-      local status,wan,sockname
-      cb=function(st,w,sn) status,wan,sockname=st,w,sn end
+      local status,wan,sockn
+      cb=function(st,w,sn) status,wan,sockn=st,w,sn end
       action()
-      return status,wan,sockname
+      return status,wan,sockn
    end
    ba.thread.run(action)
 end

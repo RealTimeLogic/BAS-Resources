@@ -1,25 +1,24 @@
-
 require "socket.mail"
 local fmt=string.format
 local lT,sT,pT
 
 do -- Verify 'log'
    local emsg='log'
-   local function tc(v, t) if type(v)~=t then error("Expected "..t,2) end end
+   local function tc(v,t) if type(v)~=t then error("Expected "..t,2) end end
    local function verify()
       local t,s,n='table','string','number'
       lT=require"loadconf".log
-      tc(lT, t)
+      tc(lT,t)
       sT=lT.smtp
-      tc(sT, t)
-      tc(sT.server, s) tc(sT.port, 'number') tc(sT.from, s) tc(sT.to, s)
-      if sT.useauth then tc(sT.user, s) tc(sT.password, s) end
+      tc(sT,t)
+      tc(sT.server,s) tc(sT.port,'number') tc(sT.from,s) tc(sT.to,s)
+      if sT.useauth then tc(sT.user,s) tc(sT.password,s) end
       if lT.proxy then
-         emsg="proxy"
-         pT=require"loadconf".proxy
-         tc(pT,t)
-         tc(pT.name,s)
-         tc(pT.port,n)
+	 emsg="proxy"
+	 pT=require"loadconf".proxy
+	 tc(pT,t)
+	 tc(pT.name,s)
+	 tc(pT.port,n)
       end
    end
    local ok,err = pcall(verify)
@@ -32,18 +31,18 @@ end
 lT.sdelay = (lT.sdelay or 24*60*60) * 1000
 lT.maxsize = lT.maxsize or 8192
 
-local function perr(msg) trace("sendmail failed:", msg) return nil,msg end
+local function perr(msg) trace("sendmail failed:",msg) return nil,msg end
 
 local function sendmail(m)
    -- copy smtp settings to new table
    local cfg
    if pT then
       local http = require"httpc".create{
-         proxy=pT.name,socks=pT.socks,proxyport=pT.port,proxycon=true}
-      local ok,status = http:request{
-         url=fmt("http://%s:%d",sT.server,sT.port)}
-      if status ~= "prxready" then      
-         return perr(fmt("proxy connection failed: %s",status))
+	 proxy=pT.name,socks=pT.socks,proxyport=pT.port,proxycon=true}
+      local _,status = http:request{
+	 url=fmt("http://%s:%d",sT.server,sT.port)}
+      if status ~= "prxready" then
+	 return perr(fmt("proxy connection failed: %s",status))
       end
       cfg={server=ba.socket.http2sock(http)}
    else
@@ -53,10 +52,10 @@ local function sendmail(m)
       cfg.user=sT.user
       cfg.password=sT.password
       if sT.consec == "tls" then
-         cfg.shark=ba.sharkclient()
+	 cfg.shark=ba.sharkclient()
       elseif sT.consec == "starttls" then
-         cfg.starttls=true
-         cfg.shark=ba.sharkclient()
+	 cfg.starttls=true
+	 cfg.shark=ba.sharkclient()
       end
    end
    -- Create send mail object
@@ -89,32 +88,32 @@ do -- mako.log() setup
    end
    local function flush(op)
       if timer then
-         timer:cancel()
-         timer=nil
+	 timer:cancel()
+	 timer=nil
       end
       msize=0
       local data=table.concat(msglist,"\n")
       if #data > 0 then
-         msglist={}
-         ba.thread.run(function() send(data, op) end)
+	 msglist={}
+	 ba.thread.run(function() send(data,op) end)
       end
    end
    local function append(msg,ts)
       if ts then
-         msg = os.date("%H:%M: ",os.time())..msg
+	 msg = os.date("%H:%M: ",os.time())..msg
       end
       table.insert(msglist,msg)
       msize=msize+#msg
       if timer then
-         if msize > lT.maxsize then flush() end
+	 if msize > lT.maxsize then flush() end
       else
-         timer=ba.timer(flush)
-         timer:set(lT.sdelay)
+	 timer=ba.timer(flush)
+	 timer:set(lT.sdelay)
       end
    end
-   function mako.log(msg, op)
+   function mako.log(msg,op)
       op=op or {}
-      if msg then append(msg, op.ts) end
+      if msg then append(msg,op.ts) end
       if op.flush then flush(op) end
       return true
    end
@@ -122,14 +121,14 @@ end
 
 if lT.logerr and mako.daemon then
    local op={flush=true}
-   local function errorh(emsg, env)
+   local function errorh(emsg,env)
       local e
       if env and env.request then
-         e=fmt("LSP Err: %s\nURL: %s\n", emsg, env.request:url())
+	 e=fmt("LSP Err: %s\nURL: %s\n",emsg,env.request:url())
       else
-         e=fmt("Lua Err: %s\n", emsg)
+	 e=fmt("Lua Err: %s\n",emsg)
       end
-      mako.log(e, op)
+      mako.log(e,op)
    end
    ba.seterrh(errorh)
 end

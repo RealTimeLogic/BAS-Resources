@@ -21,7 +21,7 @@ end
 local function checkStatus(self)
    local raw=self.raw
    if not self.statuscode then
-      local s,e1,e2,e3=raw:status()
+      local s,e1,e2,e3,ok=raw:status()
       if not s then return nil,e1,e2,e3 end
       if s == 301 or s == 302 or s == 303 or s == 307 then
 	 local r=0
@@ -51,7 +51,7 @@ local function checkStatus(self)
 	       return nil,s,op.url
 	    end
 	    op.method = s == 307 and method or "GET"
-	    local ok,e1,e2,e3=raw:request(op)
+	    ok,e1,e2,e3=raw:request(op)
 	    if not ok then return nil,e1,e2,e3 end
 	    s,e1,e2,e3=raw:status()
 	    if not s then return nil,e1,e2,e3 end
@@ -79,7 +79,7 @@ function H:cipher() return self.raw:cipher() end
 function H:trusted() return self.raw:trusted() end
 function H:sockname() return self.raw:sockname() end
 function H:peername() return self.raw:peername() end
-function H:status(size)
+function H:status()
    local ok,e1,e2,e3=checkStatus(self)
    if ok then return self.statuscode end
    return nil,e1,e2,e3
