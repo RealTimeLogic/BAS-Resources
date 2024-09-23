@@ -33,8 +33,8 @@ The Mako Server version uses a public secret, which you may consider encrypting 
   - Use the private key to sign both xedge.zip and mako.zip.
   - Signing ensures that the files have not been tampered with.
 9. **Embed the Public Key into Mako Server C Code**
-  - Embed the public key into the Mako Server's C code as instructed on the [Mako Server page](https://realtimelogic.com/ba/examples/MakoServer/readme.html#security).
-  - This allows the server to verify the signatures of the ZIP files at runtime.
+  - Embed the public key into the Mako Server's C code as instructed on the [Mako Server page](https://realtimelogic.com/ba/examples/MakoServer/readme.html#security). This allows the server to verify the signatures of the ZIP files at runtime.
+  - Compile the Mako Server C code
 
 
 
