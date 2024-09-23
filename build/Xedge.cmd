@@ -63,7 +63,6 @@ echo Using large CA certificate list (cacert.shark)
 del README.md
 del .preload
 del .gitignore
-del .lua\Xedge4Mako.lua
 
 if exist "..\..\..\lua-protobuf" (
    echo Including lua-protobuf and Sparkplug lib

@@ -1,3 +1,84 @@
+
+local secret="See https://github.com/RealTimeLogic/BAS-Resources/tree/main/src/xedge"
+
 -- .preload for the LSP Application Manager
-xinit,onunload=io:dofile(".lua/xedge.lua", _ENV)
-io:dofile(".lua/Xedge4Mako.lua", _ENV)
+local xinit,onunload=io:dofile(".lua/xedge.lua", _ENV)
+local symmetric=ba.crypto.symmetric
+
+local function cfgIo(key)
+   local log=xedge.log
+   -- Fetch Xedge Config (xc) from mako.conf
+   local xc = require"loadconf".xedge or {}
+   local cfgio = xc.ioname and ba.openio(xc.ioname) or ba.openio"home"
+   assert(cfgio)
+   local cfgname = xc.cfgname or "xcfg.bin"
+   local rw=require"rwfile"
+   local jencode,jdecode=ba.json.encode,ba.json.decode
+   local function rwCfgFile(cdata)
+      local ok,err
+      if not cdata then
+	 cdata,err=rw.file(cfgio,cfgname)
+	 log("Configuration file: %s: %s",
+	     cfgio:realpath(cfgname),cdata and "loaded" or err)
+	 return cdata
+      end
+      ok,err=rw.file(cfgio,cfgname,cdata)
+      if not ok then
+	 log("Cannot save %s: %s",cfgio:realpath(cfgname),err)
+      end
+      return ok
+   end
+   local function enc(cfg)
+      local iv=ba.rndbs(12)
+      local gcmEnc=symmetric("GCM",key,iv)
+      local cipher,tag=gcmEnc:encrypt(jencode(cfg),"PKCS7")
+      return iv..tag..cipher
+   end
+   local function dec(cdata)
+      local cfg
+      if cdata then
+	 local iv=cdata:sub(1,12)
+	 local tag=cdata:sub(13,28)
+	 local gcmDec=symmetric("GCM",key,iv)
+	 pcall(function() cfg=jdecode(gcmDec:decrypt(cdata:sub(29,-1),tag,"PKCS7")) end)
+	 if not cfg then tracep(false,1,"configuration file corrupt") end
+      end
+      return cfg
+   end
+   return function(cfg)
+      if cfg then
+	 rwCfgFile(enc(cfg))
+	 return
+      end
+      return dec(rwCfgFile())
+   end
+end
+
+local function deferred()
+   local rw=require"rwfile"
+   local log=xedge.log
+   -- Fetch Xedge Config (xc) from mako.conf
+   local xc = require"loadconf".xedge or {}
+   local cfgio = xc.ioname and ba.openio(xc.ioname) or ba.openio"home"
+   assert(cfgio)
+   local cfgname = xc.cfgname or "xcfg.bin"
+   if mako.tldir then
+      local t=mako.tldir
+      xedge.tldir=t
+      if t:configure().priority < 9 then t:configure{priority=9} end
+   else
+      local t=ba.create.tracelogger()
+      t:configure{priority=9}
+      xedge.tldir=t
+   end
+   xedge.tldir:unlink()
+   xinit(io,cfgIo(ba.crypto.hash("sha256")(ba.tpm.uniquekey(secret,64))(true)),mako.rtldir)
+   xinit=nil
+   if mako.udb and not xedge.authenticator then
+      xedge.appsd:setauth(ba.create.authenticator(mako.udb()))
+   end
+end
+dir:unlink()
+dir=nil
+mako.createloader(io)
+ba.thread.run(deferred)

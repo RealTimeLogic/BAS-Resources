@@ -57,8 +57,8 @@ The Barracuda App Server's resource files. See the [build directory](build/READM
         - sqlutil.lua
 
 - **xedge** - [Xedge](https://realtimelogic.com/ba/doc/?url=Xedge.html)'s client and server code
-    - .config
-    - .preload
+    - .config -- Xedge standalone
+    - .preload -- Xedge for Mako Server
     - index.html
     - README.md
     - .certificate
@@ -70,7 +70,6 @@ The Barracuda App Server's resource files. See the [build directory](build/READM
         - ms-sso.lua
         - rwfile.lua
         - xedge.lua
-        - Xedge4Mako.lua
     - assets
         - tree.css
         - tree.js
