@@ -430,12 +430,12 @@ function D.manual(email,domain,op)
    op.ch={set=setManual,remove=function(rspCB) rspCB(true) end}
    op.shark=httpOptions.shark
    ab.configure(email,{domain},op)
-   if op.auto then abp.autoupdate(true) end
+   abp.autoupdate(true, true)
    return true
 end
 
 
-function D.renew() checkM() return abp.renew() end
+function D.loadcert() return abp.loadcert() end
 function D.active() return active and (manualMode and "manual" or "auto") end
 function D.configure(op) return configure(op or {}, 4) end
 function D.token() return tryLoadTokengenModules() end
@@ -448,8 +448,11 @@ function D.cfgFileActivation()
       op.revcon=aT.challenge.revcon
       D.auto(aT.email,aT.domains[1],op)
    else
-      op.auto=true
-      D.manual(aT.email,aT.domains[1],op)
+      if abp.jfile"domains" then
+         D.loadcert()
+      else
+         D.manual(aT.email,aT.domains[1],op)
+      end
    end
 end
 

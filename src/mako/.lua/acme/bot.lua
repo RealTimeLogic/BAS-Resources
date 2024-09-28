@@ -119,10 +119,12 @@ loadcerts=function(domainsT)
    end
    if #keys > 0 then
       installcerts(keys,certs)
+      return true
    end
+   return false
 end
 
-loadcertsOnce=function(domainsT) loadcertsOnce=function() end loadcerts(domainsT) end
+loadcertsOnce=function(domainsT) loadcertsOnce=function() return false end return loadcerts(domainsT) end
 
 
 local function check(forceUpdate)
@@ -196,11 +198,11 @@ local function systemDateOK()
 end
 
 local timer
-local function autoupdate(activate)
+local function autoupdate(activate,force)
    if activate then
       systemDateOK()
       -- Thread not needed, we just want to defer 'check'
-      if jfile"domains" then ba.thread.run(check) end
+      if jfile"domains" then ba.thread.run(function() check(force) end) end
       -- Check activated, but signal that auto update already active */
       if timer then return false end
       timer=ba.timer(check)
@@ -212,14 +214,6 @@ local function autoupdate(activate)
    end
    loadcertsOnce()
    return true
-end
-
-local function forceRenew()
-   if timer then return nil,"autoupdate" end
-   if not jfile"domains" then return nil,"inactive" end
-   if acme.jobs() > 0 then return nil,"busy" end
-   status={}
-   return check(true)
 end
 
 local function revokeCert(domain, rspCB, op)
@@ -274,7 +268,7 @@ M={
       autoupdate=autoupdate,
       getcfg=getcfg,
       jfile=jfile,
-      renew=forceRenew,
+      loadcert=function() return loadcertsOnce() end,
       setRenewAllowed=function(func) renewAllowed=func end,
       error=function(msg) log.error("%s",msg) status={err=msg} end,
    },
