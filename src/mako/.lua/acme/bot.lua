@@ -30,7 +30,6 @@ local function jfile(name,tab)
 end
 local function cfile(name,cert)
    init()
-   name=fmt("cert/%s.pem",name)
    local ok,err=rw.file(hio,name,cert)
    if not ok and cert then log.error("Writing %s failed: %s",name,err) end
    return ok,err
@@ -60,7 +59,8 @@ local function getKeyCertNames(domain)
 end
 
 local function getCert(domain)
-   return cfile(domain..".key"),cfile(domain..".cert")
+   local kn,cn=getKeyCertNames(domain)
+   return cfile(kn),cfile(cn)
 end
 
 local function updateCert(domain,key,cert)
@@ -68,8 +68,9 @@ local function updateCert(domain,key,cert)
    domainsT[domain]=ba.parsecert(
 	 ba.b64decode(cert:match".-BEGIN.-\n%s*(.-)\n%s*%-%-")).tzto
    jfile("domains",domainsT)
-   cfile(domain..".key",key)
-   cfile(domain..".cert",cert)
+   local kn,cn=getKeyCertNames(domain)
+   cfile(kn,key)
+   cfile(cn,cert)
    loadcerts()
    return domainsT
 end
@@ -260,6 +261,10 @@ M={
 	     if clear then status.err=nil end
 	     return acme.jobs(), status.domain, e
 	  end,
+   hascert=function(domain)
+      local kn,cn=getKeyCertNames(domain)
+      return hio:stat(kn) and hio:stat(cn) and true or false
+   end,
    getCert=getCert,
    getproxy=getproxy,
    priv={ -- private: non documented: used by other acme modules

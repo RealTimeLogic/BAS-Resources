@@ -162,7 +162,7 @@ setManual=function(dnsRecord,dnsAuth,rspCB)
       D.status = function() return {record=dnsRecord,data=dnsAuth,msg=msg} end
       D.recordset=function() setManual() lock() rspCB(true) return true end
       lock(rspCB, setManual)
-      log.info("Set DNS TXT Record:\n"..msg)
+      log.log(0,"Set DNS TXT Record:\n"..msg)
       sendEmail(msg,dnsRecord,dnsAuth)
    else -- release
       -- call chain D.recordset() -> setManual OR
@@ -448,7 +448,9 @@ function D.cfgFileActivation()
       op.revcon=aT.challenge.revcon
       D.auto(aT.email,aT.domains[1],op)
    else
-      if abp.jfile"domains" then
+      local d=abp.jfile"domains"
+      local dn=d and next(d)
+      if dn and ab.hascert(dn) then
          D.loadcert()
       else
          D.manual(aT.email,aT.domains[1],op)

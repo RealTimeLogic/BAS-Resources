@@ -55,7 +55,7 @@ end
 local function createkey(kname,op)
    op=op or {}
    if tpm and "rsa" ~= op.key then
-      tpm.createkey(kname,op)
+      if not tpm.haskey(kname) then tpm.createkey(kname,op) end
       return jencode{keyname=kname,curve=op.curve}
    end
    return ba.create.key(op)
@@ -100,7 +100,7 @@ local function createAcmeHttp(op)
       local rsp=http:read"*a"
       if not ok then
 	 err=rsp or string.format("HTTP err: %d",status)
-	 errlog(url,err)
+	 return errlog(url,err)
       end
       if getraw then
 	 if ok then return rsp end
@@ -136,7 +136,7 @@ local function resumeCo(...)
       local job=jobQ[1]
       local ok,err=coroutine.resume(job.getCertCO,table.unpack(args))
       if not ok then
-	 errlog("",err)
+         respErr(err,job.rspCB)
       end
       if not ok or coroutine.status(job.getCertCO) == "dead" then
 	 table.remove(jobQ,1)
