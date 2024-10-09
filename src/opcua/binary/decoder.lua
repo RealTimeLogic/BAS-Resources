@@ -206,7 +206,6 @@ dec.char = dec.uint8
 dec.byte = dec.uint8
 dec.sbyte = dec.int8
 dec.statusCode = dec.uint32
-dec.charArray = dec.string
 dec.byteString = dec.string
 
 local nilFunc = function() end
@@ -226,10 +225,10 @@ function dec:localizedText()
   textSpecified = self:bit()
   self:bit(6)
   if localeSpecified ~= 0 then
-    locale = self:charArray()
+    locale = self:string()
   end
   if textSpecified ~= 0 then
-    text = self:charArray()
+    text = self:string()
   end
   return {
     Locale = locale,
@@ -396,10 +395,14 @@ function dec:variant(model)
   return v
 end
 
-function dec:extensionObject(model)
+function dec:extensionObject(decoder)
   local typeId = self:expandedNodeId()
-  local extObject = model and model.ExtObjects[typeId]
-  local dataTypeId = extObject and extObject.DataTypeId or typeId
+  local extObject, encF
+  if decoder then
+    extObject, encF = decoder:getExtObject(typeId)
+  end
+
+  local dataTypeId = extObject and extObject.dataTypeId or typeId
   local v = {
     TypeId = dataTypeId
   }
@@ -407,10 +410,9 @@ function dec:extensionObject(model)
   local binaryBody = self:bit()
   self:bit(7)
   if binaryBody ~= 0 then
-    local f = model and model.Encoder[dataTypeId]
-    if f then
+    if encF then
       self:uint32()
-      v.Body = model:Decode(dataTypeId)
+      v.Body = decoder:Decode(dataTypeId)
     else
       v.Body = self:byteString()
     end
@@ -437,9 +439,9 @@ end
 
 function dec:asymmetricSecurityHeader()
   return {
-    SecurityPolicyUri = self:charArray(),
-    SenderCertificate = self:charArray(),
-    ReceiverCertificateThumbprint = self:charArray()
+    SecurityPolicyUri = self:string(),
+    SenderCertificate = self:byteString(),
+    ReceiverCertificateThumbprint = self:byteString()
   }
 end
 
@@ -463,7 +465,7 @@ function dec:hello()
     SendBufferSize = self:uint32(),
     MaxMessageSize = self:uint32(),
     MaxChunkCount = self:uint32(),
-    EndpointUrl = self:charArray()
+    EndpointUrl = self:string()
   }
 end
 
@@ -480,7 +482,7 @@ end
 function dec:error()
   return {
     Error = self:uint32(),
-    Reason = self:charArray()
+    Reason = self:string()
   }
 end
 
@@ -520,7 +522,7 @@ function dec:diagnosticInfo()
     localizedText = self:int32()
   end
   if additionalInfoSpecified ~= 0 then
-    additionalInfo = self:charArray()
+    additionalInfo = self:string()
   end
   if innerStatusCodeSpecified ~= 0 then
     innerStatusCode = self:statusCode()
@@ -540,41 +542,20 @@ function dec:diagnosticInfo()
 end
 
 function dec:guid()
-  local data1
-  local data2
-  local data3
-  local data4
-  local data5
-  local data6
-  local data7
-  local data8
-  local data9
-  local data10
-  local data11
-  data1 = self:uint32()
-  data2 = self:uint16()
-  data3 = self:uint16()
-  data4 = self:byte()
-  data5 = self:byte()
-  data6 = self:byte()
-  data7 = self:byte()
-  data8 = self:byte()
-  data9 = self:byte()
-  data10 = self:byte()
-  data11 = self:byte()
-  return {
-    Data1 = data1,
-    Data2 = data2,
-    Data3 = data3,
-    Data4 = data4,
-    Data5 = data5,
-    Data6 = data6,
-    Data7 = data7,
-    Data8 = data8,
-    Data9 = data9,
-    Data10 = data10,
-    Data11 = data11,
-  }
+  local data1 = self:uint32()
+  local data2 = self:uint16()
+  local data3 = self:uint16()
+  local data4 = self:byte()
+  local data5 = self:byte()
+  local data6 = self:byte()
+  local data7 = self:byte()
+  local data8 = self:byte()
+  local data9 = self:byte()
+  local data10 = self:byte()
+  local data11 = self:byte()
+
+  return string.format("%08x-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+    data1, data2, data3, data4, data5, data6, data7, data8, data9, data10, data11)
 end
 
 function dec:xmlElement()
@@ -598,7 +579,7 @@ function dec:qualifiedName()
   local ns
   local name
   ns = self:uint16()
-  name = self:charArray()
+  name = self:string()
   return {
     ns = ns,
     Name = name,

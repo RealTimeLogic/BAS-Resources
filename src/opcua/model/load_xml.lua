@@ -1,4 +1,5 @@
 local types = require("opcua.types")
+local tools = require("opcua.binary.tools")
 
 local AttributeId = types.AttributeId
 local NodeClass = types.NodeClass
@@ -465,27 +466,15 @@ end
 -- Value Attribute Parser
 -------------------------------------------------------------
 
-local function hexs(s)
-  return tonumber(s, 16)
-end
+-- local function hexs(s)
+--   return tonumber(s, 16)
+-- end
 
 local function toguid(str)
-  local d1,d2,d3,d4,d5,d6,d7,d8,d9,d10,d11 =
-    string.match(str, "^(%x%x%x%x%x%x%x%x)-(%x%x%x%x)-(%x%x%x%x)-(%x%x)(%x%x)-(%x%x)(%x%x)(%x%x)(%x%x)(%x%x)(%x%x)$")
-  assert(d1 and d2 and d3 and d4 and d5 and d6 and d7 and d8 and d9 and d10 and d11)
-  return {
-    Data1=hexs(d1),
-    Data2=hexs(d2),
-    Data3=hexs(d3),
-    Data4=hexs(d4),
-    Data5=hexs(d5),
-    Data6=hexs(d6),
-    Data7=hexs(d7),
-    Data8=hexs(d8),
-    Data9=hexs(d9),
-    Data10=hexs(d10),
-    Data11=hexs(d11),
-  }
+  if not tools.guidValid(str) then
+    error("Invalid GUID: " .. str)
+  end
+  return str
 end
 
 local function toboolean(val)
