@@ -131,6 +131,10 @@ function S:setVariableSource(nodeId, callback)
   return self.services:setVariableSource(nodeId, callback)
 end
 
+function S:setWriteHook(nodeId, callback)
+  return self.services:setWriteHook(nodeId, callback)
+end
+
 function S.new(config, model)
   if not config then
     config = {

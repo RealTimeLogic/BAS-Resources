@@ -13,6 +13,10 @@ end
 
 local function checkSecurePolicies(config)
   local securePolicies = config.securePolicies
+  if securePolicies == nil then
+    return
+  end
+
   if type(securePolicies) ~= 'table' or #securePolicies == 0 then
     error("invalid securePolicies")
   end
@@ -277,20 +281,20 @@ end
 
 local function serverConfig(config)
   if config.endpoints == nil then
-    if config.endpointUrl == nil then
-      error("No endpointUrl")
-    end
-
-    config.endpoints = {
-      {
-        endpointUrl = config.endpointUrl,
-        listenPort = config.listenPort,
-        listenAddress = config.listenAddress
+    if config.endpointUrl ~= nil then
+      config.endpoints = {
+        {
+          endpointUrl = config.endpointUrl,
+          listenPort = config.listenPort,
+          listenAddress = config.listenAddress
+        }
       }
-    }
-    config.endpointUrl = nil
-    config.listenPort = nil
-    config.listenAddress = nil
+      config.endpointUrl = nil
+      config.listenPort = nil
+      config.listenAddress = nil
+    else
+      config.endpoints = {}
+    end
   end
 
   if type(config.endpoints) ~= "table" then

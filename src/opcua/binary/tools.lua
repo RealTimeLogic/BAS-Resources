@@ -177,24 +177,7 @@ function T.doubleValid(v)
 end
 
 function T.guidValid(v)
-  if type(v) == "string" then
-    local m = string.match(v, "^%x%x%x%x%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%x%x%x%x%x%x%x%x$")
-    return m == v
-  end
-
-  return
-  type(v) == 'table' and
-  T.uint32Valid(v.Data1) and
-  T.uint16Valid(v.Data2) and
-  T.uint16Valid(v.Data3) and
-  T.byteValid(v.Data4) and
-  T.byteValid(v.Data5) and
-  T.byteValid(v.Data6) and
-  T.byteValid(v.Data7) and
-  T.byteValid(v.Data8) and
-  T.byteValid(v.Data9) and
-  T.byteValid(v.Data10) and
-  T.byteValid(v.Data11)
+  return type(v) == "string" and string.match(v, "^%x%x%x%x%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%x%x%x%x%x%x%x%x$") ~= nil
 end
 
 function T.localizedTextValid(v)
@@ -534,6 +517,21 @@ function T.printTable(name, v, f, idents)
     end
     f(line..",")
   end
+end
+
+function T.copy(src)
+  local result
+  if type(src) == 'table' then
+    result = {}
+    for k,val in pairs(src) do
+      result[k] = T.copy(val)
+    end
+    return result
+  else
+    result = src
+  end
+
+  return result
 end
 
 

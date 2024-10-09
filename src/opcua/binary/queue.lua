@@ -96,7 +96,7 @@ local Q = {
       if (e + l) > cap then
         error(BadOutOfMemory)
       end
-      lbasetsize(self.Buf, s, e + #data)
+      lbasetsize(self.Buf, s, e + l)
       self.Buf[ix + 1] = data
       return
     end
@@ -212,9 +212,17 @@ end
 
 return {
   new = function (tailSize, hdrSize)
-    hdrSize = hdrSize or 0
-    local buf = lbacreate(hdrSize + tailSize)
-    lbasetsize(buf, hdrSize + 1, hdrSize)
+
+    local buf
+    if type(tailSize) == "userdata" then
+      buf = tailSize
+      hdrSize = 0
+    else
+      hdrSize = hdrSize or 0
+      buf = lbacreate(hdrSize + tailSize)
+      lbasetsize(buf, hdrSize + 1, hdrSize)
+    end
+
     local res = {
       Zero = hdrSize + 1,
       Buf = buf

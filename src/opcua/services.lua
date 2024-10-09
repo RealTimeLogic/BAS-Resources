@@ -815,7 +815,7 @@ function Svc:writeNode(val)
   local nodeId = val.NodeId
   local attributeId = val.AttributeId
   local value = val.Value
-  if dbgOn then traceD(fmt("Services:Write | searchin node '%s'", nodeId)) end
+  if dbgOn then traceD(fmt("Services:Write | searching node '%s'", nodeId)) end
   local n = self.nodeset:getNode(nodeId)
   if n == nil then
     if dbgOn then traceD(fmt("Services:Write | node '%s' not found", nodeId)) end
@@ -836,9 +836,9 @@ function Svc:writeNode(val)
     n.attrs[attributeId] = value.Value
   end
   self.nodeset:saveNode(n)
+  self:callWriteHook(nodeId, attributeId, value)
   if dbgOn then traceD(fmt("Services:Write | updated attribute '%d' of node '%s' ", attributeId, nodeId)) end
 end
-
 
 function Svc:write(req, channel)
   local errOn = self.trace.errOn
@@ -1209,6 +1209,36 @@ function Svc:setVariableSource(nodeId, func)
   if dbgOn then traceD(fmt("Source callback for nodeId '%s' was set", nodeId)) end
 end
 
+function Svc:setWriteHook(nodeId, func)
+  local dbgOn = self.trace.dbgOn
+  if dbgOn then traceD(fmt("Setting write hook for node '%s' attribute '%s'", nodeId)) end
+  if type(func) ~= 'function' then
+    error(BadInvalidArgument)
+  end
+
+  local nodeHooks = self.hooks[nodeId] or {}
+  nodeHooks.onWrite = func
+  self.hooks[nodeId] = nodeHooks
+  if dbgOn then traceD(fmt("Write hook for nodeId '%s' was set", nodeId)) end
+end
+
+function Svc:callWriteHook(nodeId, attributeId, value)
+  local hooks = self.hooks[nodeId]
+  if not (hooks and hooks.onWrite) then
+    return
+  end
+
+  local dbgOn = self.trace.dbgOn
+  local errOn = self.trace.errOn
+
+  if dbgOn then traceD(fmt("Services:Write | calling write hook for node '%s'", nodeId)) end
+  -- IMO failing of a hook should not be a fatal error
+  local ok, err = pcall(hooks.onWrite, nodeId, attributeId, t.copy(value))
+  if not ok and errOn then
+    traceE(fmt("Services:Write | write hook for node '%s' failed: %s", nodeId, err))
+  end
+end
+
 function Svc:getSession(req, channel)
   local dbgOn = self.trace.dbgOn
   local errOn = self.trace.errOn
@@ -1327,7 +1357,8 @@ local function newServices(config)
     endpointUrl = config.endpointUrl,
     trace = config.logging.services,
     config = config,
-    sessions = {}
+    sessions = {},
+    hooks = {},
   }
 
   setmetatable(svc, Svc)

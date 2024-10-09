@@ -43,9 +43,11 @@ t.SecurityPolicy = {
 }
 
 t.TranportProfileUri = {
-  TcpBinary = "http://opcfoundation.org/UA-Profile/Transport/uatcp-uasc-uabinary",
+  TcpBinary   = "http://opcfoundation.org/UA-Profile/Transport/uatcp-uasc-uabinary",
   HttpsBinary = "http://opcfoundation.org/UA-Profile/Transport/https-uabinary",
-  HttpsJson ="http://opcfoundation.org/UA-Profile/Transport/https-uajson"
+  HttpsJson   = "http://opcfoundation.org/UA-Profile/Transport/https-uajson",
+  MqttBinary  = "http://opcfoundation.org/UA-Profile/Transport/pubsub-mqtt-uadp",
+  MqttJson    = "http://opcfoundation.org/UA-Profile/Transport/pubsub-mqtt-json"
 }
 
 t.ServerProfile = {

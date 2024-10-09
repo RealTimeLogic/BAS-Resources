@@ -5,7 +5,6 @@ local function traceLog(level, msg)
   print(compat.gettime(), level, msg)
 end
 
-
 local function checkCommonAttributes(parentNodeId, browseName, displayName, newNodeId)
   if not tools.qualifiedNameValid(browseName) then
     error(0x80600000) -- BadBrowseNameInvalid
@@ -32,6 +31,7 @@ end
 local ua = {
   newServer = function(config, model) return require("opcua.server").new(config, model) end,
   newClient = function(config, model) return require("opcua.client").new(config, model) end,
+  newMqttClient = function(config, model) return require("opcua.pubsub.mqtt").newClient(config, model) end,
 
   Version = require("opcua.version"),
   StatusCode = require("opcua.status_codes"),
@@ -128,6 +128,7 @@ local ua = {
     checkCommonAttributes(parentNodeId, browseName, displayName, newNodeId)
 
     if not tools.dataValueValid(dataValue) then
+      debug()
       error(0x80620000) --BadNodeAttributesInvalid
     end
 
@@ -235,6 +236,20 @@ local ua = {
     }
 
     return params
+  end,
+
+  createGuid = function()
+    local n1 = ba.rnds(4) & 0xFFFF
+    local n2 = ba.rnds(4) & 0xFFFF
+    local n3 = ba.rnds(4) & 0xFFFF
+    local n4 = ba.rnds(4) & 0xFFFF
+    local n5 = ba.rnds(4) & 0xFFFF
+    local n6 = ba.rnds(4) & 0xFFFF
+    local n7 = ba.rnds(4) & 0xFFFF
+    -- print(n1,n2,n3,n4,n5,n6)
+    local guid <const> =  string.format("%0.8x-%0.4x-%0.4x-%0.4x-%0.4x%0.4x%0.4x",n1,n2,n3,n4,n5,n6,n7)
+    -- print(guid)
+    return guid
   end,
 
   debug = debug

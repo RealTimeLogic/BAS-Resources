@@ -25,7 +25,7 @@ function ch:hello()
   if infOn then traceI("binary | Receiving hello") end
 
   self.q.msgMode = false
-  local res = self.binaryDecoder:hello()
+  local res = self.Decoder:hello()
   if infOn then traceI("binary | Hello received") end
   return res
 end
@@ -35,7 +35,7 @@ function ch:acknowledge()
   if infOn then traceI("binary | Receiving acknowledge") end
 
   self.q.msgMode = false
-  local res = self.binaryDecoder:acknowledge()
+  local res = self.Decoder:acknowledge()
   if infOn then traceI("binary | Ackowledge received") end
   return res
 end
@@ -44,6 +44,7 @@ function ch:setBufferSize(size)
   local infOn = self.logging.infOn
   if infOn then traceI(fmt("binary | New buffer size %d", size)) end
   self.q.data = Q.new(size)
+  self.Decoder = self.Model:createBinaryDecoder(self.q)
 end
 
 function ch:message()
@@ -53,14 +54,14 @@ function ch:message()
   if infOn then traceI("binary | Receiving message") end
 
   self.q.msgMode = true
-  local i = self.binaryDecoder:nodeId()
+  local i = self.Decoder:nodeId()
   if infOn then traceI(fmt("binary | Received message ID '%s'", i)) end
 
   if dbgOn then traceD("binary | Decoding message body") end
   local msg = self.q.msg
-  local extObject = self.Model.ExtObjects[i]
-  msg.TypeId = extObject.DataTypeId
-  msg.Body = self.Model:Decode(msg.TypeId)
+  local extObject = self.Decoder:getExtObject(i)
+  msg.TypeId = extObject.dataTypeId
+  msg.Body = self.Decoder:Decode(msg.TypeId)
 
   if infOn then traceI("binary | Message decoded") end
   return msg
@@ -302,19 +303,14 @@ local function new(config, security, sock, hasChunks, model)
 
   setmetatable(coq, {__index=d})
 
-  local m = {
-    Deserializer = BinaryDecoder.new(coq)
-  }
-  setmetatable(m, {__index=model})
-
   local res = {
     config = config,
     logging = config.logging.binary,
 
     -- buffer for Chunk.
     q = coq,
-    Model = m,
-    binaryDecoder = m.Deserializer,
+    Model = model,
+    Decoder = model:createBinaryDecoder(coq),
   }
 
   setmetatable(res, ch)
