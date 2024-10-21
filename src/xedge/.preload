@@ -1,4 +1,3 @@
-
 local secret="See https://github.com/RealTimeLogic/BAS-Resources/tree/main/src/xedge"
 
 -- .preload for the LSP Application Manager
@@ -62,17 +61,16 @@ local function deferred()
    local cfgio = xc.ioname and ba.openio(xc.ioname) or ba.openio"home"
    assert(cfgio)
    local cfgname = xc.cfgname or "xcfg.bin"
+   local tldir
    if mako.tldir then
-      local t=mako.tldir
-      xedge.tldir=t
-      if t:configure().priority < 9 then t:configure{priority=9} end
+      tldir=mako.tldir
+      if tldir:configure().priority < 9 then tldir:configure{priority=9} end
    else
-      local t=ba.create.tracelogger()
-      t:configure{priority=9}
-      xedge.tldir=t
+      tldir=ba.create.tracelogger()
+      tldir:configure{priority=9}
    end
-   xedge.tldir:unlink()
-   xinit(io,cfgIo(ba.crypto.hash("sha256")(ba.tpm.uniquekey(secret,64))(true)),mako.rtldir)
+   tldir:unlink()
+   xinit(io,cfgIo(ba.crypto.hash("sha256")(ba.tpm.uniquekey(secret,64))(true)),tldir,mako.rtldir)
    xinit=nil
    if mako.udb and not xedge.authenticator then
       xedge.appsd:setauth(ba.create.authenticator(mako.udb()))

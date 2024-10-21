@@ -14,7 +14,7 @@ local ios,dio=ba.io(),ba.openio"disk"
 local noDiskCfg=false
 local loadPlugins -- funcs
 local gc=collectgarbage
-local sso,saveCfg
+local sso,saveCfg,rtld,tldir,dir404,insRtld
 
 local function log(fmt,...)
    local msg=sfmt("Xedge: "..fmt, ...)
@@ -245,7 +245,7 @@ do -- elog
    orgErrh=ba.seterrh(errorh) or function() end
    elogInit=function()
       local s
-      xedge.tldir:onclient(function(conns, sId)
+      tldir:onclient(function(conns, sId)
 	 if conns > 0 then
 	    tlConnected=true
 	    s=sId and ba.session(sId)
@@ -421,9 +421,14 @@ local function manageApp(name,isStartup) -- start/stop/restart
    local io,_,pn=fn2info(appc.url, true)
    if io then io,err=ba.mkio(io, pn) end
    if not io then
-      err=sendErr("Opening app '%s' (%s) failed: %s ",name,appc.url,err or "invalid URL")
-      appc.err=err
-      io=noopIO(appc)
+      io="$" == appc.url and ba.mkio(name)
+      if io then
+	 log("Loading embedded ZIP file %s",name)
+      else
+	 err=sendErr("Opening app '%s' (%s) failed: %s ",name,appc.url,err or "invalid URL")
+	 appc.err=err
+	 io=noopIO(appc)
+      end
    end
    if apps[name] then stopApp(name) end
    local env=setmetatable({io=io},{__index=G})
@@ -688,7 +693,7 @@ local function installOrSetAuth()
 	 xcfg.userdb={} -- reset
       elseif not sso then
 	 xedge.prd:unlink()
-	 if xedge.tldir then xedge.tldir:setauth() end
+	 tldir:setauth()
 	 xedge.appsd:setauth()
 	 log"Removing authenticator"
 	 xedge.authenticator=nil
@@ -713,7 +718,7 @@ local function installOrSetAuth()
    dir:setauth(auth,az)
    xedge.rtld:insertprolog(dir)
    xedge.prd=dir
-   if xedge.tldir then xedge.tldir:setauth(auth,az) end
+   tldir:setauth(auth,az)
    xedge.appsd:setauth(auth,az)
    return true
 end
@@ -758,7 +763,8 @@ function xedge.ssoSetSecret(secret)
    end
 end
 
-local function xinit(aio,rwCfgFile,rtld)
+local function xinit(aio,rwCfgFile,_tldir,_rtld)
+   tldir=_tldir
    saveCfg = rwCfgFile and function() rwCfgFile(xcfg) end or function() end
    local cfg=rwCfgFile and rwCfgFile() or {apps={}}
    ios=ba.io()
@@ -772,24 +778,26 @@ local function xinit(aio,rwCfgFile,rtld)
       t[name]=xio or io
    end
    ios=t
-   -- rtld set if mako
-   local resrdr=ba.create.resrdr(not rtld and "rtl" or nil,0,aio)
+   local resrdr=ba.create.resrdr(not _rtld and "rtl" or nil,0,aio)
    setSecH(resrdr)
    resrdr:lspfilter{io=aio}
-   if rtld then
-      rtld:insert(resrdr,true) -- Mako
-   else
-      resrdr:insert() -- Xedge standalone
-      rtld=resrdr
+   rtld=_rtld or resrdr
+   insRtld=function()
+      if _rtld then
+	 rtld:insert(resrdr,true) -- Mako
+      else
+	 rtld:insert() -- Xedge standalone
+      end
    end
-   xedge.rtld=rtld
+   insRtld()
    xcfg.revcon=cfg.revcon
    xcfg.smtp=cfg.smtp
    xcfg.openid=cfg.openid
    if "table" == type(cfg.elog) then  xcfg.elog=cfg.elog end
    smtp=xcfg.smtp
    ssoInit()
-   if xedge.tldir then rtld:insert(xedge.tldir,true) elogInit() end
+   rtld:insert(tldir)
+   elogInit()
    local lockDir -- Scan and look for writable DAV lock dir.
    for name,io in pairs(ios) do
       if io:stat".LOCK" or io:mkdir".LOCK" then
@@ -805,15 +813,14 @@ local function xinit(aio,rwCfgFile,rtld)
 
    -- The default 404 handler
    local davm={PROPFIND=true,OPTIONS=true}
-   local dir=ba.create.dir(nil,-127)
-   dir:setfunc(function(_ENV)
+   dir404=ba.create.dir(nil,-127)
+   dir404:setfunc(function(_ENV)
       if davm[request:method()] then return false end
       response:setstatus(404)
       local fp <close> =aio:open".lua/404.html"
       response:write(fp:read"*a")
    end)
-   dir:insert()
-   xedge.dir404=dir
+   dir404:insert()
    if dio or rwCfgFile then
       ba.thread.run(function() appsInit(cfg) installAuth() end)
       if dio then startAcmeDns() end
@@ -1221,6 +1228,19 @@ end
 function xedge.getappcfg(name)
    return doUpgradeOrCfg(name,nil,true)
 end
+
+function xedge.ui(enable)
+   if enable then
+      rtld:insert(tldir)
+      dir404:insert()
+      insRtld()
+   else
+      rtld:unlink()
+      dir404:unlink()
+      tldir:unlink()
+   end
+end
+
 
 -- Used by command.lsp
 function xedge.command(cmd)
