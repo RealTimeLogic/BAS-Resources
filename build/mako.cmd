@@ -50,7 +50,7 @@ if /i "%userResponse%"=="y" (
     )
 )
 
-echo Create zip file
+echo Creating the zip file
 zip -D -q -u -r -9 ../mako.zip .
 cd ..
 echo Done

@@ -91,7 +91,7 @@ goto ContinueAfterMinify
 echo Minification skipped.
 
 :ContinueAfterMinify
-echo Create zip file
+echo Creating the zip file
 zip -D -q -u -r -9 ../Xedge.zip .
 cd ..
 IF NOT DEFINED NO_BIN2C (

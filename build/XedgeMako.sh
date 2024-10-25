@@ -29,5 +29,6 @@ if [ "$userResponse" = "y" ]; then
    fi
 fi
 
+echo "Creating the zip file"
 zip -D -q -u -r -9 ../Xedge.zip .
 cd ..
