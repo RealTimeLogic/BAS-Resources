@@ -373,24 +373,44 @@ end
 
 
 function D.isreg(cb)
-   local ok,err=autoconf(2)
-   if not ok then return nil,-1,err end
-   local function action() cb(isreg()) end
-   if type(cb) ~= "function" then
-      local status,wan,sockn,email,key
-      cb=function(st,w,sn,e,k) status,wan,sockn,email,key=st,w,sn,e,k end
-      action()
-      return status,wan,sockn,email,key
+   if type(cb) ~= "function" then cb=nil end
+   local m = tryLoadTokengenModules()
+   if not m then error("Zone key not set") end
+   local function run()
+      local ok,err=autoconf(2)
+      if not ok then
+	 if cb then cb(nil,-1,err) end
+	 return nil,-1,err
+      end
+      if not cb then
+	 local status,wan,sockn,email,key
+	 cb=function(st,w,sn,e,k) status,wan,sockn,email,key=st,w,sn,e,k end
+	 cb(isreg())
+	 return status,wan,sockn,email,key
+      end
+      cb(isreg())
    end
-   ba.thread.run(action)
+   local function testCon()
+      local s <close> = ba.socket.connect(m.info(),443)
+      if s then
+	 run()
+      else
+	 ba.timer(function() ba.thread.run(testCon) end):set(30000,true)
+      end
+   end
+   if cb then ba.thread.run(testCon) else return run() end
 end
 
 
 function D.available(domain,cb)
+   if type(cb) ~= "function" then cb=nil end
    local ok,err=autoconf(2)
-   if not ok then return nil,err end
+   if not ok then
+      if cb then cb(nil,err) end
+      return nil,err
+   end
    local function action() cb(available(domain)) end
-   if type(cb) ~= "function" then
+   if not cb then
       local status,wan,sockn
       cb=function(st,w,sn) status,wan,sockn=st,w,sn end
       action()
@@ -400,8 +420,7 @@ function D.available(domain,cb)
 end
 
 function D.auto(email,domain,op)
-   local ok,err=autoconf(2)
-   if not ok then return nil,err end
+   local reactivate=false
    if not domain then
       if type(email) == "table" and not op then op=email end
       email=ab.getemail()
@@ -410,17 +429,28 @@ function D.auto(email,domain,op)
 	 return nil,"not previously activated"
       end
       op.acceptterms=true
+      reactivate=true
    end
    if not op.revcon then closeRevcon() end
    if type(op) ~= "table" or op.acceptterms ~= true then
       error("'acceptterms' not set",2)
    end
    assert(type(email) == "string")
+   if active then return email end
    manualMode,active=false,true
-   abp.autoupdate(false)
-   lock(nil,nil,true) -- release
-   ba.thread.run(function() auto(email,domain,op) end)
-   return email,domain
+   local function run()
+      abp.autoupdate(false)
+      lock(nil,nil,true) -- release
+      ba.thread.run(function() auto(email,domain,op) end)
+   end
+   if reactivate then
+      D.isreg(function(name) if name then run() end end)
+   else
+      local ok,err=autoconf(2)
+      if not ok then return nil,err end
+      run()
+   end
+   return email
 end
 
 function D.manual(email,domain,op)
@@ -433,7 +463,6 @@ function D.manual(email,domain,op)
    abp.autoupdate(true, true)
    return true
 end
-
 
 function D.loadcert() return abp.loadcert() end
 function D.active() return active and (manualMode and "manual" or "auto") end
@@ -451,9 +480,9 @@ function D.cfgFileActivation()
       local d=abp.jfile"domains"
       local dn=d and next(d)
       if dn and ab.hascert(dn) then
-         D.loadcert()
+	 D.loadcert()
       else
-         D.manual(aT.email,aT.domains[1],op)
+	 D.manual(aT.email,aT.domains[1],op)
       end
    end
 end

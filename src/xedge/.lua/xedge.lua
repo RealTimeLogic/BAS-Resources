@@ -33,7 +33,8 @@ G.xedge=xedge
 local apps={}
 local appsCfg=xcfg.apps
 local rw=require"rwfile"
-pcall(function() xedge.portal=require"acme/dns".token().info() end)
+local function adns() return require"acme/dns" end
+pcall(function() xedge.portal=adns().token().info() end)
 
 local fakeTime=(function()
    local _,_,date=ba.version()
@@ -267,7 +268,7 @@ end -- elog
 do
    local ev=require"EventEmitter".create()
    ev.reporterr=function(event,cb,err) sendErr("Event CB err: %s %s %s",event,tostring(cb),err) end
-   ev:on("sntp",function() startAcmeDns(true) end)
+   if dio then ev:on("sntp",function() startAcmeDns() end) end
    function xedge.event(event,cb,remove)
       assert("string" == type(event))
       if remove then return ev:removeListener(event,cb) end
@@ -660,24 +661,14 @@ xedge.lio=lio
 -- End virtual file system
 ----------------------------------------------------------------
 
-startAcmeDns=function(warn)
-   local portal=xedge.portal
-   assert(portal,"ACME security module not intalled")
-   local s <close> = ba.socket.connect(portal,443)
-   if s then
-      if (os.time()+86400) < xedge.compileTime then
-	 if warn then xedge.log"System time is in the past!" end
-      else
-	 local ad=require"acme/dns"
-	 ad.isreg(function(name)
-	    if name then
-	       local ok=ad.auto{production=production,revcon=xcfg.revcon}
-	       if ok then startAcmeDns=function() end end
-	    end
-	 end)
-      end
-   else
-      sendErr("Cannot connect to portal %s",portal)
+startAcmeDns=function()
+   startAcmeDns=function() end
+   if not xedge.portal then return end
+   local ad=adns()
+   local k=ad.loadcert()
+   k=k and k[1]
+   if k and k:find(xedge.portal,1,true) then
+      ad.auto{production=production,revcon=xcfg.revcon}
    end
 end
 
@@ -823,17 +814,16 @@ local function xinit(aio,rwCfgFile,_tldir,_rtld)
    dir404:insert()
    if dio or rwCfgFile then
       ba.thread.run(function() appsInit(cfg) installAuth() end)
-      if dio then startAcmeDns() end
+      if dio and (os.time()+86400) > xedge.compileTime then startAcmeDns() end
    else
       noDiskCfg=true
    end
    loadPlugins()
 end
 
-local adns=require"acme/dns"
 local acmeCmd={
    isreg=function(cmd)
-      local status,wan,sockname,email=adns.isreg()
+      local status,wan,sockname,email=adns().isreg()
       cmd:json{
 	 ok=true,
 	 isreg=status and true or false,
@@ -841,12 +831,12 @@ local acmeCmd={
 	 sockname=sockname,
 	 name=status and status:match"^[^%.]+",
 	 email=email,
-	 portal=xedge.portal,
+	 portal=xedge.portal or "",
 	 revcon=xcfg.revcon and true or false
       }
    end,
    available=function(cmd,data)
-      cmd:json{ok=true, available=adns.available(data.name)}
+      cmd:json{ok=true, available=adns().available(data.name)}
    end,
    auto=function(cmd,data)
       xcfg.revcon = xcfg.revcon or false -- not nil
@@ -855,17 +845,21 @@ local acmeCmd={
       if data.email and data.name then
 	 xcfg.revcon=revcon
 	 saveCfg()
-	 local name=adns.isreg()
+	 local name=adns().isreg()
 	 if name then data.name=name:match"^[^%.]+" end
-	 adns.auto(data.email, data.name, op)
+	 adns().auto(data.email, data.name, op)
       elseif xcfg.revcon ~= revcon then
 	 xcfg.revcon=revcon
-	 adns.auto(op)
 	 saveCfg()
       end
       cmd:json{ok=true}
    end
 }
+
+function xedge.revcon(enable)
+   xcfg.revcon=enable and true or false
+   saveCfg()
+end
 
 function xedge.ha1(name,pwd,realm)
    return ba.crypto.hash"md5"(name)":"(realm or authRealm)":"(pwd)(true,"hex")

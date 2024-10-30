@@ -97,7 +97,7 @@ local function renew(accountT,domain,accepted)
    acme.cert(accountT,domain,rspCB,optionT)
 end
 
-local function renOnNotFund(domain, force)
+local function renOnNotFound(domain, force)
    if renewAllowed(domain) or force then
       renew(jfile"account",domain, true)
    end
@@ -114,18 +114,22 @@ loadcerts=function(domainsT)
 	    table.insert(certs,c)
 	 else
 	    log.error("%s not found, recreating...",hio:stat(k) and c or k)
-	    ba.thread.run(function() renOnNotFund(domain, true) end)
+	    ba.thread.run(function() renOnNotFound(domain, true) end)
 	 end
       end
    end
    if #keys > 0 then
       installcerts(keys,certs)
-      return true
+      return keys,certs
    end
    return false
 end
 
-loadcertsOnce=function(domainsT) loadcertsOnce=function() return false end return loadcerts(domainsT) end
+loadcertsOnce=function(domainsT)
+   local k,c=loadcerts(domainsT)
+   if k then loadcertsOnce=function() return false end return end
+   return k,c
+end
 
 
 local function check(forceUpdate)
@@ -193,9 +197,9 @@ local function systemDateOK()
       end
       acme.checkCert(false)
       return false
-   else
-      acme.checkCert(true)
    end
+   acme.checkCert(true)
+   return true
 end
 
 local timer
