@@ -51,7 +51,7 @@ end
 
 local function setSecH(dir)
    dir:header{
-      ["Content-Security-Policy"] = "default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com https://unpkg.com 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://unpkg.com; img-src 'self' data:; media-src 'self' https://simplemq.com; font-src 'self' https://unpkg.com",
+      ["Content-Security-Policy"] = "default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com https://unpkg.com 'unsafe-inline' blob:; style-src 'self' 'unsafe-inline' https://unpkg.com; img-src 'self' data:; media-src 'self' https://simplemq.com; font-src 'self' https://unpkg.com; worker-src 'self' blob:",
       ["x-content-type"]="nosniff",
    }
 end
