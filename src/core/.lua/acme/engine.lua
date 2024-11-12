@@ -6,7 +6,7 @@ local dURL={ -- ACME service's directory (discover) URL
 
  -- getCert queue: list of {account=obj,rspCB=func,op=obj,getCertCO=coroutine}
 local jobQ,jobs={},0
-local tpm -- Trusted Platform Module API
+local tpm,te -- Trusted Platform Module API, TPM enabled
 local jwt=require"jwt"
 
 local slower=string.lower
@@ -31,7 +31,7 @@ local function respErr(err,rspCB)
 end
 
 local function useTPM(key,keyname)
-   if tpm then
+   if te then
       local op=jdecode(key)
       if op then
 	 if not tpm.haskey(keyname) then tpm.createkey(keyname,op) end
@@ -54,7 +54,7 @@ end
 
 local function createkey(kname,op)
    op=op or {}
-   if tpm and "rsa" ~= op.key then
+   if te and "rsa" ~= op.key then
       if not tpm.haskey(kname) then tpm.createkey(kname,op) end
       return jencode{keyname=kname,curve=op.curve}
    end
@@ -136,7 +136,7 @@ local function resumeCo(...)
       local job=jobQ[1]
       local ok,err=coroutine.resume(job.getCertCO,table.unpack(args))
       if not ok then
-         respErr(err,job.rspCB)
+	 respErr(err,job.rspCB)
       end
       if not ok or coroutine.status(job.getCertCO) == "dead" then
 	 table.remove(jobQ,1)
@@ -375,7 +375,12 @@ end
 
 local M
 M={
-   setTPM=function(t) tpm=t M.setTPM=nil end,
+   tpm=function(en)
+      assert(tpm,"not enabled")
+      if "boolean"==type(en) then te=en end
+      return te
+   end,
+   setTPM=function(t) tpm=t te=true M.setTPM=nil end,
    terms=terms,
    cert=getCert,
    jobs=function() return jobs end,
