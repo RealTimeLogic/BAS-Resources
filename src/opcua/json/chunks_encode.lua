@@ -1,6 +1,5 @@
 local ua = require("opcua.api")
 local Q = require("opcua.binary.queue")
-local JsonEncoder = require("opcua.json.encoder")
 
 local fmt = string.format
 local traceD = ua.trace.dbg
@@ -56,7 +55,7 @@ end
 function ch:message(body)
   local dbgOn = self.logging.dbgOn
   local infOn = self.logging.infOn
-  if dbgOn then traceD(fmt("json | encoding message")) end
+  if infOn then traceD(fmt("json | encoding message")) end
 
   local msg = {
     TypeId = body.TypeId,
@@ -64,11 +63,13 @@ function ch:message(body)
   }
 
   self.data:clear()
-  self.Model:EncodeExtensionObject(msg)
+  self.Encoder:extensionObject(msg)
+
+  if dbgOn then traceD(fmt("json | encoded data: %s", self.data.Buf)) end
 
   self.sock:send(self.data.Buf)
 
-  if infOn then traceI(fmt("json | message '%s' sent", body.TypeId)) end
+  if infOn then traceI(fmt("json | messageId '%s' sent", body.TypeId)) end
 end
 
 function ch.sequenceHeader()
@@ -78,9 +79,7 @@ function ch:setBufferSize(size)
   local infOn = self.logging.infOn
   if infOn then traceI(fmt("json | New buffer size '%d'",size)) end
   self.data = Q.new(size)
-  self.JsonEncoder = JsonEncoder.new(self.data)
-  self.Model.encoding = "jsonId"
-  self.Model.Serializer = self.JsonEncoder
+  self.Encoder = self.Model:createJsonEncoder(self.data)
 end
 
 function ch.setChannelId()
