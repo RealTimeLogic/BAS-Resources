@@ -6,7 +6,7 @@
 
 - Xedge.cmd - Build Xedge (Windows)
 - Xedge.sh - Build Xedge (Linux)
-- XedgeMako.cmd - Build the Xedge Mako Server app
+- XedgeMako.cmd/XedgeMako.sh - Build the Xedge Mako Server app
 
 
 ## Build Script Options
