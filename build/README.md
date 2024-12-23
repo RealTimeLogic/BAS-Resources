@@ -8,10 +8,30 @@
 - Xedge.sh - Build Xedge (Linux)
 - XedgeMako.cmd/XedgeMako.sh - Build the Xedge Mako Server app
 
+## Required and Optional Tools
+
+The following is a list of required and optional tools the build
+scripts use. Make sure the following tools are available in your
+system's PATH.
+
+- **zip:** Required for the build scripts to package resources into a
+  zip file.
+- **bin2c:** The
+  [bin2c tool](https://realtimelogic.com/downloads/bin2c/) converts
+  the zip file into a C array, which is necessary for building the
+  Xedge resource files. Executables for Windows and 64-bit Linux are
+  included in the repository. To compile from source, use: gcc -o
+  bin2c [BAS](https://github.com/RealTimeLogic/BAS)/tools/bin2c.c
+- **Node.js and npm (optional):** The build scripts can use these
+  tools to compress some resources, making the produced zip file
+  smaller.
+
 
 ## Build Script Options
 
-You will be prompted to select several options when you run the build scripts. Below is a detailed explanation of each option to help you make an informed decision.
+You will be prompted to select several options when you run the build
+scripts. Below is a detailed explanation of each option to help you
+make an informed decision.
 
 ---
 
@@ -56,4 +76,4 @@ You will be prompted to select several options when you run the build scripts. B
 
 ### Notes
 - Refer to the build script source for advanced customization to tweak configurations further.
-- Ensure you meet all dependencies (like Node.js for minification) before running the scripts.
+- Ensure you meet all dependencies (like **zip**) before running the scripts.
