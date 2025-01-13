@@ -225,6 +225,11 @@ local function createHttp()
    return nil,s,e
 end
 
+local function setip(addr,hT,http,err)
+   hT["X-IpAddress"]=addr
+   if http then return http("SetIpAddress",hT,true) end
+end
+
 local function register(http,ip,subdom,info)
    local hT={["X-IpAddress"]=ip,["X-Name"]=subdom,["X-Info"]=info}
    hT=http("Register", hT)
@@ -316,8 +321,7 @@ local function auto(email,domain,op)
       local hT={["X-Dev"]=kT.key}
       if http("IsRegistered",hT,true) then
 	 rt.setDKey(kT.key)
-	 hT["X-IpAddress"]=sockn
-	 local rspHT=http("SetIpAddress",hT,true)
+	 local rspHT=setip(sockn,hT,http)
 	 if rspHT then
 	    local regname=rspHT['X-Name']
 	    local curname = next(abp.jfile"domains" or {}) or ""
@@ -468,6 +472,20 @@ function D.loadcert() return abp.loadcert() end
 function D.active() return active and (manualMode and "manual" or "auto") end
 function D.configure(op) return configure(op or {}, 4) end
 function D.token() return tryLoadTokengenModules() end
+function D.setip(addr)
+   if not active then return false end
+   local kT=abp.jfile"devkey"
+   if kT and kT.key then
+      local hT={["X-Dev"]=kT.key}
+      ba.thread.run(function()
+	 if not setip(addr,hT,createHttp()) then
+	    ba.timer(function() D.setip(addr) end):set(60000,true)
+	 end
+      end)
+      return true
+   end
+   return nil,"no devkey"
+end
 
 -- Called by .config if acme options
 function D.cfgFileActivation()

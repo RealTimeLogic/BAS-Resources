@@ -127,7 +127,7 @@ end
 
 loadcertsOnce=function(domainsT)
    local k,c=loadcerts(domainsT)
-   if k then loadcertsOnce=function() return false end return end
+   if k then loadcertsOnce=function() return false end end
    return k,c
 end
 
