@@ -707,7 +707,7 @@ local function installOrSetAuth()
    log"Installing authenticator"
    local dir=ba.create.dir("private",127)
    dir:setauth(auth,az)
-   xedge.rtld:insertprolog(dir)
+   rtld:insertprolog(dir)
    xedge.prd=dir
    tldir:setauth(auth,az)
    xedge.appsd:setauth(auth,az)
