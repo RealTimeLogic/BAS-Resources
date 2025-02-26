@@ -346,10 +346,12 @@ let editors={};
 let lastEditorId=false; // the last selected editor tab
 
 const ext2Lang={ // File extension to source code langauge
-    xlua: "lua",
-    preload: "lua",
-    config: "lua",
-    lsp: "lsp",
+  xlua:"lua",
+  preload:"lua",
+  config:"lua",
+  lsp:"lsp",
+  js:"javascript",
+  json:"javascript"
 };
 
 
@@ -584,13 +586,16 @@ const fsBase="/rtl/apps/";
 
 // file extentions known to be text files
 const okFileExt={
-    appcfg:true,
-    conf:true,
-    config:true,
-    preload:true,
-    xlua:true,
-    lua:true,
-    lsp:true
+  appcfg:true,
+  conf:true,
+  config:true,
+  preload:true,
+  xlua:true,
+  lua:true,
+  lsp:true,
+  json:true,
+  js:true,
+  xml:true
 };
 let notOkFileExt={};
 

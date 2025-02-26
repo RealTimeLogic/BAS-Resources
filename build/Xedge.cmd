@@ -73,6 +73,15 @@ if exist "..\..\..\lua-protobuf" (
    echo ..\..\..\lua-protobuf not found; Not Including lua-protobuf and Sparkplug
 )
 
+if exist "..\..\..\CBOR" (
+   echo Including CBOR 'cbor_s.lua'
+   mkdir .lua\org\conman
+   copy ..\..\..\CBOR\cbor_s.lua .lua\org\conman > nul || exit /b 7
+) else (
+   echo ..\..\..\CBOR not found; Not Including CBOR
+)
+
+
 choice /C YN /M "Do you want to minify the JS and CSS files (requires Node and npm) (y/n)? "
 if errorlevel 2 goto NoMinify
 if errorlevel 1 goto YesMinify

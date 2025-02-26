@@ -444,7 +444,6 @@ local function manageApp(name,isStartup) -- start/stop/restart
 	 else
 	    dir=ba.create.resrdr(#dn > 0 and dn or nil,appc.priority or 0,io)
 	 end
-	 setSecH(dir)
 	 env.dir=dir
 	 dir:setfunc(function(_ENV,n)
 	    if n:find"%.x?lua$" then
@@ -769,7 +768,7 @@ local function xinit(aio,rwCfgFile,_tldir,_rtld)
       t[name]=xio or io
    end
    ios=t
-   local resrdr=ba.create.resrdr(not _rtld and "rtl" or nil,0,aio)
+   local resrdr=ba.create.resrdr(not _rtld and "rtl" or nil,127,aio)
    setSecH(resrdr)
    resrdr:lspfilter{io=aio}
    rtld=_rtld or resrdr
