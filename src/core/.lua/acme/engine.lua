@@ -41,8 +41,14 @@ local function useTPM(key,keyname)
    return false
 end
 
-local function jwtsign(key,payload,header)
-   return useTPM(key,"$account") and tpm.jwtsign("$account",payload,header) or jwt.sign(key,payload,header)
+local function jwtsign(key,payload,op)
+   local _,t
+   if useTPM(key,"$account") then
+      _,t=tpm.jwtsign(payload,"$account",op)
+   else
+      _,t=jwt.sign(payload,key,op)
+   end
+   return t
 end
 
 local function keyparams(key)

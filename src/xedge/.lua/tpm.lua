@@ -25,7 +25,7 @@ return function(gpkey,upkey)
       if not key then error(sfmt("ECC key %s not found",tostring(kname)),3) end
       return key
    end
-   local function tpmJwtsign(kname,...) return jwtsign(tpmGetKey(kname),...) end
+   local function tpmJwtsign(p,kname,op) return jwtsign(p,tpmGetKey(kname),op) end
    local function tpmKeyparams(kname) return keyparams(tpmGetKey(kname)) end
    local function tpmCreatecsr(kname,...) return createcsr(tpmGetKey(kname),...) end
    local function tpmCreatekey(kname,op)

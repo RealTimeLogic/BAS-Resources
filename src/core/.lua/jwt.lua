@@ -14,7 +14,7 @@ local function sign(payload, secret, options)
    if options.kid then options.kid = tostring(options.kid) end
    local signature, err
    local header = table2B64(options)
-   payload = type(payload) == "table" and table2B64(payload) or b64enc(payload)
+   payload = type(payload) == "table" and table2B64(payload) or payload
    local data = header .. "." .. payload
    local alg,htype=options.alg:sub(1,2),options.alg:sub(3)
    if "HS" == alg then
@@ -35,7 +35,7 @@ local function sign(payload, secret, options)
       return nil,"Unsupported algorithm"
    end
    return header .. "." .. payload .. "." .. signature, {
-      header = header,
+      protected = header,
       payload = payload,
       signature = signature
    }

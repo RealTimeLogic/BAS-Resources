@@ -78,6 +78,10 @@ end
 
 local function renew(accountT,domain,accepted)
    status.err=nil
+   if not accountT then
+      log.error"Renew failed! No account"
+      return
+   end
    local function rspCB(key,cert)
       status={domain=domain}
       if key then
