@@ -59,12 +59,18 @@ else
     echo "../../../lua-protobuf not found; Not Including lua-protobuf and Sparkplug"
 fi
 
-if [ -d "../../../CBOR" ]; then
-   echo "Including CBOR 'cbor_s.lua'"
-   mkdir -p .lua/org/conman
-   cp ../../../CBOR/cbor_s.lua .lua/org/conman || exit 1
+if [ -d "../../../LPeg" ]; then
+    echo "Including LPeg"
+    cp ../../../LPeg/re.lua .lua/ || exit 1
+    if [ -d "../../../CBOR" ]; then
+        echo "Including CBOR 'cbor_s.lua'"
+        mkdir -p .lua/org/conman
+        cp ../../../CBOR/cbor_s.lua .lua/org/conman || exit 1
+    else
+        echo "../../../CBOR not found; Not Including CBOR"
+    fi
 else
-    echo "../../../CBOR not found; Not Including CBOR"
+    echo "../../../LPeg not found; Not Including LPeg"
 fi
 
 read -p "Do you want to minify the JS and CSS files (requires Node and npm) (y/n)? "  userResponse

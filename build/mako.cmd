@@ -32,17 +32,16 @@ if exist "..\..\..\lua-protobuf" (
    echo ..\..\..\lua-protobuf not found; Not Including lua-protobuf and Sparkplug
 )
 
-if exist "..\..\..\CBOR" (
-   echo Including CBOR 'cbor_s.lua'
-   mkdir .lua\org\conman
-   copy ..\..\..\CBOR\cbor_s.lua .lua\org\conman > nul || exit /b 7
-) else (
-   echo ..\..\..\CBOR not found; Not Including CBOR
-)
-
 if exist "..\..\..\LPeg" (
    echo Including LPeg
    copy ..\..\..\LPeg\re.lua .lua > nul || exit /b 10
+   if exist "..\..\..\CBOR" (
+      echo Including CBOR 'cbor_s.lua'
+      mkdir .lua\org\conman
+      copy ..\..\..\CBOR\cbor_s.lua .lua\org\conman > nul || exit /b 7
+   ) else (
+       echo ..\..\..\CBOR not found; Not Including CBOR
+   )
 ) else (
    echo ..\..\..\LPeg not found; Not Including LPeg
 )
