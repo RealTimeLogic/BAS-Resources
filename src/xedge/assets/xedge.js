@@ -350,6 +350,8 @@ const ext2Lang={ // File extension to source code langauge
   preload:"lua",
   config:"lua",
   lsp:"lsp",
+  html:"html",
+  htm:"html",
   js:"javascript",
   json:"javascript"
 };
@@ -593,6 +595,8 @@ const okFileExt={
   xlua:true,
   lua:true,
   lsp:true,
+  htm:true,
+  html:true,
   json:true,
   js:true,
   xml:true
