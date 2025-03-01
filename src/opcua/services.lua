@@ -348,7 +348,7 @@ function Svc:activateSession(req, channel)
   end
 
   if infOn then
-    traceI(fmt("Services:activateSession(%s) | Token policy id: '%s', encryption algorithm: '%s'",
+    traceI(fmt("Services:activateSession(%s) | Token policy id: '%s', encryption algorith: '%s'",
       sessionId, token.Body.PolicyId, token.Body.EncryptionAlgorithm))
   end
 
@@ -358,10 +358,6 @@ function Svc:activateSession(req, channel)
   end
 
   if token.Body.EncryptionAlgorithm then
-    if infOn then
-      traceI(fmt("Services:activateSession(%s) | Decrypting user token with security policy '%s'",
-        sessionId, tokenPolicy.securityPolicyUri))
-    end
     encryption = securePolicy(self.config)
     authPolicy = encryption(tokenPolicy.securityPolicyUri)
     if authPolicy.aEncryptionAlgorithm ~= token.Body.EncryptionAlgorithm then

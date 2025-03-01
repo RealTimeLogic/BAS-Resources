@@ -272,8 +272,11 @@ function T.diagnosticInfoValid(v)
   return true
 end
 
-local function variantDataValid(data, f)
+local function variantDataValid(data, f, sz)
   if type(data) == "table" and #data > 0 then
+    if sz ~= nil and #data ~= sz then
+      return false
+    end
     for _,el in ipairs(data) do
       if not f(el) then
         return false
@@ -281,6 +284,9 @@ local function variantDataValid(data, f)
     end
     return true
   else
+    if sz ~= nil then
+      return false
+    end
     return f(data)
   end
 end
@@ -290,40 +296,58 @@ function T.variantValid(val)
     return false
   end
 
+  local sz
+  if val.ArrayDimensions then
+    if type(val.ArrayDimensions) ~= "table" or val.ArrayDimensions[1] == nil then
+      return false
+    else
+      sz = 1
+      for _,el in ipairs(val.ArrayDimensions) do
+        sz = sz * el
+      end
+    end
+    if sz == 0 then
+      return false
+    end
+  end
+
   if val.Boolean ~= nil then
-    return variantDataValid(val.Boolean, T.booleanValid)
+    return variantDataValid(val.Boolean, T.booleanValid, sz)
   elseif val.SByte ~= nil then
-    return variantDataValid(val.SByte, T.sbyteValid)
+    return variantDataValid(val.SByte, T.sbyteValid, sz)
   elseif val.Byte ~= nil then
-    return variantDataValid(val.Byte, T.byteValid)
+    return variantDataValid(val.Byte, T.byteValid, sz)
   elseif val.Int16 ~= nil then
-    return variantDataValid(val.Int16, T.int16Valid)
+    return variantDataValid(val.Int16, T.int16Valid, sz)
   elseif val.UInt16 ~= nil then
-    return variantDataValid(val.UInt16, T.uint16Valid)
+    return variantDataValid(val.UInt16, T.uint16Valid, sz)
   elseif val.Int32 ~= nil then
-    return variantDataValid(val.Int32, T.int32Valid)
+    return variantDataValid(val.Int32, T.int32Valid, sz)
   elseif val.UInt32 ~= nil then
-    return variantDataValid(val.UInt32, T.uint32Valid)
+    return variantDataValid(val.UInt32, T.uint32Valid, sz)
   elseif val.Int64 ~= nil then
-    return variantDataValid(val.Int64, T.int64Valid)
+    return variantDataValid(val.Int64, T.int64Valid, sz)
   elseif val.UInt64 ~= nil then
-    return variantDataValid(val.UInt64, T.uint64Valid)
+    return variantDataValid(val.UInt64, T.uint64Valid, sz)
   elseif val.Float ~= nil then
-    return variantDataValid(val.Float, T.floatValid)
+    return variantDataValid(val.Float, T.floatValid, sz)
   elseif val.Double ~= nil then
-    return variantDataValid(val.Double, T.doubleValid)
+    return variantDataValid(val.Double, T.doubleValid, sz)
   elseif val.String ~= nil then
-    return variantDataValid(val.String, T.stringValid)
+    return variantDataValid(val.String, T.stringValid, sz)
   elseif val.DateTime ~= nil then
-    return variantDataValid(val.DateTime, T.doubleValid)
+    return variantDataValid(val.DateTime, T.doubleValid, sz)
   elseif val.Guid ~= nil then
-    return variantDataValid(val.Guid, T.guidValid)
+    return variantDataValid(val.Guid, T.guidValid, sz)
   elseif val.ByteString ~= nil then
     if type(val.ByteString) == 'table' then
       if #val.ByteString == 0 then
         return true
       end
       if type(val.ByteString[1]) == 'table' or type(val.ByteString[1]) == 'string' then
+        if sz ~= nil and #val.ByteString ~= sz then
+          return false
+        end
         for _,b in ipairs(val.ByteString) do
           if T.byteStringValid(b) == false then
             return false
@@ -336,25 +360,25 @@ function T.variantValid(val)
     end
     return type(val.ByteString) == 'string'
   elseif val.XmlElement ~= nil then
-    return variantDataValid(val.XmlElement, T.xmlElementValid)
+    return variantDataValid(val.XmlElement, T.xmlElementValid, sz)
   elseif val.NodeId ~= nil then
-    return variantDataValid(val.NodeId, T.nodeIdValid)
+    return variantDataValid(val.NodeId, T.nodeIdValid, sz)
   elseif val.ExpandedNodeId ~= nil then
-    return variantDataValid(val.ExpandedNodeId, T.nodeIdValid)
+    return variantDataValid(val.ExpandedNodeId, T.nodeIdValid, sz)
   elseif val.StatusCode ~= nil then
-    return variantDataValid(val.StatusCode, T.uint32Valid)
+    return variantDataValid(val.StatusCode, T.uint32Valid, sz)
   elseif val.QualifiedName ~= nil then
-    return variantDataValid(val.QualifiedName, T.qualifiedNameValid)
+    return variantDataValid(val.QualifiedName, T.qualifiedNameValid, sz)
   elseif val.LocalizedText ~= nil then
-    return variantDataValid(val.LocalizedText, T.localizedTextValid)
+    return variantDataValid(val.LocalizedText, T.localizedTextValid, sz)
   elseif val.ExtensionObject ~= nil then
-    return variantDataValid(val.ExtensionObject, T.extensionObjectValid)
+    return variantDataValid(val.ExtensionObject, T.extensionObjectValid, sz)
   elseif val.DataValue ~= nil then
-    return variantDataValid(val.DataValue, T.dataValueValid)
+    return variantDataValid(val.DataValue, T.dataValueValid, sz)
   elseif val.Variant ~= nil then
-    return variantDataValid(val.Variant, T.variantValid)
+    return variantDataValid(val.Variant, T.variantValid, sz)
   elseif val.DiagnosticInfo ~= nil then
-    return variantDataValid(val.DiagnosticInfo, T.diagnosticInfoValid)
+    return variantDataValid(val.DiagnosticInfo, T.diagnosticInfoValid, sz)
   end
 
   return false
@@ -469,6 +493,23 @@ end
 
 function T.arrayDimensionsValid(value, arrayDimensions, valueRank)
   local val
+  if value.ArrayDimensions and not arrayDimensions then
+    return false
+  end
+  -- if not value.ArrayDimensions and arrayDimensions then
+  --   return false
+  -- end
+  if value.ArrayDimensions and arrayDimensions then
+    if #value.ArrayDimensions ~= #arrayDimensions then
+      return false
+    end
+    for i=1,#value.ArrayDimensions do
+      if value.ArrayDimensions[i] ~= arrayDimensions[i] then
+        return false
+      end
+    end
+  end
+
   for _,v in pairs(value) do
     val= v
     if val ~= nil then

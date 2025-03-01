@@ -290,8 +290,9 @@ function dec:variant(model)
   local v = {}
   local arrLen = 0
   local decFunc
-  local vt = self:bit(7)
+  local vt = self:bit(6)
 
+  local hasDimensions = self:bit(1)
   local isArray = self:bit(1)
   if isArray ~= 0 then
     arrLen = self:int32()
@@ -389,6 +390,16 @@ function dec:variant(model)
         tins(val, curVal)
       end
     end
+  end
+
+  if hasDimensions == 1 then
+    local dimLen = self:int32()
+    local dims = {}
+    for _=1,dimLen do
+      local dim = self:int32()
+      tins(dims, dim)
+    end
+    v.ArrayDimensions = dims
   end
 
   v[vt] = val

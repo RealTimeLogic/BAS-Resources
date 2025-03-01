@@ -56,8 +56,7 @@ end
 
 local function rsaPkcs15Sha1Sign(key, ...)
   local sum1 = sha1Sum(...)
-  sum1 = "\x30\x21\x30\x09\x06\x05\x2B\x0E\x03\x02\x1A\x05\x00\x04\x14" .. sum1
-  local m,err = ba.crypto.sign(sum1, key)
+  local m,err = ba.crypto.sign(sum1, key, {padding="pkcs1", hashid="sha1"})
   if err then
     error(err)
   end
@@ -66,20 +65,16 @@ end
 
 local function rsaPkcs15Sha1Verify(cert, cipherSig, ...)
   local sum1 = sha1Sum(...)
-  sum1 = "\x30\x21\x30\x09\x06\x05\x2B\x0E\x03\x02\x1A\x05\x00\x04\x14"..sum1
-  local sum2,err = ba.crypto.verify(cipherSig, cert.pem)
+  local result,err = ba.crypto.verify(cipherSig, cert.pem, sum1, {padding="pkcs1", hashid="sha1"})
   if err then
     return false
   end
-
-  local result = sum2 == sum1
   return result
 end
 
 local function rsaPkcs15Sha256Sign(key, ...)
   local sum1 = hashSum("sha256", ...)
-  sum1 = "\x30\x31\x30\x0D\x06\x09\x60\x86\x48\x01\x65\x03\x04\x02\x01\x05\x00\x04\x20" .. sum1
-  local m,err = ba.crypto.sign(sum1, key)
+  local m,err = ba.crypto.sign(sum1, key, {padding="pkcs1", hashid="sha256"})
   if err then
     error(err)
   end
@@ -88,16 +83,13 @@ end
 
 local function rsaPkcs15Sha256Verify(cert, cipherSig, ...)
   local sum1 = hashSum("sha256", ...)
-  sum1 = "\x30\x31\x30\x0D\x06\x09\x60\x86\x48\x01\x65\x03\x04\x02\x01\x05\x00\x04\x20" .. sum1
-  local sum2,err = ba.crypto.verify(cipherSig, cert.pem)
+  local result,err = ba.crypto.verify(cipherSig, cert.pem, sum1, {padding="pkcs1", hashid="sha256"})
   if err then
     return false
   end
 
-  local result = sum2 == sum1
   return result
 end
-
 
 ba.rsaPkcs15Sha1Sign = rsaPkcs15Sha1Sign
 ba.rsaPkcs15Sha1Verify = rsaPkcs15Sha1Verify
@@ -196,11 +188,11 @@ local function keysize(key)
 end
 
 local function decrypt(e, key, params)
-  return ba.crypto.decrypt(e, key, params)
+  return ba.crypto.decrypt(e, key, {padding=params.padding, hashid=params.hash})
 end
 
 local function encrypt(data, cert, params)
-  return ba.crypto.encrypt(tostring(data), cert.pem, params)
+  return ba.crypto.encrypt(tostring(data), cert.pem, {padding=params.padding, hashid=params.hash})
 end
 
 local function symmetric(alg, key, iv, op)

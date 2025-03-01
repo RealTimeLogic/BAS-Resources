@@ -26,9 +26,10 @@ local function createPolicy(_--[[modes]], _--[[params]], fsIo)
       key = createKey(key, fsIo)
       assert(key)
 
-      local sz,err = ua.crypto.keysize(key)
-      if err then error(err) end
-      if sz < 128 or sz > 256 then
+      local sz,t = ua.crypto.keysize(key)
+      -- TODO: check error is thrown
+      -- if err then error(err) end
+      if t ~= "RSA" or sz < 128 or sz > 256 then
         error(BadSecurityChecksFailed)
       end
       self.certificate = createCert(certificate, fsIo)

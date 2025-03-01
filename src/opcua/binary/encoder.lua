@@ -559,17 +559,30 @@ function enc:variant(v, model)
   assert(vt ~= nil)
   assert(encFunc ~= nil)
 
-  self:bit(vt, 7)
+  self:bit(vt, 6)
+  if v.ArrayDimensions ~= nil then
+    self:bit(1, 1)
+  else
+    self:bit(0, 1)
+  end
+
   local isArray = type(data) == 'table' and data[1] ~= nil
   if isArray then
-    self:bit(1, 1) -- ArrayLengthSpecified = 1
+    self:bit(1, 1) -- ArrayLengthSpecified =
     self:int32(#data)
-    for _,val in ipairs(data) do
-      encFunc(self, val, model)
+    for i =1,#data do
+      encFunc(self, data[i], model)
     end
   else
     self:bit(0, 1) -- ArrayLengthSpecified = 0
     encFunc(self, data, model)
+  end
+
+  if v.ArrayDimensions ~= nil then
+    self:int32(#v.ArrayDimensions)
+    for _,dim in ipairs(v.ArrayDimensions) do
+      self:int32(dim)
+    end
   end
 end
 
