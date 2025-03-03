@@ -1,6 +1,8 @@
-local acme=require"acme/engine"
-local log=require"acme/log"
-local fmt=string.format
+local acme,log,fmt=require"acme/engine",require"acme/log",string.format
+local function el(url,msg)
+   log.error("%s: %s",tostring(url),tostring(msg))
+end
+acme.seterrlog(el)
 
 local optionT={production=true}
 local status={}

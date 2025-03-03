@@ -9,13 +9,23 @@ local sendlog = mako and mako.daemon and
 
 local function log(err,prio,fmts,...)
    local msg=fmt((err and "ACME error: " or "ACME: ")..fmts,...)
-   tracep(false, prio, msg)
+   if mako then tracep(false, prio, msg) end
    sendlog(err, msg)
 end
 
+local nextErrTm=0
+local function err(...)
+   local t=os.time()
+   if t > nextErrTm then
+      nextErrTm=t+86400
+      log(true,0, ...)
+   end
+end
+
+
 return {
    info=function(...) log(false,8, ...) end,
-   error=function(...) log(true,0, ...) end,
+   error=err,
    log=function(prio,...) log(false,prio, ...) end,
    setlog=function(logfunc) sendlog=logfunc end
 }

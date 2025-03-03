@@ -393,6 +393,7 @@ M={
    revoke=function(account,cert,rspCB)
       ba.thread.run(function() revokeCert(account,cert,rspCB) end) end,
    ahttp=createAcmeHttp,
-   checkCert=function(check) checkCert=check end
+   checkCert=function(check) checkCert=check end,
+   seterrlog=function(l) errlog=l end,
 }
 return M
