@@ -18,10 +18,14 @@ local function sign(payload, secret, options)
    local data = header .. "." .. payload
    local alg,htype=options.alg:sub(1,2),options.alg:sub(3)
    if "HS" == alg then
-      signature = b64enc(ba.crypto.hash("hmac", "sha"..htype, secret)(data)(true))
+      signature=b64enc(ba.crypto.hash("hmac","sha"..htype, secret)(data)(true))
    else
       local hash = ba.crypto.hash("sha"..htype)(data)(true)
-      signature, err = ba.crypto.sign(hash, secret)
+      if "function" == type(secret) then
+         signature,err=secret(hash)
+      else
+         signature,err=ba.crypto.sign(hash, secret)
+      end
       if not signature then return nil, err end
       if "ES" == alg then
 	 local r, s = ba.crypto.sigparams(signature)

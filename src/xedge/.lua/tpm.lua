@@ -1,7 +1,7 @@
 local maxHash=pcall(function() ba.crypto.hash("sha512") end) and "sha512" or "sha256"
-local sfmt,jencode,jdecode,symmetric,PBKDF2,keyparams,jwtsign,createkey,createcsr,sharkcert=
+local sfmt,jencode,jdecode,symmetric,PBKDF2,keyparams,sign,jwtsign,createkey,createcsr,sharkcert=
 string.format,ba.json.encode,ba.json.decode,ba.crypto.symmetric,ba.crypto.PBKDF2,ba.crypto.keyparams,
-require"jwt".sign,ba.create.key,ba.create.csr,ba.create.sharkcert
+ba.crypto.sign,require"jwt".sign,ba.create.key,ba.create.csr,ba.create.sharkcert
 
 local function setuser(ju,db,name,pwd)
    if pwd then
@@ -25,7 +25,8 @@ return function(gpkey,upkey)
       if not key then error(sfmt("ECC key %s not found",tostring(kname)),3) end
       return key
    end
-   local function tpmJwtsign(p,kname,op) return jwtsign(p,tpmGetKey(kname),op) end
+   local function tpmSign(h,kname,op) return sign(h,tpmGetKey(kname),op) end
+   local function tpmJwtsign(p,kname,op) return jwtsign(p,function(h) return sign(h,tpmGetKey(kname)) end,op) end
    local function tpmKeyparams(kname) return keyparams(tpmGetKey(kname)) end
    local function tpmCreatecsr(kname,...) return createcsr(tpmGetKey(kname),...) end
    local function tpmCreatekey(kname,op)
@@ -46,6 +47,7 @@ return function(gpkey,upkey)
    function t.haskey(k) return tpmHaskey(k) end
    function t.createkey(k,...) return tpmCreatekey(k,...) end
    function t.createcsr(k,...) return tpmCreatecsr(k,...) end
+   function t.sign(h,k,o) return tpmSign(h,k,o) end
    function t.jwtsign(k,...) return tpmJwtsign(k,...) end
    function t.keyparams(k,...) return tpmKeyparams(k,...) end
    function t.sharkcert(k,...) return tpmSharkcert(k,...) end
