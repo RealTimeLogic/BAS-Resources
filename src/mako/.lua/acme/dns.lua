@@ -6,7 +6,7 @@ local fmt=string.format
 local b64Enc=ba.b64urlencode
 local checkCert=true
 local revcon,revconTimer -- set if Reverse Connection enabled
-local dnsResolveTmo = 120000 -- 2 mins
+local dnsResolveTmo = 30000 -- 30 secs
 local getZoneToken
 local zoneKey,zoneSecret,refreshToken
 local serverName,serverIp,commandURL
@@ -20,15 +20,15 @@ end
 local function sendEmail(msg)
    if mako and mako.daemon then
       local op={flush=true}
-      mako.log(nil, op)
+      mako.log(nil,op)
       op.subject="Set ACME DNS TXT Record"
-      mako.log(msg, op)
+      mako.log(msg,op)
    end
 end
 
 local function calculateSecret()
    if not refreshToken then return nil,"No X-RefreshToken" end
-   local token,hash = getZoneToken(serverIp, refreshToken)
+   local token,hash = getZoneToken(serverIp,refreshToken)
    return b64Enc(token),b64Enc(hash)
 end
 
@@ -79,7 +79,7 @@ local function checkAndCfg(level)
       local crypto=ba.crypto
       local zkT={}
       local schar=string.char
-      for x in zoneKey:gmatch("%x%x") do table.insert(zkT, schar(tonumber(x,16))) end
+      for x in zoneKey:gmatch("%x%x") do table.insert(zkT,schar(tonumber(x,16))) end
       local zkbin=table.concat(zkT)
       getZoneToken=function(ip,token)
 	 local rnd=ba.rndbs(32)
@@ -144,13 +144,46 @@ do
    end
 end
 
+local function isPrivateIP(ip)
+    local function ipToNum(ip)
+	local o1,o2,o3,o4 = ip:match("^(%d+)%.(%d+)%.(%d+)%.(%d+)$")
+	if not o1 then return nil end
+	return (tonumber(o1)*256^3)+(tonumber(o2)*256^2)+(tonumber(o3)*256)+tonumber(o4)
+    end
+    local ipNum=ipToNum(ip)
+    if not ipNum then return false end
+    local privateRanges = {
+	{ipToNum("10.0.0.0"),ipToNum("10.255.255.255")},
+	{ipToNum("172.16.0.0"),ipToNum("172.31.255.255")},
+	{ipToNum("192.168.0.0"),ipToNum("192.168.255.255")}
+    }
+    for _,range in ipairs(privateRanges) do
+       if ipNum >= range[1] and ipNum <= range[2] then return true end
+    end
+end
+
+local function runsOnPubNetwork(wan,sockn,peern)
+   if wan == sockn then
+      return not isPrivateIP(peern)
+   end
+end
+
+local function socPeerName(x)
+   local function ip4(ip,_,is6)
+      if is6 and ip:find("::ffff:",1,true) == 1 then
+	 ip=ip:sub(8,-1) -- IPv4-mapped IPv6 address to IPv4
+      end
+      return ip
+   end
+   return ip4(x:sockname()),ip4(x:peername())
+end
 
 local manualMode,active=false,false
 local function checkM()
-   if manualMode ~= true then error("Not in manual mode", 3) end
+   if manualMode ~= true then error("Not in manual mode",3) end
 end
-local function noActivation() checkM() return nil, "Challenge not active" end
-local D={activate=noActivation, status=noActivation}
+local function noActivation() checkM() return nil,"Challenge not active" end
+local D={activate=noActivation,status=noActivation,socPeerName=socPeerName,isPrivateIP=isPrivateIP}
 
 -- acme.lua's 'set' challenge CB for manual operation
 local setManual
@@ -158,10 +191,10 @@ setManual=function(dnsRecord,dnsAuth,rspCB)
    if dnsRecord then -- activate
       -- call chain: acme.lua -> setManual
       local msg=string.format("\tRecord name:\t%s\n\tRecord data:\t%s",
-			      dnsRecord, dnsAuth)
+			      dnsRecord,dnsAuth)
       D.status = function() return {record=dnsRecord,data=dnsAuth,msg=msg} end
       D.recordset=function() setManual() lock() rspCB(true) return true end
-      lock(rspCB, setManual)
+      lock(rspCB,setManual)
       log.log(0,"Set DNS TXT Record:\n"..msg)
       sendEmail(msg,dnsRecord,dnsAuth)
    else -- release
@@ -172,18 +205,9 @@ setManual=function(dnsRecord,dnsAuth,rspCB)
 end
 
 
-local function sockname(http)
-   local ip,_,is6=http:sockname()
-   if is6 and ip:find("::ffff:",1,true) == 1 then
-      ip=ip:sub(8,-1) -- IPv4-mapped IPv6 address to IPv4
-   end
-   return ip
-end
-
-
 -- activateAuto code below
-local function createHttp()
-   if not refreshToken then return nil, -1, "No X-RefreshToken" end
+local function createHttp(ext)
+   if not refreshToken then return nil,-1,"No X-RefreshToken" end
    local http=require"httpc".create(httpOptions)
    local function xhttp(command,hT,nolog)
       hT=hT or {}
@@ -192,7 +216,7 @@ local function createHttp()
       if not token then
 	 local err = rt.emsg() or hash
 	 abp.error(fmt("Err: %s",err))
-	 return nil, -2, err
+	 return nil,-2,err
       end
       hT['X-Token'],hT['X-Hash']=token,hash
       hT['X-Command'],hT["X-RefreshToken"]=command,b64Enc(refreshToken)
@@ -212,15 +236,18 @@ local function createHttp()
       if status ~= 201 then
 	 if status == 403 then rt.getnew() end
 	 if not nolog and status and hT then
-	    abp.error(fmt("HTTP status=%d: %s\nURL: %s",status,hT["X-Reason"], commandURL))
+	    abp.error(fmt("HTTP status=%d: %s\nURL: %s",status,hT["X-Reason"],commandURL))
 	 end
-	 return nil, status, (hT and hT["X-Reason"] or err or fmt("HTTP status=%d",status))
+	 return nil,status,(hT and hT["X-Reason"] or err or fmt("HTTP status=%d",status))
       end
       return hT
    end
    local hT,s,e=xhttp"GetWan"
    if hT then
-      return xhttp, hT['X-IpAddress'], sockname(http)
+      if ext then
+	 return xhttp,hT['X-IpAddress'],socPeerName(http)
+      end
+      return xhttp,hT['X-IpAddress']
    end
    return nil,s,e
 end
@@ -232,13 +259,13 @@ end
 
 local function register(http,ip,subdom,info)
    local hT={["X-IpAddress"]=ip,["X-Name"]=subdom,["X-Info"]=info}
-   hT=http("Register", hT)
+   hT=http("Register",hT)
    if hT then
       local devKey,domain=hT['X-Dev'],hT['X-Name']
       assert(devKey and domain)
       abp.jfile("domains",{[domain]=""})
       local kT={key=devKey}
-      abp.jfile("devkey", kT)
+      abp.jfile("devkey",kT)
       return kT,domain
    end
 end
@@ -248,7 +275,7 @@ local function isreg()
    while not http do
       if cnt > 5 then break end
       cnt=cnt+1
-      http,wan,sockn=createHttp()
+      http,wan,sockn=createHttp(true)
       if not http then ba.sleep(1000) end
    end
    if not http then return nil,wan,sockn end
@@ -265,10 +292,10 @@ local function isreg()
 end
 
 local function available(domain)
-   local http,wan,sockn=createHttp()
+   local http,wan,sockn=createHttp(true)
    if not http then return nil,wan,sockn end
    local hT,status,err={["X-Name"]=domain}
-   hT,status,err=http("IsAvailable", hT)
+   hT,status,err=http("IsAvailable",hT)
    if hT then
       return (hT["X-Available"] == "yes" and true or false),wan,sockn
    end
@@ -287,7 +314,7 @@ local function activateRevcon()
    if not revcon then
       if ba.revcon then
 	 revcon=ba.revcon{shark=ba.sharkclient(),url=commandURL}
-	 if mako then mako.onexit(function() closeRevcon() end, true) end
+	 if mako then mako.onexit(function() closeRevcon() end,true) end
 	 setRevConToken()
 	 local function check()
 	    local s=revcon:status()
@@ -302,14 +329,13 @@ local function activateRevcon()
    end
 end
 
-
 local function auto(email,domain,op)
    local function tryagain(emsg)
       abp.error("auto failed: "..tostring(emsg or "?"))
       ba.timer(function() ba.thread.run(function() auto(email,domain,op) end) end):set(60000,true)
    end
-   local http,wan,sockn=createHttp()
-   if wan == sockn then
+   local http,wan,sockn,peern=createHttp(true)
+   if runsOnPubNetwork(wan,sockn,peern) then
       active=false
       return abp.error(fmt("Public IP address %s equals local IP address",wan))
    elseif not http then
@@ -346,7 +372,7 @@ local function auto(email,domain,op)
       return  -- err
    end
    ----- Acmebot set/remove DNS record CBs
-   local function set(dnsRecord, dnsAuth, rspCB)
+   local function set(dnsRecord,dnsAuth,rspCB)
       local hT={
 	 ["X-Dev"]=abp.jfile"devkey".key,
 	 ["X-RecordName"]=dnsRecord,
@@ -354,7 +380,7 @@ local function auto(email,domain,op)
 	 ["X-DnsResolveTmo"]=tostring(dnsResolveTmo)
       }
       local timer
-      lock(rspCB, function() timer:cancel() end)
+      lock(rspCB,function() timer:cancel() end)
       if http("SetAcmeRecord",hT) then
 	 timer=ba.timer(function() lock() rspCB(true) end)
 	 timer:set(dnsResolveTmo)
@@ -464,13 +490,13 @@ function D.manual(email,domain,op)
    op.ch={set=setManual,remove=function(rspCB) rspCB(true) end}
    op.shark=httpOptions.shark
    ab.configure(email,{domain},op)
-   abp.autoupdate(true, true)
+   abp.autoupdate(true,true)
    return true
 end
 
 function D.loadcert() return abp.loadcert() end
 function D.active() return active and (manualMode and "manual" or "auto") end
-function D.configure(op) return configure(op or {}, 4) end
+function D.configure(op) return configure(op or {},4) end
 function D.token() return tryLoadTokengenModules() end
 function D.setip(addr)
    if not active then return false end
@@ -508,7 +534,7 @@ end
 function D.init(op,sm)
    if op then setHttpOptions(op) end
    if sm then
-      assert(type(sm) == 'function', 'arg #2 must be func.')
+      assert(type(sm) == 'function','arg #2 must be func.')
       sendEmail=sm
    end
 end

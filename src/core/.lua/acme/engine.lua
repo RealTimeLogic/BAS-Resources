@@ -32,13 +32,13 @@ end
 
 local function useTPM(key,keyname)
    if te then
-      local op=jdecode(key)
+      local op="table"==type(key) and key or jdecode(key)
       if op then
+	 keyname=op.keyname or keyname
 	 if not tpm.haskey(keyname) then tpm.createkey(keyname,op) end
-	 return true
+	 return keyname
       end
    end
-   return false
 end
 
 local function jwtsign(key,payload,op)
@@ -68,10 +68,9 @@ local function createkey(kname,op)
 end
 
 local function createcsr(key,kname,dn,certtype,keyusage)
-   return kname and useTPM(key,kname) and tpm.createcsr(kname,dn,certtype,keyusage) or ba.create.csr(key,dn,certtype,keyusage)
+   kname=useTPM(key,kname)
+   return kname and tpm.createcsr(kname,dn,certtype,keyusage) or ba.create.csr(key,dn,certtype,keyusage)
 end
-
-
 
 -- Extracts and returns the public x,y components from a private ECC key.
 local function decodeEccPemKey(key)
@@ -381,6 +380,8 @@ end
 
 local M
 M={
+   createkey=createkey,
+   useTPM=useTPM,
    tpm=function(en)
       assert(tpm,"not enabled")
       if "boolean"==type(en) then te=en end
