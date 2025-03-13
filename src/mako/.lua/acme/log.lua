@@ -24,7 +24,7 @@ end
 
 
 return {
-   info=function(...) log(false,8, ...) end,
+   info=function(...) log(false,5, ...) end,
    error=err,
    log=function(prio,...) log(false,prio, ...) end,
    setlog=function(logfunc) sendlog=logfunc end

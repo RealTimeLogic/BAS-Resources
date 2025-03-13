@@ -53,7 +53,9 @@ local function renewAllowed() return true end -- Default
 local function time2renew(asn1exptime)
    local exptime = ba.parsecerttime(asn1exptime)
    -- Renew no later than 22 days before exp.
-   return exptime == 0 or (exptime - 1900800) < os.time()
+   local now=os.time()
+   local days = exptime > now and (exptime-now)//86400 or 0
+   return (exptime==0 or (exptime-1900800)<now),days
 end
 
 local function getKeyCertNames(domain)
@@ -151,7 +153,10 @@ local function check(forceUpdate)
       forceUpdate=true
    end
    for domain,exptime in pairs(domainsT) do
-      if forceUpdate or (renewAllowed(domain) and time2renew(exptime)) then
+      local doit,days=time2renew(exptime)
+      if forceUpdate or (renewAllowed(domain) and doit) then
+         log.info("%s for domain %s; expires in %d days",
+                  forceUpdate and "Forcing certificate renewal" or "Renewing certificate",domain,days)
 	 renew(accountT,domain,#exptime > 0)
       end
    end
