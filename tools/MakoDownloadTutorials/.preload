@@ -1,0 +1,229 @@
+
+-- Start this app as follows:
+-- mako -l::BAS-Resources/tools/MakoDownloadTutorials
+
+local info = [[
+
+
+=========================================================
+This application downloads and starts the Lua tutorials.
+You can also run the online version: https://tutorial.realtimelogic.com/
+Tutorial installation directory: %s
+=========================================================
+
+]]
+
+
+
+local errinfo = [[
+
+
+=========================================================
+
+Are you behind a proxy?
+
+This Lua application is not compatible with networks that require
+proxy configurations.
+
+You must manually download and start the Lua tutorials as explained on
+the following page:
+
+https://makoserver.net/documentation/manual/
+
+=========================================================
+
+
+]]
+
+local fmt=string.format
+local dir=dir
+local errmsg
+
+local function dirfunc(_ENV)
+   if request:uri() ~= "/" then response:setstatus(404) end
+   response:write"<html>"
+   if errmsg then
+      response:write("<body><h1>Error</h1><pre>",errmsg,"</pre>")
+   else
+      response:write('<head><meta http-equiv="refresh" content="3"></head><body>',
+                     '<h2>Downloading tutorials. Please wait...</h2>')
+   end
+   response:write"</body><html>"
+end
+dir:setfunc(dirfunc)
+
+local function beep()
+   print(fmt("%c",7))
+end
+
+
+local function doerr(msg)
+   errmsg=fmt("%s\n%s",msg,errinfo)
+   tracep(false,0,errmsg)
+   beep()
+   ba.sleep(10000)
+   error(msg)
+end
+
+local function check(ok,emsg)
+   if not ok then doerr(emsg) end
+end
+
+local hdir = os.getenv"HOME" or os.getenv"USERPROFILE"
+check(hdir, "Cannot find your home directory")
+hdir=mako.dos2unix(hdir)
+local dio=ba.openio"disk"
+local appdir=hdir.."/lspapps"
+check(dio:stat(appdir) or dio:mkdir(appdir), "Cannot create "..appdir)
+local appio=ba.mkio(dio,appdir)
+
+local function tutdate(date)
+   local retval
+   local fp=appio:open("date.json", date and "w" or "r")
+   if fp then
+      if date then
+         retval=fp:write(ba.json.encode{date=date})
+      else
+         local t=ba.json.decode(fp:read"*a")
+         retval = t and t.date
+      end
+      fp:close()
+      return retval
+   end
+end
+
+local function deferred()
+   print(fmt(info,appio:realpath""))
+   local st
+   local http=require"httpm".create()
+   local download=true
+   local d=tutdate()
+   st=http:stat"http://makoserver.net/download/tutorials.zip"
+   if d then
+      if (st and d == st.mtime) or (not st and appio:stat"intro.zip") then
+         download=false
+      end
+   end
+   if download then
+      print("Downloading tutorials to: "..appio:realpath"")
+      local time=os.time()
+      local ok,err=http:download{
+         io=appio,
+         name="tutorials.zip",
+         url="http://makoserver.net/download/tutorials.zip",
+         func=function(size,dsize)
+                 if not size then return end
+                 size=100*dsize/size
+                 if time+1 < os.time() or size >= 100 then
+                    print(fmt("Downloading: %d%%\r",size))
+                    time=os.time()
+                 end
+              end
+      }
+      check(ok and http:status() == 200,"Network error: Cannot download http://makoserver.net/download/tutorials.zip.")
+      -- Copy data "from" file pointer "to" file pointer
+      local function copy(size,from,to)
+         while size > 0 do
+            local chunk = size > 512 and 512 or size
+            size = size - chunk
+            local data = from:read(chunk)
+            check(data and to:write(data), "I/O error\n")
+         end
+      end
+      local fio,err
+      fio,err=ba.mkio(appio, "tutorials.zip") -- from
+      check(fio,err)
+      local function unpackzip(dir)
+         for name,isdir,mtime,size in fio:files(dir,true) do
+            local fn=dir..name
+            if isdir then
+               check(appio:stat(fn) or appio:mkdir(fn),
+                     "Cannot create "..appio:realpath(fn))
+               unpackzip(fn.."/")
+            else
+               local from,to
+               from,err = fio:open(fn);
+               check(from,err)
+               to,err = appio:open(fn, "w");
+               check(to,err)
+               print("Extracting ",appio:realpath(fn))
+               copy(size,from,to)
+               to:close()
+            end
+         end
+      end
+      unpackzip"/"
+      if st then tutdate(st.mtime) end
+      fio=nil
+      collectgarbage()
+      collectgarbage()
+      collectgarbage()
+      appio:remove"tutorials.zip"
+   else
+      print"Tutorials are up-to-date!"
+   end
+
+   local function execPreload(appenv,zipname)
+      local ok,err
+      if appenv.io:stat".preload" then
+         local f
+         f,err = appenv.io:loadfile(".preload",appenv)
+         if f then
+            ok, err = pcall(f)
+            if ok then err=nil end
+         end
+      else
+         print(fmt("Info: %s/.preload not found",zipname))
+      end
+      if err then
+         return nil,err
+      end
+      return true
+   end
+
+   apptab={} -- Keep references here so apps do not GC
+ 
+   local function start(zipname,appname)
+      local io,err = ba.mkio(appio,zipname)
+      if io then
+         local rootapp = #appname == 0 and true or false
+         print(fmt("Loading %s as %s",zipname, rootapp and "'root application'" or appname))
+         local resrdr=ba.create.resrdr(not rootapp and appname or nil,0,io)
+         if resrdr then
+            resrdr:insert()
+            local appenv=setmetatable({io=io,dir=resrdr},{__index=_G})
+            appenv.app = appenv
+            local ok
+            ok,err=execPreload(appenv,zipname)
+            if not err then
+               resrdr:lspfilter(appenv)
+               table.insert(apptab,resrdr)
+               return
+            end
+            resrdr:unlink()
+            tracep(false,0,fmt("Warning (%s): %s", zipname, err or ""))
+         else
+            doerr(fmt("Cannot create resrdr for %s",zipname))
+         end
+      end
+   end
+
+   local apps={}
+   for name,isdir in appio:files("/",true) do
+      if not isdir and name:find"%.zip$" then
+         apps[name]=name:match"([^%.]+)"
+      end
+   end
+   apps["tutorials.zip"]=nil
+   apps["intro.zip"]=""
+   apps["IoT.zip"]=""
+   apps["badoc.zip"]="ba"
+   apps["m2m-server.zip"]="demos"
+   for app,name in pairs(apps) do start(app,name) end
+   if not errmsg then
+      dir:unlink()
+   end
+end
+
+ba.thread.run(deferred)
+
