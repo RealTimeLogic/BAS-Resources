@@ -8,7 +8,7 @@ local info = [[
 =========================================================
 This application downloads and starts the Lua tutorials.
 You can also run the online version: https://tutorial.realtimelogic.com/
-Tutorial installation directory: %s
+Tutorials installation directory: %s
 =========================================================
 
 ]]
