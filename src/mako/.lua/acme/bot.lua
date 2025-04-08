@@ -134,9 +134,11 @@ loadcerts=function(domainsT)
 end
 
 loadcertsOnce=function(domainsT)
-   local k,c=loadcerts(domainsT)
-   if k then loadcertsOnce=function() return false end end
-   return k,c
+   if ba.openio"home":stat"cert" then
+      local k,c=loadcerts(domainsT)
+      if k then loadcertsOnce=function() return false end end
+      return k,c
+   end
 end
 
 
@@ -155,8 +157,8 @@ local function check(forceUpdate)
    for domain,exptime in pairs(domainsT) do
       local doit,days=time2renew(exptime)
       if forceUpdate or (renewAllowed(domain) and doit) then
-         log.info("%s for domain %s; expires in %d days",
-                  forceUpdate and "Forcing certificate renewal" or "Renewing certificate",domain,days)
+	 log.info("%s for domain %s; expires in %d days",
+		  forceUpdate and "Forcing certificate renewal" or "Renewing certificate",domain,days)
 	 renew(accountT,domain,#exptime > 0)
       end
    end
