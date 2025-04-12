@@ -134,7 +134,7 @@ loadcerts=function(domainsT)
 end
 
 loadcertsOnce=function(domainsT)
-   if ba.openio"home":stat"cert" then
+      if (hio or ba.openio"home"):stat"cert" then
       local k,c=loadcerts(domainsT)
       if k then loadcertsOnce=function() return false end end
       return k,c
