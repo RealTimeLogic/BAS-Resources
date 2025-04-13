@@ -89,6 +89,18 @@ echo "Creating the zip file"
 zip -D -q -u -r -9 ../Xedge.zip .
 cd ..
 if [ -z "$NO_BIN2C" ]; then
-    bin2c -z getLspZipReader Xedge.zip XedgeZip.c
+    echo "Running bin2c..."
+    if ! bin2c -z getLspZipReader Xedge.zip XedgeZip.c; then
+        echo "bin2c failed - attempting to compile it..."
+        gcc -o ../tools/linux/bin2c ../../BAS/tools/bin2c.c || {
+            echo "Compilation of bin2c failed."
+            exit 1
+        }
+        echo "Retrying bin2c..."
+        if ! ../tools/linux/bin2c -z getLspZipReader Xedge.zip XedgeZip.c; then
+            echo "bin2c failed again after recompiling. Exiting."
+            exit 1
+        fi
+    fi
     echo "Copy XedgeZip.c to your build directory"
 fi
