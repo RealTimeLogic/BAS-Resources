@@ -45,9 +45,7 @@ if [ "$userResponse" = "s" ]; then
     cd ..
 fi
 
-rm README.md
-rm .preload
-rm .gitignore
+rm -f README.md .preload .gitignore
 
 
 if [ -d "../../../lua-protobuf" ]; then
