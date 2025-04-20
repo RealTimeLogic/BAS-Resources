@@ -1,4 +1,4 @@
--- local tools = require("opcua.binary.tools")
+local tools = require("opcua.binary.tools")
 local compat = require("opcua.compat")
 local n = require("opcua.node_id")
 local s = require("opcua.status_codes")
@@ -139,14 +139,8 @@ function dec:dateTime()
   }
 
   sec = ba.datetime(date):ticks()
-
-  if msec then
-    msec = tonumber(msec)
-  else
-    msec = 0
-  end
-
-  return sec + msec / 1000
+  msec = msec and (tonumber("0."..msec)) or 0
+  return sec + msec
 end
 
 function dec:string()
@@ -167,49 +161,36 @@ dec.char = dec.uint8
 dec.byte = dec.uint8
 dec.sbyte = dec.int8
 dec.statusCode = dec.uint32
-dec.charArray = dec.string
 
 
 function dec:guid()
   local str = self:string()
-  local d1,d2,d3,d4,d5,d6,d7,d8,d9,d10,d11 =
-    string.match(str, "^(%x%x%x%x%x%x%x%x)-(%x%x%x%x)-(%x%x%x%x)-(%x%x)(%x%x)-(%x%x)(%x%x)(%x%x)(%x%x)(%x%x)(%x%x)$")
-
-  if not (d1 and d2 and d3 and d4 and d5 and d6 and d7 and d8 and d9 and d10 and d11) then
+  if not tools.guidValid(str) then
     error(s.BadDecodingError)
   end
 
-  return {
-    Data1=tonumber(d1, 16),
-    Data2=tonumber(d2, 16),
-    Data3=tonumber(d3, 16),
-    Data4=tonumber(d4, 16),
-    Data5=tonumber(d5, 16),
-    Data6=tonumber(d6, 16),
-    Data7=tonumber(d7, 16),
-    Data8=tonumber(d8, 16),
-    Data9=tonumber(d9, 16),
-    Data10=tonumber(d10, 16),
-    Data11=tonumber(d11, 16)
-  }
+  return str
 end
 
 function dec:localizedText()
-  local lt = {}
-  self:beginObject()
-  self:beginField("Locale")
+  local lt
   if self:stackLastValue() then
-    lt.Locale = self:string()
-  end
-  self:endField("Locale")
+    self:beginObject()
+    lt = {}
+    self:beginField("Locale")
+    if self:stackLastValue() then
+      lt.Locale = self:string()
+    end
+    self:endField("Locale")
 
-  self:beginField("Text")
-  if self:stackLastValue() then
-    lt.Text = self:string()
+    self:beginField("Text")
+    if self:stackLastValue() then
+      lt.Text = self:string()
+    end
+    self:endField("Text")
+    self:endObject()
   end
-  self:endField("Text")
 
-  self:endObject()
   return lt
 end
 
@@ -237,12 +218,26 @@ end
 function dec:nodeId()
   self:beginObject()
 
-  self:beginField("IdType")
-  local idType = self:uint8()
-  self:endField("IdType")
+  local idType = 0
+  -- IDtype is skipped for UInt32 IDs
+  if self:stackLastValue()["IdType"] ~= nil then
+    self:beginField("IdType")
+    idType = self:uint8()
+    self:endField("IdType")
+  end
 
   self:beginField("Id")
   local nodeIdType
+  if idType == nil then
+    local valType = type(self:stackLastValue())
+    if valType == "number" then
+      idType = 0
+    elseif valType == "string" then
+      idType = 1
+    else
+      error(s.BadDecodingError)
+    end
+  end
   local id
   if idType == 0 then
     id = self:uint32()
@@ -296,102 +291,107 @@ end
 dec.expandedNodeId = dec.nodeId
 
 function dec:variant(model)
-  self:beginObject()
-
   local v = {}
   local decFunc
 
-  self:beginField("Type")
-  local vt = self:int32()
-  self:endField("Type")
+  local last = self:stackLast()
+  local vt
+
+  local t = type(last)
+  local hasBody = (t == 'table' and last.Body ~= nil)
+  if hasBody then
+    self:beginObject()
+    self:beginField("Type")
+    vt = self:int32()
+    self:endField("Type")
+  else
+    local l = last
+    if t == 'table' and last[1] then
+      t = type(last[1])
+      l = last[1]
+    end
+
+    if t == 'number' then
+      local _,e = math.modf(l)
+      if e == 0 then
+        vt = 8 -- Int64
+      else
+        vt = 11 -- Double
+      end
+    elseif t == 'string' then
+      vt = 12
+    elseif t == 'boolean' then
+      vt = 1
+    else -- I don't know how to decode complex structures..
+      error(s.BadDecodingError)
+    end
+  end
 
   if vt == 0 then
-    vt = 'Null'
+    vt = 0
   elseif vt == 1 then
     decFunc = self.boolean
-    vt = "Boolean"
   elseif vt == 2 then
     decFunc = self.sbyte
-    vt = "SByte"
   elseif vt == 3 then
     decFunc = self.byte
-    vt = "Byte"
   elseif vt == 4 then
     decFunc = self.int16
-    vt = "Int16"
   elseif vt == 5 then
     decFunc = self.uint16
-    vt = "UInt16"
   elseif vt == 6 then
     decFunc = self.int32
-    vt = "Int32"
   elseif vt == 7 then
     decFunc = self.uint32
-    vt = "UInt32"
   elseif vt == 8 then
     decFunc = self.int64
-    vt = "Int64"
   elseif vt == 9 then
     decFunc = self.uint64
-    vt = "UInt64"
   elseif vt == 10 then
     decFunc = self.float
-    vt = "Float"
   elseif vt == 11 then
     decFunc = self.double
-    vt = "Double"
   elseif vt == 12 then
     decFunc = self.string
-    vt = "String"
   elseif vt == 13 then
     decFunc = self.dateTime
-    vt = "DateTime"
   elseif vt == 14 then
     decFunc = self.guid
-    vt = "Guid"
   elseif vt == 15 then
     decFunc = self.byteString
-    vt = "ByteString"
   elseif vt == 16 then
     decFunc = self.xmlElement
-    vt = "XmlElement"
   elseif vt == 17 then
     decFunc = self.nodeId
-    vt = "NodeId"
   elseif vt == 18 then
     decFunc = self.expandedNodeId
-    vt = "ExpandedNodeId"
   elseif vt == 19 then
     decFunc = self.statusCode
-    vt = "StatusCode"
   elseif vt == 20 then
     decFunc = self.qualifiedName
-    vt = "QualifiedName"
   elseif vt == 21 then
     decFunc = self.localizedText
-    vt = "LocalizedText"
   elseif vt == 22 then
     decFunc = self.extensionObject
-    vt = "ExtensionObject"
   elseif vt == 23 then
     decFunc = self.dataValue
-    vt = "DataValue"
   elseif vt == 24 then
     decFunc = self.variant
-    vt = "Variant"
   elseif vt == 25 then
     decFunc = self.diagnosticInfo
-    vt = "DiagnosticInfo"
   else
     error(s.BadDecodingError)
   end
 
-  self:beginField("Body")
+  if hasBody then
+    self:beginField("Body")
+    last = self:stackLast()
+  end
 
-  local last = self:stackLast()
   local val
+  local isArray = type(last) == 'table' and last[1] ~= nil
   if decFunc then
-    if type(last) == 'table' and last[1] ~= nil then
+    if isArray then
       local arrLen = self:beginArray()
 
       val = {}
@@ -406,11 +406,14 @@ function dec:variant(model)
     end
   end
 
-  self:endField("Body")
+  if hasBody then
+    self:endField("Body")
+    self:endObject()
+  end
 
-  self:endObject()
-
-  v[vt] = val
+  v.Type = vt
+  v.IsArray = isArray
+  v.Value = val
 
   return v
 end
@@ -422,7 +425,7 @@ function dec:dataValue(model)
 
   self:beginField("Value")
   if self:stackLastValue() then
-    v.Value = self:variant(model)
+    v = self:variant(model)
   end
   self:endField("Value")
 
@@ -492,7 +495,7 @@ function dec:diagnosticInfo()
 
   self:beginField("AdditionalInfo")
   if self:stackLastValue() then
-    v.AdditionalInfo = self:charArray()
+    v.AdditionalInfo = self:string()
   end
   self:endField("AdditionalInfo")
 
@@ -514,29 +517,31 @@ function dec:diagnosticInfo()
 end
 
 
-function dec:extensionObject(model)
+function dec:extensionObject(decoder)
   self:beginObject()
 
   self:beginField("TypeId")
   local encodedId = self:nodeId()
   self:endField("TypeId")
 
-  local extObject = model.ExtObjects[encodedId]
+  local extObject = decoder:getExtObject(encodedId)
   local v = {
-    TypeId = extObject and extObject.DataTypeId or encodedId
+    TypeId = extObject and extObject.dataTypeId or encodedId
   }
 
   if extObject then
-    self:beginField("Encoding")
-    local encoding = self:uint32()
-    if encoding ~= 0 then
-      v.encoding = encoding
+    if self:stackLast()["Encoding"] ~= ba.json.nullt then
+      self:beginField("Encoding")
+      local encoding = self:uint32()
+      if encoding ~= 0 then
+        v.Encoding = encoding
+      end
+      self:endField("Encoding")
     end
-    self:endField("Encoding")
 
     self:beginField("Body")
     if self:stackLast() ~= ba.json.null then
-      v.Body = model:Decode(v.TypeId)
+      v.Body = decoder:Decode(v.TypeId)
     end
     self:endField("Body")
   end

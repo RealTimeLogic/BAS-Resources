@@ -5,7 +5,6 @@ local function traceLog(level, msg)
   print(compat.gettime(), level, msg)
 end
 
-
 local function checkCommonAttributes(parentNodeId, browseName, displayName, newNodeId)
   if not tools.qualifiedNameValid(browseName) then
     error(0x80600000) -- BadBrowseNameInvalid
@@ -28,12 +27,25 @@ local function debug()
   require("ldbgmon").connect({client=false})
 end
 
+local uaVersion = require("opcua.version")
+
+local function versionValid(str)
+  return uaVersion.Version == str
+end
+
+local function assertVersion(str)
+  if not versionValid(str) then
+    error(string.format("Wrong OPCUA version %s. Requred %s", uaVersion.Version, str))
+  end
+end
+
 
 local ua = {
   newServer = function(config, model) return require("opcua.server").new(config, model) end,
   newClient = function(config, model) return require("opcua.client").new(config, model) end,
+  newMqttClient = function(config, model) return require("opcua.pubsub.mqtt").newClient(config, model) end,
 
-  Version = require("opcua.version"),
+  Version = uaVersion,
   StatusCode = require("opcua.status_codes"),
   NodeId = require("opcua.node_id"),
   Types = types,
@@ -45,6 +57,9 @@ local ua = {
     inf = function(msg) traceLog("[INF] ", msg) end,  -- Information logging print
     err = function(msg) traceLog("[ERR] ", msg) end   -- Error loging print
   },
+
+  assertVersion = assertVersion,
+  versionValid = versionValid,
 
   parseUrl = function(endpointUrl)
     if type(endpointUrl) ~= "string" then
@@ -112,7 +127,7 @@ local ua = {
     return params
   end,
 
-  newVariableParams = function(parentNodeId, name, dataValue, newNodeId)
+  newVariableParams = function(parentNodeId, name, val, newNodeId)
     local displayName
     local browseName
     if type(name) == "table" then
@@ -127,83 +142,22 @@ local ua = {
 
     checkCommonAttributes(parentNodeId, browseName, displayName, newNodeId)
 
-    if not tools.dataValueValid(dataValue) then
+    if not tools.dataValueValid(val) then
       error(0x80620000) --BadNodeAttributesInvalid
     end
 
-    local val = dataValue.Value
-    local v
-    if val.Boolean ~= nil then
-      v = val.Boolean
-    elseif val.SByte ~= nil then
-      v = val.SByte
-    elseif val.Byte ~= nil then
-      v = val.Byte
-    elseif val.Int16 ~= nil then
-      v = val.Int16
-    elseif val.UInt16 ~= nil then
-      v = val.UInt16
-    elseif val.Int32 ~= nil then
-      v = val.Int32
-    elseif val.UInt32 ~= nil then
-      v = val.UInt32
-    elseif val.Int64 ~= nil then
-      v = val.Int64
-    elseif val.UInt64 ~= nil then
-      v = val.UInt64
-    elseif val.Float ~= nil then
-      v = val.Float
-    elseif val.Double ~= nil then
-      v = val.Double
-    elseif val.String ~= nil then
-      v = val.String
-    elseif val.DateTime ~= nil then
-      v = val.DateTime
-    elseif val.Guid ~= nil then
-      v = val.Guid
-    elseif val.ByteString ~= nil then
-      v = val.ByteString
-    elseif val.XmlElement ~= nil then
-      v = val.XmlElement
-    elseif val.NodeId ~= nil then
-      v = val.NodeId
-    elseif val.ExpandedNodeId ~= nil then
-      v = val.ExpandedNodeId
-    elseif val.StatusCode ~= nil then
-      v = val.StatusCode
-    elseif val.QualifiedName ~= nil then
-      v = val.QualifiedName
-    elseif val.LocalizedText ~= nil then
-      v = val.LocalizedText
-    elseif val.ExtensionObject ~= nil then
-      v = val.ExtensionObject
-    elseif val.DataValue ~= nil then
-      v = val.DataValue
-    elseif val.Variant ~= nil then
-      v = val.Variant
-    elseif val.DiagnosticInfo ~= nil then
-      v = val.DiagnosticInfo
-    else
-      error("unknown variant type")
-    end
+    local arrayDimensions = val.ArrayDimensions
 
     local valueRank
-    local arrayDimensions
-
-    if val.ByteString and type(v) ~= 'string'then
-       if type(v[1]) == 'number' then
-          valueRank = -1 -- Scalar
-       else
+    if val.IsArray then
+      if arrayDimensions == nil then
         valueRank = 1 -- OneDimension
-        arrayDimensions = {#v}
+        arrayDimensions = {#val.Value}
+      else
+        valueRank = 0 -- Unknown Dimensions
       end
     else
-      if type(v) == 'table' and v[1] ~= nil then
-        valueRank = 1 -- OneDimension
-        arrayDimensions = {#v}
-      else
-        valueRank = -1 -- Scalar
-      end
+      valueRank = -1 -- Scalar
     end
 
     local params = {
@@ -222,8 +176,8 @@ local ua = {
           Description = displayName,
           WriteMask = 0,
           UserWriteMask = 0,
-          Value = dataValue,
-          DataType = tools.getVariantType(val),
+          Value = val,
+          DataType = tools.getVariantTypeId(val),
           ValueRank = valueRank,
           ArrayDimensions = arrayDimensions,
           AccessLevel = 0,
@@ -235,6 +189,20 @@ local ua = {
     }
 
     return params
+  end,
+
+  createGuid = function()
+    local n1 = ba.rnds(4) & 0xFFFF
+    local n2 = ba.rnds(4) & 0xFFFF
+    local n3 = ba.rnds(4) & 0xFFFF
+    local n4 = ba.rnds(4) & 0xFFFF
+    local n5 = ba.rnds(4) & 0xFFFF
+    local n6 = ba.rnds(4) & 0xFFFF
+    local n7 = ba.rnds(4) & 0xFFFF
+    -- print(n1,n2,n3,n4,n5,n6)
+    local guid <const> =  string.format("%0.8x-%0.4x-%0.4x-%0.4x-%0.4x%0.4x%0.4x",n1,n2,n3,n4,n5,n6,n7)
+    -- print(guid)
+    return guid
   end,
 
   debug = debug

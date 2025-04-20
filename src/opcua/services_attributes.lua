@@ -62,54 +62,54 @@ local function getValue(attr, dataType)
 
   local variant = {}
   if dataType == Boolean then
-    variant.Boolean = attr or false
+    variant.Type = ua.Types.VariantType.Boolean
   elseif dataType == SByte then
-    variant.SByte = attr or 0
+    variant.Type = ua.Types.VariantType.SByte
   elseif dataType == Byte then
-    variant.Byte = attr
+    variant.Type = ua.Types.VariantType.Byte
   elseif dataType == Int16 then
-    variant.Int16 = attr
+    variant.Type = ua.Types.VariantType.Int16
   elseif dataType == UInt16 then
-    variant.UInt16 = attr
+    variant.Type = ua.Types.VariantType.UInt16
   elseif dataType == Int32 then
-    variant.Int32 = attr
+    variant.Type = ua.Types.VariantType.Int32
   elseif dataType == UInt32 then
-    variant.UInt32 = attr
+    variant.Type = ua.Types.VariantType.UInt32
   elseif dataType == Int64 then
-    variant.Int64 = attr
+    variant.Type = ua.Types.VariantType.Int64
   elseif dataType == UInt64 then
-    variant.UInt64 = attr
+    variant.Type = ua.Types.VariantType.UInt64
   elseif dataType == Float then
-    variant.Float = attr
+    variant.Type = ua.Types.VariantType.Float
   elseif dataType == Double then
-    variant.Double = attr or 0.0
+    variant.Type = ua.Types.VariantType.Double
   elseif dataType == String then
-    variant.String = attr
+    variant.Type = ua.Types.VariantType.String
   elseif dataType == DateTime or dataType == 294 then
-    variant.DateTime = attr
+    variant.Type = ua.Types.VariantType.DateTime
   elseif dataType == Guid then
-    variant.Guid = attr
+    variant.Type = ua.Types.VariantType.Guid
   elseif dataType == ByteString then
-    variant.ByteString = attr
+    variant.Type = ua.Types.VariantType.ByteString
   elseif dataType == XmlElement then
     return createBadAttribute()
   elseif dataType == NodeId then
-    variant.NodeId = attr
+    variant.Type = ua.Types.VariantType.NodeId
   elseif dataType == ExpandedNodeId then
-    variant.ExpandedNodeId = attr
+    variant.Type = ua.Types.VariantType.ExpandedNodeId
   elseif dataType == StatusCode then
-    variant.StatusCode = attr
+    variant.Type = ua.Types.VariantType.StatusCode
   elseif dataType == QualifiedName then
     assert(t.qualifiedNameValid(attr))
-    variant.QualifiedName = attr
-    if (variant.QualifiedName.ns == nil) then
-      variant.QualifiedName.ns = 0
+    variant.Type = ua.Types.VariantType.QualifiedName
+    if (attr.ns == nil) then
+      attr.ns = 0
     end
   elseif dataType == LocalizedText then
     assert(t.localizedTextValid(attr));
-    variant.LocalizedText = attr
+    variant.Type = ua.Types.VariantType.LocalizedText
   elseif dataType == ExtensionObject then
-    variant.ExtensionObject = attr
+    variant.Type = ua.Types.VariantType.ExtensionObject
   elseif dataType == DataValue then
     return createBadAttribute()
   elseif dataType == Variant then
@@ -120,12 +120,12 @@ local function getValue(attr, dataType)
     return {
       StatusCode = BadInternalError
     }
-    end
+  end
 
-  return {
-    Value = variant,
-    StatusCode = 0
-  }
+  variant.Value = attr
+  variant.StatusCode = 0
+
+  return variant
 end
 
 local function getCommonAttribute(attrs, attrId)
@@ -231,7 +231,11 @@ local function getVariableAttribute(attrs, attrId, nodeset)
   elseif attrId == AttributeId.Rank then
     return getValue(attr or -2, Int32)
   elseif attrId == AttributeId.ArrayDimensions then
-    return getValue(attr, UInt32)
+    local res = getValue(attr, UInt32)
+    if res.Value then
+      res.IsArray = true
+    end
+    return res
   elseif attrId == AttributeId.AccessLevel then
     return getValue(attr or 0, Byte)
   elseif attrId == AttributeId.UserAccessLevel then
@@ -261,8 +265,12 @@ local function getVariableTypeAttribute(attrs, attrId, nodeset)
     if attr == nil then return {StatusCode = 0} end
     return getValue(attr, attrs[AttributeId.DataType])
   elseif attrId == AttributeId.ArrayDimensions then
-    return getValue(attrs[attrId], UInt32)
-  else
+    local attr = getValue(attrs[attrId], UInt32)
+    if attr and attr.Value then
+      attr.IsArray = true
+    end
+    return attr
+else
     return getCommonAttribute(attrs, attrId, nodeset)
   end
 end
@@ -299,7 +307,7 @@ local function checkDataType(val, dataType, nodeset)
     -- if datatype is a node id in string representation
     local tt = ua.NodeId.fromString(dataType).id
     while tt >= AttributeId.Max and nodeset ~= nil do
-      local n = nodeset:getNode(dataType)
+      local n = nodeset[dataType]
       if n == nil then return s.NodeIdUnknown end
       for _,ref in ipairs(n.refs) do
         if ref.type == HasSubtype and ref.isForward == false then
@@ -324,7 +332,7 @@ local function checkDataType(val, dataType, nodeset)
     dataType = DateTime
   end
 
-  local vt = t.getVariantType(val)
+  local vt = t.getVariantTypeId(val)
   local isValid = (dataType == "i=24" or vt == dataType or vt == ExtensionObject) and t.variantValid(val)
   if isValid == false then
     error(BadTypeMismatch)
@@ -381,7 +389,7 @@ local function checkVariableAttribute(attrs, attrId, val, nodeset)
     if not t.dataValueValid(val) then
         error(BadAttributeIdInvalid)
     end
-    checkDataType(val.Value, attrs[AttributeId.DataType], nodeset)
+    checkDataType(val, attrs[AttributeId.DataType], nodeset)
   elseif attrId == AttributeId.DataType then
     checkDataType(val, NodeId, nodeset)
   elseif attrId == AttributeId.ValueRank then

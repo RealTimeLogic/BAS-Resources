@@ -33,7 +33,7 @@ local function readLoop(self, endpointUrl, transportProfile, connectCallback, me
       if dbgOn then traceD("binary | cosocket: new message decoded") end
       err = nil
     else
-      if dbgOn then traceD(fmt("binary | cosocket: reeive error '%s'", result)) end
+      if dbgOn then traceD(fmt("binary | cosocket: receive error '%s'", result)) end
       err = result
       result = nil
     end
@@ -43,7 +43,7 @@ local function readLoop(self, endpointUrl, transportProfile, connectCallback, me
       err = BadCommunicationError
     end
 
-    if err == BadCommunicationError then
+    if err ~= nil then
       self.sock = nil
       if dbgOn then traceD(fmt("binary | cosocket: Calling connect callback with error '%s'", err)) end
       connectCallback(err)

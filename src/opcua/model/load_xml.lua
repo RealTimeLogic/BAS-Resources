@@ -1,12 +1,12 @@
 local types = require("opcua.types")
+local tools = require("opcua.binary.tools")
+local nodeId = require("opcua.node_id")
 
 local AttributeId = types.AttributeId
 local NodeClass = types.NodeClass
 
 local tins = table.insert
 local strmatch = string.match
-
-local HasSubtype = "i=45"
 
 local DefaultAliases <const> = {
   ["HasComponent"] = "i=47",
@@ -64,8 +64,8 @@ local DefaultAliases <const> = {
 }
 
 local function GetDatatype(dt, aliases)
-  local nodeId = aliases[dt] or DefaultAliases[dt] or dt
-  return nodeId
+  local nId = aliases[dt] or DefaultAliases[dt] or dt
+  return nId
 end
 
 
@@ -130,8 +130,8 @@ local LocalizedTextAttributeParser = {
   end,
 }
 
-local function newLocalizedTextAttributeParser(nodeId, model, attrId)
-  local parser = { NodeId = nodeId, Model=model, AttrId = attrId}
+local function newLocalizedTextAttributeParser(nId, model, attrId)
+  local parser = { NodeId = nId, Model=model, AttrId = attrId}
   setmetatable(parser, {__index = LocalizedTextAttributeParser})
   return parser
 end
@@ -148,8 +148,8 @@ local QualifiedNameAttributeParser = {
   end,
 }
 
-local function newQualifiedNameAttributeParser(nodeId, model, attrId)
-  local parser = { NodeId = nodeId, Model=model, AttrId = attrId}
+local function newQualifiedNameAttributeParser(nId, model, attrId)
+  local parser = { NodeId = nId, Model=model, AttrId = attrId}
   setmetatable(parser, {__index = QualifiedNameAttributeParser})
   return parser
 end
@@ -248,26 +248,6 @@ local ModelParser = {
     self.Model.XmlSchemaUri = attribs.XmlSchemaUri
   end,
   done = function(self)
-    -- for _,model in ipairs(self.Models) do
-    --   if model.ModelUri == self.Model.ModelUri then
-    --     return "Model '" .. self.Model.ModelUri .. "' already exists"
-    --   end
-    -- end
-
-    for _, requiredModel in ipairs(self.Model.RequiredModels) do
-      local model
-      for _,m in ipairs(self.Models) do
-        if m.ModelUri == requiredModel.ModelUri then
-          model = m
-          break
-        end
-      end
-
-      if not model then
-        return "Required ModelUri " .. requiredModel.ModelUri .. " not found"
-      end
-    end
-
     tins(self.Models, self.Model)
   end
 }
@@ -363,9 +343,9 @@ local FieldParser = {
   end,
 }
 
-local function newFieldParser(nodeId, model)
+local function newFieldParser(nId, model)
   local parser = {
-    NodeId = nodeId,
+    NodeId = nId,
     Model = model
   }
   setmetatable(parser, {__index = FieldParser})
@@ -381,9 +361,9 @@ local DefinitionParser = {
   end,
 }
 
-local function newDefinitionParser(nodeId, model)
+local function newDefinitionParser(nId, model)
   local parser = {
-    NodeId = nodeId,
+    NodeId = nId,
     Model = model,
   }
   setmetatable(parser, {__index = DefinitionParser})
@@ -422,7 +402,7 @@ local ReferenceParser = {
 
     local targetNode = self.Model.Nodes[self.TargetId]
     if targetNode == nil then
-      targetNode = {refs={}, attrs={target=self.TargetId}}
+      targetNode = {attrs={}, refs={}}
       self.Model.Nodes[self.TargetId] = targetNode
     end
     addReference(targetNode.refs, {target=self.NodeId, type=self.RefType, isForward=(self.IsForward == false)})
@@ -433,9 +413,9 @@ local ReferenceParser = {
   end
 }
 
-local function newReferenceParser(nodeId, model)
+local function newReferenceParser(nId, model)
   local parser = {
-    NodeId = nodeId,
+    NodeId = nId,
     Model = model
   }
   setmetatable(parser, {__index = ReferenceParser})
@@ -451,9 +431,9 @@ local ReferencesParser = {
   end,
 }
 
-local function newReferencesParser(nodeId, model)
+local function newReferencesParser(nId, model)
   local parser = {
-    NodeId = nodeId,
+    NodeId = nId,
     Model = model,
   }
   setmetatable(parser, {__index = ReferencesParser})
@@ -465,27 +445,15 @@ end
 -- Value Attribute Parser
 -------------------------------------------------------------
 
-local function hexs(s)
-  return tonumber(s, 16)
-end
+-- local function hexs(s)
+--   return tonumber(s, 16)
+-- end
 
 local function toguid(str)
-  local d1,d2,d3,d4,d5,d6,d7,d8,d9,d10,d11 =
-    string.match(str, "^(%x%x%x%x%x%x%x%x)-(%x%x%x%x)-(%x%x%x%x)-(%x%x)(%x%x)-(%x%x)(%x%x)(%x%x)(%x%x)(%x%x)(%x%x)$")
-  assert(d1 and d2 and d3 and d4 and d5 and d6 and d7 and d8 and d9 and d10 and d11)
-  return {
-    Data1=hexs(d1),
-    Data2=hexs(d2),
-    Data3=hexs(d3),
-    Data4=hexs(d4),
-    Data5=hexs(d5),
-    Data6=hexs(d6),
-    Data7=hexs(d7),
-    Data8=hexs(d8),
-    Data9=hexs(d9),
-    Data10=hexs(d10),
-    Data11=hexs(d11),
-  }
+  if not tools.guidValid(str) then
+    error("Invalid GUID: " .. str)
+  end
+  return str
 end
 
 local function toboolean(val)
@@ -498,20 +466,22 @@ local function todatetime(str)
   return dt+ns/1000000000
 end
 
-local function PutValue(variant, typeName, val, isArray)
+local function PutValue(variant, vartype, val, isArray)
+  variant.Type = vartype
   if isArray then
-    if type(variant[typeName]) ~= "table" then
-      variant[typeName] = {}
+    variant.IsArray = true
+    if type(variant.Value) ~= "table" then
+      variant.Value = {}
     end
-    tins(variant[typeName], val)
+    tins(variant.Value, val)
   else
-    variant[typeName] = val
+    variant.Value = val
   end
 end
 
 local StringValueParser = {
   text = function (self, text)
-    PutValue(self.Value, "String", trim_spaces(text), self.IsArray)
+    PutValue(self.Value, types.VariantType.String, trim_spaces(text), self.IsArray)
   end,
 }
 
@@ -531,7 +501,7 @@ local ByteStringValueParser = {
   end,
   done = function (self)
     local b64 = ba.b64decode(self.Text)
-    PutValue(self.Value, "ByteString", b64, self.IsArray)
+    PutValue(self.Value, types.VariantType.ByteString, b64, self.IsArray)
   end,
 }
 
@@ -549,15 +519,15 @@ local NumberValueParser = {
   text = function (self, text)
     local str = trim_spaces(text)
     local val = self.Conv(str)
-    PutValue(self.Value, self.TypeName, val, self.IsArray)
+    PutValue(self.Value, self.Type, val, self.IsArray)
   end,
 }
 
-local function newNumberValueParser(value, typeName, isArray, conv)
+local function newNumberValueParser(value, type, isArray, conv)
   local parser = {
     Conv = conv,
     IsArray = isArray,
-    TypeName = typeName,
+    Type = type,
     Value = value
   }
   setmetatable(parser, {__index = NumberValueParser})
@@ -575,7 +545,7 @@ local LocalizedTextValueParser = {
     end
   end,
   done = function (self)
-    PutValue(self.Value, "LocalizedText", {Text=self.TextValue.String, Locale=self.LocaleValue.String}, self.IsArray)
+    PutValue(self.Value, types.VariantType.LocalizedText, {Text=self.TextValue.Value, Locale=self.LocaleValue.Value}, self.IsArray)
   end,
 }
 
@@ -590,6 +560,55 @@ local function newLocalizedTextValueParser(value, isArray)
   return parser
 end
 
+local QualifiedNameValueParser = {
+  createParser = function (self, tagname)
+    if tagname == "NamespaceIndex" then
+      return nil, newNumberValueParser(self.NamespaceIndex, types.VariantType.UInt16, false, tonumber)
+    elseif tagname == "Name" then
+      return nil, newStringValueParser(self.Name, false)
+    else
+      return "Unknown tag inside QualifiedName: " .. tagname
+    end
+  end,
+  done = function (self)
+    PutValue(self.Value, types.VariantType.QualifiedName, {Name=self.Name.Value, ns=self.NamespaceIndex.Value}, self.IsArray)
+  end,
+}
+
+local function newQualifiedNameValueParser(value, isArray)
+  local parser = {
+    IsArray = isArray,
+    NamespaceIndex = {},
+    Name = {},
+    Value = value
+  }
+  setmetatable(parser, {__index = QualifiedNameValueParser})
+  return parser
+end
+
+local NodeIdValueParser = {
+  createParser = function (self, tagname)
+    if tagname == "Identifier" then
+      return nil, newStringValueParser(self.NodeId, false)
+    else
+      return "Unknown tag inside NodeId: " .. tagname
+    end
+  end,
+  done = function (self)
+    PutValue(self.Value, types.VariantType.NodeId, self.NodeId.Value, self.IsArray)
+  end,
+}
+
+local function newNodeIdValueParser(value, isArray)
+  local parser = {
+    IsArray = isArray,
+    NodeId = {},
+    Value = value
+  }
+  setmetatable(parser, {__index = NodeIdValueParser})
+  return parser
+end
+
 
 local function newScalarParser(value, tagname, isarray)
   if tagname == "String" then
@@ -597,36 +616,42 @@ local function newScalarParser(value, tagname, isarray)
   elseif tagname == "ByteString" then
     return newByteStringValueParser(value, isarray)
   elseif tagname == "DateTime" then
-    return newNumberValueParser(value, "DateTime", isarray, todatetime)
+    return newNumberValueParser(value, types.VariantType.DateTime, isarray, todatetime)
   elseif tagname == "Boolean" then
-    return newNumberValueParser(value, "Boolean", isarray, toboolean)
+    return newNumberValueParser(value, types.VariantType.Boolean, isarray, toboolean)
   elseif tagname == "Guid" then
-    return newNumberValueParser(value, "Guid", isarray, toguid)
+    return newNumberValueParser(value, types.VariantType.Guid, isarray, toguid)
   elseif tagname == "Byte" then
-    return newNumberValueParser(value, "Byte", isarray, tonumber)
+    return newNumberValueParser(value, types.VariantType.Byte, isarray, tonumber)
   elseif tagname == "SByte" then
-    return newNumberValueParser(value, "SByte", isarray, tonumber)
+    return newNumberValueParser(value, types.VariantType.SByte, isarray, tonumber)
   elseif tagname == "Int16" then
-    return newNumberValueParser(value, "Int16", isarray, tonumber)
+    return newNumberValueParser(value, types.VariantType.Int16, isarray, tonumber)
   elseif tagname == "UInt16" then
-    return newNumberValueParser(value, "UInt16", isarray, tonumber)
+    return newNumberValueParser(value, types.VariantType.UInt16, isarray, tonumber)
   elseif tagname == "UInt32" then
-    return newNumberValueParser(value, "UInt32", isarray, tonumber)
+    return newNumberValueParser(value, types.VariantType.UInt32, isarray, tonumber)
   elseif tagname == "Int32" then
-    return newNumberValueParser(value, "Int32", isarray, tonumber)
+    return newNumberValueParser(value, types.VariantType.Int32, isarray, tonumber)
   elseif tagname == "Int64" then
-    return newNumberValueParser(value, "Int64", isarray, tonumber)
+    return newNumberValueParser(value, types.VariantType.Int64, isarray, tonumber)
   elseif tagname == "UInt64" then
-    return newNumberValueParser(value, "UInt64", isarray, tonumber)
+    return newNumberValueParser(value, types.VariantType.UInt64, isarray, tonumber)
   elseif tagname == "Float" then
-    return newNumberValueParser(value, "Float", isarray, tonumber)
+    return newNumberValueParser(value, types.VariantType.Float, isarray, tonumber)
   elseif tagname == "Double" then
-    return newNumberValueParser(value, "Double", isarray, tonumber)
+    return newNumberValueParser(value, types.VariantType.Double, isarray, tonumber)
   elseif tagname == "LocalizedText" then
     return newLocalizedTextValueParser(value, isarray)
+  elseif tagname == "QualifiedName" then
+    return newQualifiedNameValueParser(value, isarray)
+  elseif tagname == "NodeId" then
+    return newNodeIdValueParser(value, isarray)
   elseif tagname == "ExtensionObject" then
     return NilParser
     -- return newNumberValueParser(value, "Double", isarray, tonumber)
+  elseif tagname == "ListOfExtensionObject" then
+    return NilParser
   else
     error("Unknown scalar type: " .. tagname)
   end
@@ -657,13 +682,13 @@ local ValueAttributeParser = {
 end,
   done = function (self)
     local node = self.Model.Nodes[self.NodeId]
-    node.attrs[AttributeId.Value] = {Value=self.Value}
+    node.attrs[AttributeId.Value] = self.Value
   end,
 }
 
-local function newValueAttributeParser(nodeId, model)
+local function newValueAttributeParser(nId, model)
   local parser = {
-    NodeId = nodeId,
+    NodeId = nId,
     Model = model,
     Value = {}
   }
@@ -878,102 +903,243 @@ xmlHandler.EMPTY_ELEMENT = function(context,tagname,attrs)
   return xmlHandler.END_ELEMENT(context,tagname)
 end
 
-local function fillInheritedDefinitions(model)
-  for _,node in pairs(model.Nodes) do
-    local definitions = {}
-    local type = node
-    -- Collect all superTypes
-    while type and
-          type.attrs[AttributeId.NodeClass] == NodeClass.DataType and
-          type.attrs[AttributeId.NodeId] ~= "i=24"
-    do
-      -- Every DataType contain part of definition
-      -- To construct full definition we need also collect
-      -- fields from parent types and compose full definition.
-      tins(definitions, type.fields)
-      local superType
-      for _,ref in ipairs(type.refs) do
-        -- Search HasSubtype reference
-        if ref.type == HasSubtype and ref.isForward == false then
-          superType = model.Nodes[ref.target]
-          break
-        end
-      end
-      type = superType
+local function createLoader(xml)
+  local loader
+  if type(xml) == "string" then
+    loader = function()
+      local result = xml
+      xml = nil
+      return result
     end
-
-    if #definitions >= 1 then
-      local fullDefinition = {}
-      for i = #definitions, 1, -1 do
-        local definition = definitions[i]
-        for _,field in ipairs(definition) do
-          tins(fullDefinition, field)
-        end
-      end
-
-      node.definition = fullDefinition
+  elseif type (xml) == "function" then
+    loader = xml
+  elseif type(xml) == "table" or type(xml) == "userdata" and xml.read then
+    loader = function()
+      local str = xml:read(4096)
+      return str
     end
+  else
+    error("invalid loader param")
   end
+  return loader
 end
 
-local function loadModel(model, xml)
-  local context = {
-    len = 0,
-    stack = {},
-    parsers = {},
-    UANodeSet = model
-  }
+local function nilTrace()
+end
 
-  local handler = {
+local function createXmlHandler(context, dbgTrace)
+  return {
     START_ELEMENT = function (_, tagname, attribs)
-      return xmlHandler.START_ELEMENT(context, tagname, attribs)
+      local tagNons = string.match(tagname, "([^:]+)$")
+      if dbgTrace then
+        dbgTrace("START_ELEMENT "..tagname.." "..tagNons)
+      end
+      return xmlHandler.START_ELEMENT(context, tagNons, attribs)
     end,
     END_ELEMENT = function(_, tagname)
-      return xmlHandler.END_ELEMENT(context, tagname)
+      local tagNons = string.match(tagname, "([^:]+)$")
+      if dbgTrace then
+        dbgTrace("END_ELEMENT "..tagname.." "..tagNons)
+      end
+      return xmlHandler.END_ELEMENT(context, tagNons)
     end,
     TEXT = function(_, text)
+      if dbgTrace then
+        dbgTrace("TEXT "..text)
+      end
       return xmlHandler.TEXT(context, text)
     end,
     EMPTY_ELEMENT = function(_, tagname, attribs)
-      return xmlHandler.EMPTY_ELEMENT(context, tagname, attribs)
+      local tagNons = string.match(tagname, "([^:]+)$")
+      if dbgTrace then
+        dbgTrace("EMPTY_ELEMENT "..tagname.." "..tagNons)
+      end
+      return xmlHandler.EMPTY_ELEMENT(context, tagNons, attribs)
     end,
   }
+end
 
-  local parser=xparser.create(handler)
-
+local function parseXml(loader, parser)
   local err, detail
-  if type(xml) == "function" then
-    while true do
-      local chunk = xml()
-      if not chunk then
+  while true do
+    local chunk = loader()
+    if not chunk then
+      break
+    end
+
+    err, detail = parser:parse(chunk)
+    if err ~= true and detail ~= false then
+      if err then
         break
       end
-
-      err, detail = parser:parse(chunk)
-      if err ~= true and detail ~= false then
-        if err then
-          break
-        end
-        if detail then
-          break
-        end
+      if detail then
+        break
       end
     end
-  else
-    err, detail = parser:parse(xml)
   end
 
   -- Error happend
   if err then
-    return err
+    error(err)
   end
   if type(detail) == "string" then
-    return detail
+    error(detail)
+  end
+end
+
+local function changeNs(nid, changeMap)
+  local id = nodeId.fromString(nid)
+  local ns = changeMap[id.ns]
+  if ns and id.ns ~= ns then
+    id.ns = ns
+    nid = nodeId.toString(id)
   end
 
-  fillInheritedDefinitions(model)
+  return nid
+end
 
-  return err
+local function loadModel(self, xml, dbgTrace)
+  if not dbgTrace then
+    dbgTrace = nilTrace
+  end
+
+  local context = {
+    len = 0,
+    stack = {},
+    parsers = {},
+    UANodeSet = {
+      Models = {},
+      NamespaceUris = {},
+      Nodes = {},
+      Aliases = {},
+    }
+  }
+
+  local handler = createXmlHandler(context, dbgTrace)
+  local parser=xparser.create(handler)
+  local loader = createLoader(xml)
+  parseXml(loader, parser)
+
+  for _, model in ipairs(context.UANodeSet.Models) do
+    for _, requiredModel in ipairs(model.RequiredModels) do
+      local mod
+      for _,m in ipairs(context.UANodeSet.Models) do
+        if m.ModelUri == requiredModel.ModelUri then
+          mod = m
+          break
+        end
+      end
+
+      for _,m in ipairs(self.Models) do
+        if m.ModelUri == requiredModel.ModelUri then
+          mod = m
+          break
+        end
+      end
+
+      if not mod then
+        error("Required ModelUri " .. requiredModel.ModelUri .. " not found")
+      end
+    end
+  end
+
+  local existingUriMap  = {}
+  local maxIndex = 0
+  for idx, namespaceUri in ipairs(self.NamespaceUris) do
+    existingUriMap[namespaceUri] = idx
+    existingUriMap[idx] = namespaceUri
+    if idx > maxIndex then
+      maxIndex = idx
+    end
+  end
+
+  local changeIndexMap = {}
+  -- ipairs because
+  for i,uri in ipairs(context.UANodeSet.NamespaceUris) do
+    if existingUriMap[uri] then
+      -- if namespace has same index then no need to change
+      if existingUriMap[uri] == i then
+        goto continue
+      end
+
+      error("NamespaceUri " .. uri .. " already exists")
+    end
+
+    maxIndex = maxIndex + 1
+    tins(self.NamespaceUris, uri)
+    dbgTrace("NamespaceUri " .. uri .. "index from ".. i .. " changed to " .. maxIndex)
+    existingUriMap[uri] = maxIndex
+    existingUriMap[maxIndex] = uri
+    changeIndexMap[i] = maxIndex
+    ::continue::
+  end
+
+  for alias, nid in pairs(context.UANodeSet.Aliases) do
+    local newNid = changeNs(nid, changeIndexMap)
+    local oldId = self.Aliases[alias]
+    if oldId and oldId ~= newNid then
+      error("Alias ".. alias .. " for node ".. nid .. " already exists.")
+    end
+  end
+
+  local newNodes = {}; -- required because keys should not change in original table
+  -- Change namespace index in all nodes
+  for oldId,node in pairs(context.UANodeSet.Nodes) do
+    local newId = changeNs(oldId, changeIndexMap)
+    if newId ~= oldId then
+      dbgTrace("NodeId " .. oldId .. " changed to " .. newId)
+    else
+      dbgTrace("NodeId " .. oldId .. " left as is ")
+    end
+
+    -- change nodeIDs in attributes
+    for attrId,attrValue in pairs(node.attrs) do
+      if type(attrValue) ~= "string" or not nodeId.isValid(attrValue) then
+        goto continue
+      end
+
+      local attrNodeId = changeNs(attrValue, changeIndexMap)
+      if attrNodeId ~= attrValue then
+        node.attrs[attrId] = attrNodeId
+        dbgTrace("attribute ".. attrId .. " changed " .. attrValue .. " to " .. attrNodeId)
+      end
+
+      ::continue::
+    end
+
+    for idx,ref in pairs(node.refs) do
+      local targetNodeId = changeNs(ref.target, changeIndexMap)
+      if targetNodeId ~= ref.target then
+        dbgTrace("ref #" .. idx .. " target changed " .. ref.target .. " to " .. targetNodeId)
+        ref.target = targetNodeId
+      end
+    end
+    newNodes[newId] = node
+  end
+  context.UANodeSet.Nodes = newNodes
+
+  for alias, nid in pairs(context.UANodeSet.Aliases) do
+    local newNid = changeNs(nid, changeIndexMap)
+    -- local oldId = self.Aliases[alias]
+    dbgTrace("New alias ''" .. alias .. "'' for node " .. nid .. " changed to " .. newNid)
+    self.Aliases[alias] = newNid
+  end
+
+  for nid, node in pairs(context.UANodeSet.Nodes) do
+    if self.Nodes[nid] then
+      local n = self.Nodes[nid]
+      dbgTrace("Node " .. nid .. " already exists. Adding refs")
+      for _,ref in ipairs(node.refs) do
+        addReference(n.refs, ref)
+      end
+    else
+      self.Nodes[nid] = node
+    end
+  end
+
+  for _,model in ipairs(context.UANodeSet.Models) do
+    tins(self.Models, model)
+  end
 end
 
 return loadModel
