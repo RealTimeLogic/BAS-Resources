@@ -1,3 +1,5 @@
+local types = require("opcua.types")
+
 local function newVariableName(context)
   local count = context.varCount
   count = count + 1
@@ -176,55 +178,58 @@ local function getBooleanUaValue(_, value, _)
 end
 
 local function getVariantUaValue(context, value, output)
-  local v = value.Value
+  local v = value
   local valueData
   local valueSize
   local valueType
-  if v.Boolean ~= nil then
+  if v == nil then
+    return nil
+  end
+  if v.Type == types.VariantType.Boolean then
     valueType = "UA_Type_Boolean"
-    valueData, valueSize = getBooleanUaValue(context, v.Boolean, output)
-  elseif v.SByte then
+    valueData, valueSize = getBooleanUaValue(context, v.Value, output)
+  elseif v.Type == types.VariantType.SByte then
     valueType = "UA_Type_SByte"
-    valueData, valueSize = getUInt32UaValue(context, v.SByte, output)
-  elseif v.Byte then
+    valueData, valueSize = getUInt32UaValue(context, v.Value, output)
+  elseif v.Type == types.VariantType.Byte then
     valueType = "UA_Type_Byte"
-    valueData, valueSize = getUInt32UaValue(context, v.Byte, output)
-  elseif v.Int16 then
+    valueData, valueSize = getUInt32UaValue(context, v.Value, output)
+  elseif v.Type == types.VariantType.Int16 then
     valueType = "UA_Type_Int16"
-    valueData, valueSize = getInt32UaValue(context, v.Int16, output)
-  elseif v.UInt16 then
+    valueData, valueSize = getInt32UaValue(context, v.Value, output)
+  elseif v.Type == types.VariantType.UInt16 then
     valueType = "UA_Type_UInt16"
-    valueData, valueSize = getUInt32UaValue(context, v.UInt16, output)
-  elseif v.Int32 then
+    valueData, valueSize = getUInt32UaValue(context, v.Value, output)
+  elseif v.Type == types.VariantType.Int32 then
     valueType = "UA_Type_Int32"
-    valueData, valueSize = getInt32UaValue(context, v.Int32, output)
-  elseif v.UInt32 then
+    valueData, valueSize = getInt32UaValue(context, v.Value, output)
+  elseif v.Type == types.VariantType.UInt32 then
     valueType = "UA_Type_UInt32"
-    valueData, valueSize = getUInt32UaValue(context, v.UInt32, output)
-  elseif v.Float then
+    valueData, valueSize = getUInt32UaValue(context, v.Value, output)
+  elseif v.Type == types.VariantType.Float then
     valueType = "UA_Type_Float"
-    valueData, valueSize = getFloatUaValue(context, v.Float, output)
-  elseif v.Double then
+    valueData, valueSize = getFloatUaValue(context, v.Value, output)
+  elseif v.Type == types.VariantType.Double then
     valueType = "UA_Type_Double"
-    valueData, valueSize = getDoubleUaValue(context, v.Double, output)
-  elseif v.String then
+    valueData, valueSize = getDoubleUaValue(context, v.Value, output)
+  elseif v.Type == types.VariantType.String then
     valueType = "UA_Type_String"
-    valueData, valueSize = getStringUaValue(context, v.String, output)
-  elseif v.ByteString then
+    valueData, valueSize = getStringUaValue(context, v.Value, output)
+  elseif v.Type == types.VariantType.ByteString then
     valueType = "UA_Type_ByteString"
-    valueData, valueSize = getByteStringUaValue(context, v.ByteString, output)
-  elseif v.DateTime then
+    valueData, valueSize = getByteStringUaValue(context, v.Value, output)
+  elseif v.Type == types.VariantType.DateTime then
     valueType = "UA_Type_DateTime"
-    valueData, valueSize = getDoubleUaValue(context, v.DateTime, output)
-  elseif v.LocalizedText then
+    valueData, valueSize = getDoubleUaValue(context, v.Value, output)
+  elseif v.Type == types.VariantType.LocalizedText then
     valueType = "UA_Type_LocalizedText"
-    valueData, valueSize = getLocalizedTextUaValue(context, v.LocalizedText, output)
+    valueData, valueSize = getLocalizedTextUaValue(context, v.Value, output)
   else
     for k, _ in pairs(v) do
       error("invalid variant value: " .. k)
     end
 
-    return "{}"
+    return nil
   end
 
   local variantVarName = newVariableName(context).."_variant"
@@ -238,6 +243,9 @@ local function getAttrValue(context, attrs, attrName, value, func, output)
   end
 
   local uaValue = func(context, value, output)
+  if uaValue == nil then
+    return
+  end
   local attrValue = string.format("{.id=%s, .data=%s},", attrName, uaValue)
   table.insert(attrs, attrValue)
 end

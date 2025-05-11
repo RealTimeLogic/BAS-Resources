@@ -32,7 +32,7 @@ function ch:hello(hello)
   if infOn then traceI(fmt("binary | sending hello")) end
 
   self:beginMessage("HEL")
-  self.BinaryEncoder:hello(hello)
+  self.Encoder:hello(hello)
   self:finishMessage()
   self:send()
 
@@ -44,7 +44,7 @@ function ch:acknowledge(ack)
   if infOn then traceI(fmt("binary | sending acknowledge")) end
 
   self:beginMessage("ACK")
-  self.BinaryEncoder:acknowledge(ack)
+  self.Encoder:acknowledge(ack)
   self:finishMessage("F")
   self:send()
 
@@ -112,9 +112,9 @@ function ch:message(body)
   self:beginMessage(msgType, body.RequestId)
 
   if dbgOn then traceD(fmt("binary | encoding message")) end
-  local extObject = self.Model.Nodes[type]
-  self.BinaryEncoder:nodeId(extObject.binaryId)
-  self.Model:Encode(type, body)
+  local extObject = self.Encoder:getExtObject(type)
+  self.Encoder:nodeId(extObject.binaryId)
+  self.Encoder:Encode(type, body)
 
   self:finishMessage()
   self:send()
@@ -151,30 +151,43 @@ end
 -- Queue interface through which fills up message body
 function ch:pushBack(data)
   local tailSize = self.policy and self.policy:tailSize() or 0
-  if self.data:tailCapacity() - tailSize <= 0 then
+  local tailCap = self.data:tailCapacity() - tailSize
+
+  if tailCap <= 0 then
     self:finishChunk("C")
     self:send()
   end
 
   if type(data) == 'number' then
     self.data:pushBack(data)
+    return
+  end
+
+  local dsize <const> = #data
+  if type(data) == 'string' and tailCap > dsize then
+    self.data:pushBack(data)
   else
     local pos = 1
-    local dsize = #data
     while pos <= dsize do
       if pos ~= 1 then
         self:finishChunk("C")
         self:send()
       end
 
-      local tailCap = self.data:tailCapacity() - tailSize
+      tailCap = self.data:tailCapacity() - tailSize
       local leftSize = dsize - (pos - 1)
       if leftSize > tailCap then
         leftSize = tailCap
       end
 
-      for i = 0,(leftSize-1) do
-        self.data:pushBack(data[pos+i])
+      if type(data) == 'string' then
+        for i = 0,(leftSize-1) do
+          self.data:pushBack(data:byte(pos+i))
+        end
+      else
+        for i = 0,(leftSize-1) do
+          self.data:pushBack(data[pos+i])
+        end
       end
 
       pos = pos + leftSize
@@ -282,8 +295,7 @@ function ch:setBufferSize(size)
   local infOn = self.logging.infOn
   if infOn then traceI(fmt("binary | New buffer size '%d'",size)) end
   self.data = Q.new(size)
-  self.BinaryEncoder = BinaryEncoder.new(self)
-  self.Model.Serializer = self.BinaryEncoder
+  self.Encoder = self.Model:createBinaryEncoder(self)
 end
 
 function ch:setChannelId(channelId)
@@ -321,9 +333,6 @@ local function new(config, security, sock, hasChunks, model)
   assert(type(hasChunks) == "boolean", "hasChunks must be boolean")
   assert(model ~= nil, "no model")
 
-  local m = {}
-  setmetatable(m, {__index=model})
-
   local res = {
     security = security,
     logging = config.logging.binary,
@@ -336,7 +345,7 @@ local function new(config, security, sock, hasChunks, model)
 
     -- buffer for Chunk.
     -- Binary types encoder
-    Model = m,
+    Model = model,
 
     -- Socket where to flush chunks
     sock = sock,

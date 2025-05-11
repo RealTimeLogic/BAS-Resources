@@ -2,6 +2,7 @@ local s = require("opcua.status_codes")
 local compat = require "opcua.compat"
 local n = require("opcua.node_id")
 local tools = require("opcua.binary.tools")
+local types = require("opcua.types")
 local tins = table.insert
 
 local BadEncodingError = s.BadEncodingError
@@ -122,7 +123,6 @@ enc.char = enc.uint8
 enc.byte = enc.uint8
 enc.sbyte = enc.int8
 enc.statusCode = enc.uint32
-enc.charArray = enc.string
 
 function enc:byteString(v)
   if v ~= nil then
@@ -145,7 +145,7 @@ function enc:dateTime(v)
   end
 
   local secs = math.floor(v)
-  local msecs = math.ceil((v - secs)*1000)
+  local msecs = math.floor((v - secs)*1000 + 0.5)
   local dt = ba.datetime(secs):date()
   local str
   if msecs == 0 then
@@ -157,12 +157,19 @@ function enc:dateTime(v)
 end
 
 function enc:guid(v)
-  local str = string.format("%08X-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X",
-    v.Data1, v.Data2, v.Data3, v.Data4, v.Data5, v.Data6, v.Data7, v.Data8, v.Data9, v.Data10, v.Data11)
-  self:string(str)
+  if not tools.guidValid(v) then
+    error(s.BadDecodingError)
+  end
+
+  self:string(v)
 end
 
 function enc:localizedText(v)
+  if v == nil then
+    self:jsPushValue("null")
+    return
+  end
+
   self:beginObject()
 
   if v.Locale then
@@ -208,10 +215,21 @@ function enc:nodeId(v)
 
   if type(v) == 'string' then
     v = n.fromString(v)
-  end
-
-  if type(v) == 'table' and v.id ~= nil then
     id = v.id
+    idType = v.type
+    if v.ns ~= nil then
+      if type(v.ns) == 'number' then
+        ns = v.ns
+      elseif type(v.ns) == 'string' then
+        nsUri = v.ns
+      end
+    end
+    if v.srv ~= nil then
+      si = v.srv
+    end
+  elseif type(v) == 'table' and v.id ~= nil then
+    id = v.id
+    idType = v.type
     if v.ns ~= nil then
       if type(v.ns) == 'number' then
         ns = v.ns
@@ -230,26 +248,43 @@ function enc:nodeId(v)
     error(s.BadEncodingError)
   end
 
-  if type(id) == 'number' then
-    idType = 0
+  if idType == nil then
+    if type(id) == 'number' then
+      idType = n.Numeric
+    elseif type(id) == 'string' and tools.guidValid(id) then
+      idType = n.Guid
+    elseif type(id) == 'string' then
+      idType = n.String
+    elseif type(id) == 'table' then
+      idType = n.ByteString
+    else
+      error(s.BadEncodingError)
+    end
+  end
+
+  -- WTF: binary nodeIDtypes are different from JSON nodeIDtypes
+  if idType == n.Numeric or idType == n.TwoByte or idType == n.FourByte then
     idEnc = self.uint32
-  elseif type(id) == 'string' then
-    idType = 1
+    idType = 0
+  elseif idType == n.String then
     idEnc = self.string
-  elseif type(id) == 'table' and id.Data1 ~= nil then
-    idType = 2
+    idType = 1
+  elseif idType == n.Guid then
     idEnc = self.guid
-  elseif type(id) == 'table' then
-    idType = 3
+    idType = 2
+  elseif idType == n.ByteString then
     idEnc = self.byteString
+    idType = 3
   else
     error(s.BadEncodingError)
   end
 
-  -- Node ID fields mask
-  self:beginField("IdType")
-  self:uint8(idType)
-  self:endField("IdType")
+  -- IDtype is skipped for UInt32 IDs
+  if idType ~= 0 then
+    self:beginField("IdType")
+    self:uint8(idType)
+    self:endField("IdType")
+  end
 
   -- Node ID value
   self:beginField("Id")
@@ -283,109 +318,58 @@ end
 enc.expandedNodeId = enc.nodeId
 
 function enc:variant(v, model)
-  local data
   local encFunc
-  local vt
+  local vt = v.Type
 
-  if v.Boolean ~= nil then
-    vt = 1
-    data = v.Boolean
+  if vt == types.VariantType.Boolean then
     encFunc = self.boolean
-  elseif v.SByte ~= nil then
-    vt = 2
-    data = v.SByte
+  elseif vt == types.VariantType.SByte then
     encFunc = self.sbyte
-  elseif v.Byte ~= nil then
-    vt = 3
-    data = v.Byte
+  elseif vt == types.VariantType.Byte then
     encFunc = self.byte
-  elseif v.Int16 ~= nil then
-    vt = 4
-    data = v.Int16
+  elseif vt == types.VariantType.Int16 then
     encFunc = self.int16
-  elseif v.UInt16 ~= nil then
-    vt = 5
-    data = v.UInt16
+  elseif vt == types.VariantType.UInt16 then
     encFunc = self.uint16
-  elseif v.Int32 ~= nil then
-    vt = 6
-    data = v.Int32
+  elseif vt == types.VariantType.Int32 then
     encFunc = self.int32
-  elseif v.UInt32 ~= nil then
-    vt = 7
-    data = v.UInt32
+  elseif vt == types.VariantType.UInt32 then
     encFunc = self.uint32
-  elseif v.Int64 ~= nil then
-    vt = 8
-    data = v.Int64
+  elseif vt == types.VariantType.Int64 then
     encFunc = self.int64
-  elseif v.UInt64 ~= nil then
-    vt = 9
-    data = v.UInt64
+  elseif vt == types.VariantType.UInt64 then
     encFunc = self.uint64
-  elseif v.Float ~= nil then
-    vt = 10
-    data = v.Float
+  elseif vt == types.VariantType.Float then
     encFunc = self.float
-  elseif v.Double ~= nil then
-    vt = 11
-    data = v.Double
+  elseif vt == types.VariantType.Double then
     encFunc = self.double
-  elseif v.String ~= nil then
-    vt = 12
-    data = v.String
+  elseif vt == types.VariantType.String then
     encFunc = self.string
-  elseif v.DateTime ~= nil then
-    vt = 13
-    data = v.DateTime
+  elseif vt == types.VariantType.DateTime then
     encFunc = self.dateTime
-  elseif v.Guid ~= nil then
-    vt = 14
-    data = v.Guid
+  elseif vt == types.VariantType.Guid then
     encFunc = self.guid
-  elseif v.ByteString ~= nil then
-    vt = 15
-    data = v.ByteString
+  elseif vt == types.VariantType.ByteString then
     encFunc = self.byteString
-  elseif v.XmlElement ~= nil then
-    vt = 16
-    data = v.XmlElement
+  elseif vt == types.VariantType.XmlElement then
     encFunc = self.xmlElement
-  elseif v.NodeId ~= nil then
-    vt = 17
-    data = v.NodeId
+  elseif vt == types.VariantType.NodeId then
     encFunc = self.nodeId
-  elseif v.ExpandedNodeId ~= nil then
-    vt = 18
-    data = v.ExpandedNodeId
+  elseif vt == types.VariantType.ExpandedNodeId then
     encFunc = self.expandedNodeId
-  elseif v.StatusCode ~= nil then
-    vt = 19
-    data = v.StatusCode
+  elseif vt == types.VariantType.StatusCode then
     encFunc = self.statusCode
-  elseif v.QualifiedName ~= nil then
-    vt = 20
-    data = v.QualifiedName
+  elseif vt == types.VariantType.QualifiedName then
     encFunc = self.qualifiedName
-  elseif v.LocalizedText ~= nil then
-    vt = 21
-    data = v.LocalizedText
+  elseif vt == types.VariantType.LocalizedText then
     encFunc = self.localizedText
-  elseif v.ExtensionObject ~= nil then
-    vt = 22
-    data = v.ExtensionObject
+  elseif vt == types.VariantType.ExtensionObject then
     encFunc = self.extensionObject
-  elseif v.DataValue ~= nil then
-    vt = 23
-    data = v.DataValue
+  elseif vt == types.VariantType.DataValue then
     encFunc = self.dataValue
-  elseif v.Variant ~= nil then
-    vt = 24
-    data = v.Variant
+  elseif vt == types.VariantType.Variant then
     encFunc = self.variant
-  elseif v.DiagnosticInfo ~= nil then
-    vt = 25
-    data = v.DiagnosticInfo
+  elseif vt == types.VariantType.DiagnosticInfo then
     encFunc = self.diagnosticInfo
   else
     for _,_ in pairs(v) do
@@ -395,8 +379,6 @@ function enc:variant(v, model)
     return
   end
 
-  assert(data ~= nil)
-  assert(vt ~= nil)
   assert(encFunc ~= nil)
   self:beginObject()
 
@@ -406,7 +388,8 @@ function enc:variant(v, model)
   self:endField("Type")
 
   self:beginField("Body")
-  local isArray = type(data) == 'table' and data[1] ~= nil
+  local data = v.Value
+  local isArray = v.IsArray
   if isArray then
     self:beginArray(#data)
     for _,val in ipairs(data) do
@@ -428,7 +411,7 @@ function enc:dataValue(v, model)
 
   if v.Value then
     self:beginField("Value")
-    self:variant(v.Value, model)
+    self:variant(v, model)
     self:endField("Value")
   end
 
@@ -490,7 +473,7 @@ function enc:diagnosticInfo(v)
   end
   if v.AdditionalInfo ~= nil then
     self:beginField("AdditionalInfo")
-    self:charArray(v.AdditionalInfo)
+    self:string(v.AdditionalInfo)
     self:endField("AdditionalInfo")
   end
   if v.InnerStatusCode ~= nil then
@@ -507,10 +490,13 @@ function enc:diagnosticInfo(v)
   self:endObject()
 end
 
-function enc:extensionObject(v, model)
+function enc:extensionObject(v, encoder)
   self:beginObject()
 
-  local extObject = model.Nodes[v.TypeId]
+  local extObject
+  if encoder then
+    extObject = encoder:getExtObject(v.TypeId)
+  end
 
   self:beginField("TypeId")
   self:nodeId(extObject and extObject.jsonId or v.TypeId)
@@ -522,7 +508,7 @@ function enc:extensionObject(v, model)
 
   if v.Body then
     self:beginField("Body")
-    model:Encode(v.TypeId, v.Body)
+    encoder:Encode(v.TypeId, v.Body)
     self:endField("Body")
   end
 
@@ -556,13 +542,15 @@ function enc:endObject()
   self.data:pushBack("}")
 end
 
-function enc:beginArray()
+function enc:beginArray(sz)
   local last, prev <const> = self:stackLast()
   if last == nil or last == 'f' or last == 'a' or last == 'v' then
     if last == 'v' and prev == 'a' then -- new element of array
       self.data:pushBack(",")
     end
-    self.data:pushBack("[")
+    if sz == nil or sz >= 0 then
+      self.data:pushBack("[")
+    end
     if last == 'f' or last == 'a' then
       self:stackPush('v')
     end
@@ -572,7 +560,7 @@ function enc:beginArray()
   end
 end
 
-function enc:endArray()
+function enc:endArray(sz)
   local last <const> = self:stackLast()
   if last ~= 'v' and last ~= 'a' then
     error(BadEncodingError)
@@ -580,7 +568,11 @@ function enc:endArray()
 
   self:stackPopValue()
   self:stackPop('a')
-  self.data:pushBack("]")
+  if sz == nil or sz >= 0 then
+    self.data:pushBack("]")
+  else
+    self.data:pushBack("null")
+  end
 end
 
 function enc:beginField(name)

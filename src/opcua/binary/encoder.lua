@@ -1,7 +1,7 @@
 local s = require "opcua.status_codes"
+local types = require "opcua.types"
 local nodeId = require("opcua.node_id")
 local tools = require("opcua.binary.tools")
-require "math"
 
 local abs = math.abs
 local modf = math.modf
@@ -226,12 +226,14 @@ function enc:boolean(v)
 end
 
 function enc:array(val)
-  if type(val) ~= "string" and type(val) ~= "table" then
+  if type(val) == "string" then
+    self.data:pushBack(val)
+  elseif type(val) == "table" then
+    for i = 1, #val do
+      self:char(val[i])
+    end
+  else
     error(BadEncodingError)
-  end
-
-  for i = 1, #val do
-    self:char(tools.index(val, i))
   end
 end
 
@@ -249,7 +251,6 @@ enc.char = enc.uint8
 enc.byte = enc.uint8
 enc.sbyte = enc.int8
 enc.statusCode = enc.uint32
-enc.charArray = enc.string
 enc.byteString = enc.string
 
 local function qwordToArr(v)
@@ -333,10 +334,10 @@ function enc:localizedText(v)
   self:bit(v.Text ~= nil and 1 or 0, 1)
   self:bit(0, 6)
   if v.Locale ~= nil then
-    self:charArray(v.Locale)
+    self:string(v.Locale)
   end
   if v.Text ~= nil then
-    self:charArray(v.Text)
+    self:string(v.Text)
   end
 end
 
@@ -350,10 +351,6 @@ function enc:nodeId(v)
   local idEnc  -- encoding function of Id
   local nsiEnc = self.uint16 -- namespace Index endcoding func
 
-  if type(v) == 'string' then
-    v = nodeId.fromString(v)
-  end
-
   if type(v) == 'table' and v.id ~= nil then
     id = v.id
     if v.ns ~= nil then
@@ -363,9 +360,18 @@ function enc:nodeId(v)
         nsUri = v.ns
       end
     end
-    if v.srv ~= nil then
-      si = v.srv
+    si = v.srv
+    idType = v.type
+  elseif type(v) == 'string' and not tools.guidValid(v) then
+    v = nodeId.fromString(v)
+    idType = v.type
+    id = v.id
+    if type(v.ns) == 'number' then
+      ns = v.ns
+    elseif type(v.ns) == 'string' then
+      nsUri = v.ns
     end
+  si = v.srv
   else
     id = v
   end
@@ -374,34 +380,47 @@ function enc:nodeId(v)
     error(s.BadEncodingError)
   end
 
-  if type(id) == 'number' then
-    if id < 0 then
-      error(s.BadEncodingError)
-    end
-    if id <= 0xFF and ns == 0 and nsUri == nil then
-      idType = nodeId.TwoByte
-      idEnc = self.uint8
-      nsiEnc = nil
-    else
-      if id <= 0xFFFF then
-        idType = nodeId.FourByte
-        idEnc = self.uint16
-        nsiEnc = self.uint8
-      elseif id <= 0xFFFFFFFF then
-        idType = nodeId.Numeric
-        idEnc = self.uint32
-      else
+  if idType == nil or idType == nodeId.Numeric then
+    if type(id) == 'number' then
+      if id < 0 then
         error(s.BadEncodingError)
       end
+      if id <= 0xFF and ns == 0 and nsUri == nil then
+        idType = nodeId.TwoByte
+      else
+        if id <= 0xFFFF then
+          idType = nodeId.FourByte
+        elseif id <= 0xFFFFFFFF then
+          idType = nodeId.Numeric
+        else
+          error(s.BadEncodingError)
+        end
+      end
+    elseif tools.guidValid(id) then
+      idType = nodeId.Guid
+    elseif type(id) == 'string' then
+      idType = nodeId.String
+    elseif type(id) == 'table' then
+      idType = nodeId.ByteString
+    else
+      error(s.BadEncodingError)
     end
-  elseif type(id) == 'string' then
-    idType = nodeId.String
+  end
+
+  if idType == nodeId.TwoByte then
+    idEnc = self.uint8
+    nsiEnc = nil
+  elseif idType == nodeId.FourByte then
+    idEnc = self.uint16
+    nsiEnc = self.uint8
+  elseif idType == nodeId.Numeric then
+    idType = nodeId.Numeric
+    idEnc = self.uint32
+  elseif idType == nodeId.String then
     idEnc = self.string
-  elseif type(id) == 'table' and id.Data1 ~= nil then
-    idType = nodeId.Guid
+  elseif idType == nodeId.Guid then
     idEnc = self.guid
-  elseif type(id) == 'table' then
-    idType = nodeId.ByteString
+  elseif idType == nodeId.ByteString then
     idEnc = self.byteString
   else
     error(s.BadEncodingError)
@@ -445,107 +464,85 @@ enc.expandedNodeId = enc.nodeId
 function enc:variant(v, model)
   local data
   local encFunc
-  local vt
+  local vt = v.Type
 
-  if v.Boolean ~= nil then
-    vt = 1
-    data = v.Boolean
+  if vt == types.VariantType.Null then
+    self:byte(0)
+    return
+  elseif vt == types.VariantType.Boolean then
+    data = v.Value
     encFunc = self.boolean
-  elseif v.SByte ~= nil then
-    vt = 2
-    data = v.SByte
+  elseif vt == types.VariantType.SByte then
+    data = v.Value
     encFunc = self.sbyte
-  elseif v.Byte ~= nil then
-    vt = 3
-    data = v.Byte
+  elseif vt == types.VariantType.Byte then
+    data = v.Value
     encFunc = self.byte
-  elseif v.Int16 ~= nil then
-    vt = 4
-    data = v.Int16
+  elseif vt == types.VariantType.Int16 then
+    data = v.Value
     encFunc = self.int16
-  elseif v.UInt16 ~= nil then
-    vt = 5
-    data = v.UInt16
+  elseif vt == types.VariantType.UInt16 then
+    data = v.Value
     encFunc = self.uint16
-  elseif v.Int32 ~= nil then
-    vt = 6
-    data = v.Int32
+  elseif vt == types.VariantType.Int32 then
+    data = v.Value
     encFunc = self.int32
-  elseif v.UInt32 ~= nil then
-    vt = 7
-    data = v.UInt32
+  elseif vt == types.VariantType.UInt32 then
+    data = v.Value
     encFunc = self.uint32
-  elseif v.Int64 ~= nil then
-    vt = 8
-    data = v.Int64
+  elseif vt == types.VariantType.Int64 then
+    data = v.Value
     encFunc = self.int64
-  elseif v.UInt64 ~= nil then
-    vt = 9
-    data = v.UInt64
+  elseif vt == types.VariantType.UInt64 then
+    data = v.Value
     encFunc = self.uint64
-  elseif v.Float ~= nil then
-    vt = 10
-    data = v.Float
+  elseif vt == types.VariantType.Float then
+    data = v.Value
     encFunc = self.float
-  elseif v.Double ~= nil then
-    vt = 11
-    data = v.Double
+  elseif vt == types.VariantType.Double then
+    data = v.Value
     encFunc = self.double
-  elseif v.String ~= nil then
-    vt = 12
-    data = v.String
+  elseif vt == types.VariantType.String then
+    data = v.Value
     encFunc = self.string
-  elseif v.DateTime ~= nil then
-    vt = 13
-    data = v.DateTime
+  elseif vt == types.VariantType.DateTime then
+    data = v.Value
     encFunc = self.dateTime
-  elseif v.Guid ~= nil then
-    vt = 14
-    data = v.Guid
+  elseif vt == types.VariantType.Guid then
+    data = v.Value
     encFunc = self.guid
-  elseif v.ByteString ~= nil then
-    vt = 15
-    data = v.ByteString
+  elseif vt == types.VariantType.ByteString then
+    data = v.Value
     encFunc = self.byteString
-  elseif v.XmlElement ~= nil then
-    vt = 16
-    data = v.XmlElement
+  elseif vt == types.VariantType.XmlElement then
+    data = v.Value
     encFunc = self.xmlElement
-  elseif v.NodeId ~= nil then
-    vt = 17
-    data = v.NodeId
+  elseif vt == types.VariantType.NodeId then
+    data = v.Value
     encFunc = self.nodeId
-  elseif v.ExpandedNodeId ~= nil then
-    vt = 18
-    data = v.ExpandedNodeId
+  elseif vt == types.VariantType.ExpandedNodeId then
+    data = v.Value
     encFunc = self.expandedNodeId
-  elseif v.StatusCode ~= nil then
-    vt = 19
-    data = v.StatusCode
+  elseif vt == types.VariantType.StatusCode then
+    data = v.Value
     encFunc = self.statusCode
-  elseif v.QualifiedName ~= nil then
-    vt = 20
-    data = v.QualifiedName
+  elseif vt == types.VariantType.QualifiedName then
+    data = v.Value
     encFunc = self.qualifiedName
-  elseif v.LocalizedText ~= nil then
-    vt = 21
-    data = v.LocalizedText
+  elseif vt == types.VariantType.LocalizedText then
+    data = v.Value
     encFunc = self.localizedText
-  elseif v.ExtensionObject ~= nil then
-    vt = 22
-    data = v.ExtensionObject
+  elseif vt == types.VariantType.ExtensionObject then
+    data = v.Value
     encFunc = self.extensionObject
-  elseif v.DataValue ~= nil then
-    vt = 23
-    data = v.DataValue
+  elseif vt == types.VariantType.DataValue then
+    data = v.Value
     encFunc = self.dataValue
-  elseif v.Variant ~= nil then
-    vt = 24
-    data = v.Variant
+  elseif vt == types.VariantType.Variant then
+    data = v.Value
     encFunc = self.variant
-  elseif v.DiagnosticInfo ~= nil then
-    vt = 25
-    data = v.DiagnosticInfo
+  elseif vt == types.VariantType.DiagnosticInfo then
+    data = v.Value
     encFunc = self.diagnosticInfo
   else
     for _,_ in pairs(v) do
@@ -566,8 +563,7 @@ function enc:variant(v, model)
     self:bit(0, 1)
   end
 
-  local isArray = type(data) == 'table' and data[1] ~= nil
-  if isArray then
+  if v.IsArray then
     self:bit(1, 1) -- ArrayLengthSpecified =
     self:int32(#data)
     for i =1,#data do
@@ -606,22 +602,23 @@ local function newSizeQ()
   return sizeQ
 end
 
-function enc:extensionObject(v, model)
+function enc:extensionObject(v, encoder)
   local typeId = v.TypeId
   local body = v.Body
-
-  local extObject = model and model.Nodes[typeId]
+  local extObject, encF
+  if encoder then
+    extObject, encF = encoder:getExtObject(typeId)
+  end
 
   self:expandedNodeId(extObject and extObject.binaryId or typeId)
   self:bit(body ~= nil and 1 or 0, 1)
   self:bit(0, 7)
   if body ~= nil then
-    local f = model and model.Encoder[typeId]
     -- Extension object body is encoded as bytestring.
     -- To encode extension object as byte string we should know its size
     -- To calculate size we use a helper class instead buffer.
     -- After calculating size we encode extension object.
-    if f then
+    if encF then
       local extBuf = self.extBuf
       local extEnc = self.extEnc
       if extEnc == nil then
@@ -632,11 +629,17 @@ function enc:extensionObject(v, model)
       end
       extBuf:clear()
       -- calculate size of extension object
-      f(model, extEnc, body, typeId)
+      local serializer = encoder.Serializer
+      encoder.Serializer = extEnc
+      local suc, result = pcall(encF, encoder, body, typeId)
+      encoder.Serializer = serializer
+      if not suc then
+        error(result)
+      end
       -- serialize size
       self:uint32(extBuf.size)
       -- serialize extension object
-      f(model, self, body, typeId)
+      encF(encoder, body, typeId)
     else
       self:byteString(body)
     end
@@ -675,9 +678,9 @@ end
 --------------------------------------
 
 function enc:asymmetricSecurityHeader(securityPolicyUri, senderCertificate, receiverCertificateThumbprint)
-  self:charArray(securityPolicyUri)
-  self:charArray(senderCertificate)
-  self:charArray(receiverCertificateThumbprint)
+  self:string(securityPolicyUri)
+  self:byteString(senderCertificate)
+  self:byteString(receiverCertificateThumbprint)
 end
 
 --------------------------------------
@@ -718,7 +721,7 @@ function enc:hello(val)
   self:uint32(val.SendBufferSize)
   self:uint32(val.MaxMessageSize)
   self:uint32(val.MaxChunkCount)
-  self:charArray(val.EndpointUrl)
+  self:string(val.EndpointUrl)
 end
 
 --------------------------------------
@@ -739,7 +742,7 @@ end
 
 function enc:error(val)
   self:uint32(val.Error)
-  self:charArray(val.Reason)
+  self:string(val.Reason)
 end
 
 function enc:diagnosticInfo(v)
@@ -764,7 +767,7 @@ function enc:diagnosticInfo(v)
     self:int32(v.LocalizedText)
   end
   if v.AdditionalInfo ~= nil then
-    self:charArray(v.AdditionalInfo)
+    self:string(v.AdditionalInfo)
   end
   if v.InnerStatusCode ~= nil then
     self:statusCode(v.InnerStatusCode)
@@ -775,31 +778,33 @@ function enc:diagnosticInfo(v)
 end
 
 function enc:guid(v)
-  self:uint32(v.Data1)
-  self:uint16(v.Data2)
-  self:uint16(v.Data3)
-  self:byte(v.Data4)
-  self:byte(v.Data5)
-  self:byte(v.Data6)
-  self:byte(v.Data7)
-  self:byte(v.Data8)
-  self:byte(v.Data9)
-  self:byte(v.Data10)
-  self:byte(v.Data11)
+  assert(type(v) == 'string')
+
+  local d1,d2,d3,d4,d5,d6,d7,d8,d9,d10,d11 =
+  string.match(v, "^(%x%x%x%x%x%x%x%x)-(%x%x%x%x)-(%x%x%x%x)-(%x%x)(%x%x)-(%x%x)(%x%x)(%x%x)(%x%x)(%x%x)(%x%x)$")
+
+  if not (d1 and d2 and d3 and d4 and d5 and d6 and d7 and d8 and d9 and d10 and d11) then
+    error(s.BadDecodingError)
+  end
+
+  self:uint32(tonumber(d1, 16))
+  self:uint16(tonumber(d2, 16))
+  self:uint16(tonumber(d3, 16))
+  self:byte(tonumber(d4, 16))
+  self:byte(tonumber(d5, 16))
+  self:byte(tonumber(d6, 16))
+  self:byte(tonumber(d7, 16))
+  self:byte(tonumber(d8, 16))
+  self:byte(tonumber(d9, 16))
+  self:byte(tonumber(d10, 16))
+  self:byte(tonumber(d11, 16))
 end
 
-function enc:xmlElement(v)
-  self:int32(v.Value ~= nil and #v.Value or -1)
-  if v.Value ~= nil then
-    for i = 1, #v.Value do
-      self:char(tools.index(v.Value, i))
-    end
-  end
-end
+enc.xmlElement = enc.string
 
 function enc:qualifiedName(v)
   self:uint16(v.ns)
-  self:charArray(v.Name)
+  self:string(v.Name)
 end
 
 function enc:dataValue(v, model)
@@ -811,7 +816,7 @@ function enc:dataValue(v, model)
   self:bit(v.ServerPicoseconds ~= nil and 1 or 0, 1)
   self:bit(0, 2)
   if v.Value ~= nil then
-    self:variant(v.Value, model)
+    self:variant(v, model)
   end
   if v.StatusCode ~= nil then
     self:statusCode(v.StatusCode)

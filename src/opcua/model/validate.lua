@@ -32,7 +32,10 @@ local function checkRefs(self, callback)
 end
 
 local function validate(self, callback)
+  local err = {}
+  callback = callback or function(e) table.insert(err, e) end
   checkRefs(self, callback)
+  return err
 end
 
 return validate

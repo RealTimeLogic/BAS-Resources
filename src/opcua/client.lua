@@ -910,14 +910,14 @@ local function NewUaClient(clientConfig, sock, model)
   if clientConfig == nil then
     error("no OPCUA configuration")
   end
-  if model == nil then
-    model = require("opcua.model.import").getBaseModel()
-  end
-
   local uaConfig = require("opcua.config")
   local err = uaConfig.client(clientConfig)
   if err ~= nil then
     error("Configuration error: "..err)
+  end
+
+  if model == nil then
+    model = require("opcua.model.import").getBaseModel(clientConfig)
   end
 
   local c = {

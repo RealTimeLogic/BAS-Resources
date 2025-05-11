@@ -99,7 +99,7 @@ function S.fillResponseParams(_, msg, statusCode)
 end
 
 function S:responseServiceFault(msg, faultCode)
-  if self.trace.errOn then traceE(fmt("%s Sending SERVICE_FAULT 0x%x", self.logId, faultCode)) end
+  if self.trace.errOn then traceE(fmt("%s Sending SERVICE_FAULT 0x%s", self.logId, faultCode)) end
   local response = self.encoder:createResponse(Msg.SERVICE_FAULT, self:fillResponseParams(msg, faultCode))
   self.encoder:message(response)
 end

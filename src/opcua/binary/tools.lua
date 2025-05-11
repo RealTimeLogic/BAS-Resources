@@ -177,24 +177,7 @@ function T.doubleValid(v)
 end
 
 function T.guidValid(v)
-  if type(v) == "string" then
-    local m = string.match(v, "^%x%x%x%x%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%x%x%x%x%x%x%x%x$")
-    return m == v
-  end
-
-  return
-  type(v) == 'table' and
-  T.uint32Valid(v.Data1) and
-  T.uint16Valid(v.Data2) and
-  T.uint16Valid(v.Data3) and
-  T.byteValid(v.Data4) and
-  T.byteValid(v.Data5) and
-  T.byteValid(v.Data6) and
-  T.byteValid(v.Data7) and
-  T.byteValid(v.Data8) and
-  T.byteValid(v.Data9) and
-  T.byteValid(v.Data10) and
-  T.byteValid(v.Data11)
+  return type(v) == "string" and string.match(v, "^%x%x%x%x%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%x%x%x%x%x%x%x%x$") ~= nil
 end
 
 function T.localizedTextValid(v)
@@ -227,17 +210,7 @@ function T.stringValid(v)
   return type(v) == 'string'
 end
 
-function T.xmlElementValid(v)
-  if type(v) ~= 'table' then
-    return false
-  end
-
-  if v.Value == nil then
-    return false
-  end
-
-  return type(v.Value) == 'string'
-end
+T.xmlElementValid = T.stringValid
 
 function T.nodeIdValid(v)
   return nodeId.isValid(v)
@@ -297,155 +270,165 @@ function T.variantValid(val)
   end
 
   local sz
+  if val.IsArray then
+    if type(val.Value) ~= "table" or val.Value[1] == nil then
+      return false
+    end
+    sz = #val.Value
+  end
+
   if val.ArrayDimensions then
     if type(val.ArrayDimensions) ~= "table" or val.ArrayDimensions[1] == nil then
       return false
-    else
-      sz = 1
-      for _,el in ipairs(val.ArrayDimensions) do
-        sz = sz * el
-      end
     end
-    if sz == 0 then
+
+    local lsz = 1
+    for _,el in ipairs(val.ArrayDimensions) do
+      lsz = lsz * el
+    end
+    if sz == nil then
+      sz = lsz
+    elseif lsz ~= sz then
       return false
     end
   end
 
-  if val.Boolean ~= nil then
-    return variantDataValid(val.Boolean, T.booleanValid, sz)
-  elseif val.SByte ~= nil then
-    return variantDataValid(val.SByte, T.sbyteValid, sz)
-  elseif val.Byte ~= nil then
-    return variantDataValid(val.Byte, T.byteValid, sz)
-  elseif val.Int16 ~= nil then
-    return variantDataValid(val.Int16, T.int16Valid, sz)
-  elseif val.UInt16 ~= nil then
-    return variantDataValid(val.UInt16, T.uint16Valid, sz)
-  elseif val.Int32 ~= nil then
-    return variantDataValid(val.Int32, T.int32Valid, sz)
-  elseif val.UInt32 ~= nil then
-    return variantDataValid(val.UInt32, T.uint32Valid, sz)
-  elseif val.Int64 ~= nil then
-    return variantDataValid(val.Int64, T.int64Valid, sz)
-  elseif val.UInt64 ~= nil then
-    return variantDataValid(val.UInt64, T.uint64Valid, sz)
-  elseif val.Float ~= nil then
-    return variantDataValid(val.Float, T.floatValid, sz)
-  elseif val.Double ~= nil then
-    return variantDataValid(val.Double, T.doubleValid, sz)
-  elseif val.String ~= nil then
-    return variantDataValid(val.String, T.stringValid, sz)
-  elseif val.DateTime ~= nil then
-    return variantDataValid(val.DateTime, T.doubleValid, sz)
-  elseif val.Guid ~= nil then
-    return variantDataValid(val.Guid, T.guidValid, sz)
-  elseif val.ByteString ~= nil then
-    if type(val.ByteString) == 'table' then
-      if #val.ByteString == 0 then
+  if val.Type == types.VariantType.Boolean then
+    return variantDataValid(val.Value, T.booleanValid, sz)
+  elseif val.Type == types.VariantType.SByte then
+    return variantDataValid(val.Value, T.sbyteValid, sz)
+  elseif val.Type == types.VariantType.Byte then
+    return variantDataValid(val.Value, T.byteValid, sz)
+  elseif val.Type == types.VariantType.Int16 then
+    return variantDataValid(val.Value, T.int16Valid, sz)
+  elseif val.Type == types.VariantType.UInt16 then
+    return variantDataValid(val.Value, T.uint16Valid, sz)
+  elseif val.Type == types.VariantType.Int32 then
+    return variantDataValid(val.Value, T.int32Valid, sz)
+  elseif val.Type == types.VariantType.UInt32 then
+    return variantDataValid(val.Value, T.uint32Valid, sz)
+  elseif val.Type == types.VariantType.Int64 then
+    return variantDataValid(val.Value, T.int64Valid, sz)
+  elseif val.Type == types.VariantType.UInt64 then
+    return variantDataValid(val.Value, T.uint64Valid, sz)
+  elseif val.Type == types.VariantType.Float then
+    return variantDataValid(val.Value, T.floatValid, sz)
+  elseif val.Type == types.VariantType.Double then
+    return variantDataValid(val.Value, T.doubleValid, sz)
+  elseif val.Type == types.VariantType.String then
+    return variantDataValid(val.Value, T.stringValid, sz)
+  elseif val.Type == types.VariantType.DateTime then
+    return variantDataValid(val.Value, T.doubleValid, sz)
+  elseif val.Type == types.VariantType.Guid then
+    return variantDataValid(val.Value, T.guidValid, sz)
+  elseif val.Type == types.VariantType.ByteString then
+    if type(val.Value) == 'table' then
+      if #val.Value == 0 then
         return true
       end
-      if type(val.ByteString[1]) == 'table' or type(val.ByteString[1]) == 'string' then
-        if sz ~= nil and #val.ByteString ~= sz then
+      if type(val.Value[1]) == 'table' or type(val.Value[1]) == 'string' then
+        if sz ~= nil and #val.Value ~= sz then
           return false
         end
-        for _,b in ipairs(val.ByteString) do
+        for _,b in ipairs(val.Value) do
           if T.byteStringValid(b) == false then
             return false
           end
         end
         return true
       else
-        return T.byteStringValid(val.ByteString)
+        return T.byteStringValid(val.Value)
       end
     end
-    return type(val.ByteString) == 'string'
-  elseif val.XmlElement ~= nil then
-    return variantDataValid(val.XmlElement, T.xmlElementValid, sz)
-  elseif val.NodeId ~= nil then
-    return variantDataValid(val.NodeId, T.nodeIdValid, sz)
-  elseif val.ExpandedNodeId ~= nil then
-    return variantDataValid(val.ExpandedNodeId, T.nodeIdValid, sz)
-  elseif val.StatusCode ~= nil then
-    return variantDataValid(val.StatusCode, T.uint32Valid, sz)
-  elseif val.QualifiedName ~= nil then
-    return variantDataValid(val.QualifiedName, T.qualifiedNameValid, sz)
-  elseif val.LocalizedText ~= nil then
-    return variantDataValid(val.LocalizedText, T.localizedTextValid, sz)
-  elseif val.ExtensionObject ~= nil then
-    return variantDataValid(val.ExtensionObject, T.extensionObjectValid, sz)
-  elseif val.DataValue ~= nil then
-    return variantDataValid(val.DataValue, T.dataValueValid, sz)
-  elseif val.Variant ~= nil then
-    return variantDataValid(val.Variant, T.variantValid, sz)
-  elseif val.DiagnosticInfo ~= nil then
-    return variantDataValid(val.DiagnosticInfo, T.diagnosticInfoValid, sz)
+    return type(val.Value) == 'string'
+  elseif val.Type == types.VariantType.XmlElement then
+    return variantDataValid(val.Value, T.xmlElementValid, sz)
+  elseif val.Type == types.VariantType.NodeId then
+    return variantDataValid(val.Value, T.nodeIdValid, sz)
+  elseif val.Type == types.VariantType.ExpandedNodeId then
+    return variantDataValid(val.Value, T.nodeIdValid, sz)
+  elseif val.Type == types.VariantType.StatusCode then
+    return variantDataValid(val.Value, T.uint32Valid, sz)
+  elseif val.Type == types.VariantType.QualifiedName then
+    return variantDataValid(val.Value, T.qualifiedNameValid, sz)
+  elseif val.Type == types.VariantType.LocalizedText then
+    return variantDataValid(val.Value, T.localizedTextValid, sz)
+  elseif val.Type == types.VariantType.ExtensionObject then
+    return variantDataValid(val.Value, T.extensionObjectValid, sz)
+  elseif val.Type == types.VariantType.DataValue then
+    return variantDataValid(val.Value, T.dataValueValid, sz)
+  elseif val.Type == types.VariantType.Variant then
+    return variantDataValid(val.Value, T.variantValid, sz)
+  elseif val.Type == types.VariantType.DiagnosticInfo then
+    return variantDataValid(val.Value, T.diagnosticInfoValid, sz)
   end
 
   return false
 end
 
 
-function T.getVariantType(val)
-  if val.Boolean ~= nil then
+function T.getVariantTypeId(val)
+  local t = val.Type
+  if t == types.VariantType.Boolean then
     return "i=1"
-  elseif val.SByte ~= nil then
+  elseif t == types.VariantType.SByte then
     return "i=2"
-  elseif val.Byte ~= nil then
+  elseif t == types.VariantType.Byte then
     return "i=3"
-  elseif val.Int16 ~= nil then
+  elseif t == types.VariantType.Int16 then
     return "i=4"
-  elseif val.UInt16 ~= nil then
+  elseif t == types.VariantType.UInt16 then
     return "i=5"
-  elseif val.Int32 ~= nil then
+  elseif t == types.VariantType.Int32 then
     return "i=6"
-  elseif val.UInt32 ~= nil then
+  elseif t == types.VariantType.UInt32 then
     return "i=7"
-  elseif val.Int64 ~= nil then
+  elseif t == types.VariantType.Int64 then
     return "i=8"
-  elseif val.UInt64 ~= nil then
+  elseif t == types.VariantType.UInt64 then
     return "i=9"
-  elseif val.Float ~= nil then
+  elseif t == types.VariantType.Float then
     return "i=10"
-  elseif val.Double ~= nil then
+  elseif t == types.VariantType.Double then
     return "i=11"
-  elseif val.String ~= nil then
+  elseif t == types.VariantType.String then
     return "i=12"
-  elseif val.DateTime ~= nil then
+  elseif t == types.VariantType.DateTime then
     return "i=13"
-  elseif val.Guid ~= nil then
+  elseif t == types.VariantType.Guid then
     return "i=14"
-  elseif val.ByteString ~= nil then
+  elseif t == types.VariantType.ByteString then
     return "i=15"
-  elseif val.XmlElement ~= nil then
+  elseif t == types.VariantType.XmlElement then
     return "i=16"
-  elseif val.NodeId ~= nil then
+  elseif t == types.VariantType.NodeId then
     return "i=17"
-  elseif val.ExpandedNodeId ~= nil then
+  elseif t == types.VariantType.ExpandedNodeId then
     return "i=18"
-  elseif val.StatusCode ~= nil then
+  elseif t == types.VariantType.StatusCode then
     return "i=19"
-  elseif val.QualifiedName ~= nil then
+  elseif t == types.VariantType.QualifiedName then
     return "i=20"
-  elseif val.LocalizedText ~= nil then
+  elseif t == types.VariantType.LocalizedText then
     return "i=21"
-  elseif val.ExtensionObject ~= nil then
+  elseif t == types.VariantType.ExtensionObject then
     return "i=22"
-  elseif val.DataValue ~= nil then
+  elseif t == types.VariantType.DataValue then
     return "i=23"
-  elseif val.Variant ~= nil then
+  elseif t == types.VariantType.Variant then
     return "i=24"
-  elseif val.DiagnosticInfo ~= nil then
+  elseif t == types.VariantType.DiagnosticInfo then
     return "i=25"
   end
 
-  error("unknown variant type"..val)
+  error("unknown variant type".. tostring(t))
 end
 
 function T.dataValueValid(v)
   if type(v) ~= 'table' then
     return false
   end
-  if not T.variantValid(v.Value) then
+  if not T.variantValid(v) then
     return false
   end
   if v.StatusCode ~= nil and not T.uint32Valid(v.StatusCode) then
@@ -492,7 +475,6 @@ local function oneDimensionValid(val, arrayDimensions)
 end
 
 function T.arrayDimensionsValid(value, arrayDimensions, valueRank)
-  local val
   if value.ArrayDimensions and not arrayDimensions then
     return false
   end
@@ -510,13 +492,8 @@ function T.arrayDimensionsValid(value, arrayDimensions, valueRank)
     end
   end
 
-  for _,v in pairs(value) do
-    val= v
-    if val ~= nil then
-      break
-    end
-  end
-
+  -- Search for the value field: it can be any except ArraySimensions
+  local val= value.Value
   if valueRank == types.ValueRank.Scalar then
     return scalarValid(val, arrayDimensions, valueRank)
   elseif valueRank == types.ValueRank.OneDimension then
@@ -575,6 +552,21 @@ function T.printTable(name, v, f, idents)
     end
     f(line..",")
   end
+end
+
+function T.copy(src)
+  local result
+  if type(src) == 'table' then
+    result = {}
+    for k,val in pairs(src) do
+      result[k] = T.copy(val)
+    end
+    return result
+  else
+    result = src
+  end
+
+  return result
 end
 
 

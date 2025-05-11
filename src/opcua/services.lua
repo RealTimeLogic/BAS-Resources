@@ -5,7 +5,6 @@ local createCert = ua.crypto.createCert
 local securePolicy = require("opcua.binary.crypto.policy")
 local Q = require("opcua.binary.queue")
 local BinaryDecoder = require("opcua.binary.decoder")
-local address_space = require("opcua.address_space")
 local srvObject = require("opcua.server_object")
 
 
@@ -22,8 +21,6 @@ local fmt = string.format
 local tins = table.insert
 
 local HasSubtype = "i=45"
-local LocalizedText = "i=21"
-local QualifiedName = "i=20"
 local HasTypeDefinition = "i=40"
 local HasModellingRule = "i=37"
 local ModellingRule_Mandatory = "i=78"
@@ -57,11 +54,8 @@ local Svc = {}
 Svc.__index = Svc
 
 function Svc:start()
-  self.nodeset = address_space()
+  self.nodeset = self.model.Nodes
   self.srvObject = srvObject()
-  if self.srvObject.start == nil then
-    ua.debug()
-  end
   return self.srvObject:start(self.config, self)
 end
 
@@ -348,7 +342,7 @@ function Svc:activateSession(req, channel)
   end
 
   if infOn then
-    traceI(fmt("Services:activateSession(%s) | Token policy id: '%s', encryption algorith: '%s'",
+    traceI(fmt("Services:activateSession(%s) | Token policy id: '%s', encryption algorithm: '%s'",
       sessionId, token.Body.PolicyId, token.Body.EncryptionAlgorithm))
   end
 
@@ -358,6 +352,10 @@ function Svc:activateSession(req, channel)
   end
 
   if token.Body.EncryptionAlgorithm then
+    if infOn then
+      traceI(fmt("Services:activateSession(%s) | Decrypting user token with security policy '%s'",
+        sessionId, tokenPolicy.securityPolicyUri))
+    end
     encryption = securePolicy(self.config)
     authPolicy = encryption(tokenPolicy.securityPolicyUri)
     if authPolicy.aEncryptionAlgorithm ~= token.Body.EncryptionAlgorithm then
@@ -483,7 +481,7 @@ function Svc:getSubtypes(parent, cont)
     end
 
     local subtypeId = ref.target
-    local subtype = self.nodeset:getNode(subtypeId)
+    local subtype = self.nodeset[subtypeId]
     if subtype == nil then
       traceE(fmt("Services:getSubtypes | INTERNAL ERROR: Unknown subtype NodeId '%s'", subtypeId))
       error(BadInternalError)
@@ -539,7 +537,7 @@ function Svc:browse(req, channel)
         break
       end
 
-      local node = self.nodeset:getNode(n.NodeId)
+      local node = self.nodeset[n.NodeId]
       if node == nil then
         if errOn then traceE(fmt("Services:browse(%s) | Unknown node ID '%s'", sessionId, n.NodeId)) end
         result.StatusCode = BadNodeIdUnknown
@@ -547,7 +545,7 @@ function Svc:browse(req, channel)
       end
 
       -- collect subtypes of reference type
-      local refNode = self.nodeset:getNode(n.ReferenceTypeId)
+      local refNode = self.nodeset[n.ReferenceTypeId]
       if refNode == nil then
         if errOn then traceE(fmt("Services:browse(%s) | Unknown Reference ID %s", sessionId, n.ReferenceTypeId)) end
         result.StatusCode = BadReferenceTypeIdInvalid
@@ -578,7 +576,7 @@ function Svc:browse(req, channel)
             break
           end
 
-          local targetNode = self.nodeset:getNode(ref.target)
+          local targetNode = self.nodeset[ref.target]
           if not targetNode then
             if errOn then traceE(fmt("Services:browse(%s) |   Target node '%s' not found", sessionId, ref.target)) end
             error(BadInternalError)
@@ -587,10 +585,19 @@ function Svc:browse(req, channel)
           local displayName = attrs.getAttributeValue(targetNode.attrs, AttributeId.DisplayName, self.nodeset)
           local browseName = attrs.getAttributeValue(targetNode.attrs, AttributeId.BrowseName, self.nodeset)
 
-          assert(t.getVariantType(displayName.Value) == LocalizedText)
-          assert(t.getVariantType(browseName.Value) == QualifiedName)
+          if displayName.Type ~= ua.Types.VariantType.LocalizedText then
+            if errOn then traceE(fmt("Services:browse(%s) |   Target node '%s' display name is not a LocalizedText", sessionId, ref.target)) end
+            error(BadInternalError)
+          end
 
-          if dbgOn then traceD(fmt("Services:browse(%s) |   Target node browseName='%s'", sessionId, browseName.Value.QualifiedName.Name)) end
+          if browseName.Type ~= ua.Types.VariantType.QualifiedName then
+            if errOn then traceE(fmt("Services:browse(%s) |   Target node '%s' browse name is not a QualifiedName", sessionId, ref.target)) end
+            error(BadInternalError)
+          end
+
+          if dbgOn then
+            traceD(fmt("Services:browse(%s) |   Target node browseName='%s'", sessionId, browseName.Value.Name))
+          end
 
           local nodeClass = targetNode.attrs[AttributeId.NodeClass]
           local typeDefinition = ua.NodeId.Null
@@ -609,9 +616,9 @@ function Svc:browse(req, channel)
             ReferenceTypeId = refType,
             IsForward = ref.isForward,
             NodeClass = nodeClass,
-            BrowseName = browseName.Value.QualifiedName,
+            BrowseName = browseName.Value,
             TypeDefinition = typeDefinition,
-            DisplayName = displayName.Value.LocalizedText
+            DisplayName = displayName.Value
           }
 
           tins(result.References, r)
@@ -641,7 +648,7 @@ function Svc:translateBrowsePath(path, sessionId)
 
   local targetId = path.StartingNode
   if dbgOn then traceD(fmt("Services:translateBrowsePath(%s) | target node %s", sessionId, targetId)) end
-  local targetNode = self.nodeset:getNode(targetId)
+  local targetNode = self.nodeset[targetId]
   if targetNode == nil then
     if dbgOn then traceD(fmt("Services:translateBrowsePath(%s) | target node not found", sessionId)) end
     error(BadNodeIdUnknown)
@@ -662,7 +669,7 @@ function Svc:translateBrowsePath(path, sessionId)
     local refId = rel.ReferenceTypeId
     if rel.IncludeSubtypes == true then
       if dbgOn then traceD(fmt("Services:translateBrowsePath(%s) | Collecting subtypes of reference %s", sessionId, rel.ReferenceTypeId)) end
-      self:getSubtypes(self.nodeset:getNode(refId), refTypes)
+      self:getSubtypes(self.nodeset[refId], refTypes)
     else
       refTypes[refId] = 1
     end
@@ -686,7 +693,7 @@ function Svc:translateBrowsePath(path, sessionId)
 
         local nodeId = nodeRef.target
         if dbgOn then traceD(fmt("Services:translateBrowsePath(%s) | target node id %s", sessionId, nodeId)) end
-        local node = self.nodeset:getNode(nodeId)
+        local node = self.nodeset[nodeId]
         if node == nil then
           if dbgOn then traceD(fmt("Services:translateBrowsePath | node %s not found", sessionId, nodeId)) end
           break
@@ -779,7 +786,7 @@ function Svc:read(req, channel)
   local results = {}
   for _, r in ipairs(req.NodesToRead) do
     local val = {}
-    local node = self.nodeset:getNode(r.NodeId)
+    local node = self.nodeset[r.NodeId]
     if node == nil then
       if dbgOn then traceD(fmt("Services:Read(%s) | Unknown node id %s", sessionId, r.NodeId)) end
       val.StatusCode = BadNodeIdUnknown
@@ -811,8 +818,8 @@ function Svc:writeNode(val)
   local nodeId = val.NodeId
   local attributeId = val.AttributeId
   local value = val.Value
-  if dbgOn then traceD(fmt("Services:Write | searchin node '%s'", nodeId)) end
-  local n = self.nodeset:getNode(nodeId)
+  if dbgOn then traceD(fmt("Services:Write | searching node '%s'", nodeId)) end
+  local n = self.nodeset[nodeId]
   if n == nil then
     if dbgOn then traceD(fmt("Services:Write | node '%s' not found", nodeId)) end
     error(BadNodeIdUnknown)
@@ -828,13 +835,13 @@ function Svc:writeNode(val)
       valueSource(nodeId, value)
     end
   else
-    attrs.checkAttributeValue(n.attrs, attributeId, value and value.Value, self.nodeset)
+    attrs.checkAttributeValue(n.attrs, attributeId, value, self.nodeset)
     n.attrs[attributeId] = value.Value
   end
   self.nodeset:saveNode(n)
+  self:callWriteHook(nodeId, attributeId, value)
   if dbgOn then traceD(fmt("Services:Write | updated attribute '%d' of node '%s' ", attributeId, nodeId)) end
 end
-
 
 function Svc:write(req, channel)
   local errOn = self.trace.errOn
@@ -917,7 +924,7 @@ function Svc:getVariableAttributes(nodeId, allAttrs, nodeset)
     if errOn then traceE("Services:addNodes | ValueRank invalid") end
     error(BadNodeAttributesInvalid)
   end
-  if not t.arrayDimensionsValid(nodeAttrs.Value.Value, nodeAttrs.ArrayDimensions, nodeAttrs.ValueRank) then
+  if not t.arrayDimensionsValid(nodeAttrs.Value, nodeAttrs.ArrayDimensions, nodeAttrs.ValueRank) then
     if errOn then traceE("Services:addNodes | ArrayDimensions invalid") end
     error(BadNodeAttributesInvalid)
   end
@@ -937,7 +944,7 @@ function Svc:getVariableAttributes(nodeId, allAttrs, nodeset)
     if errOn then traceE("Services:addNodes | Historizing invalid") end
     error(BadNodeAttributesInvalid)
   end
-  local suc, code = pcall(attrs.checkDataType, nodeAttrs.Value.Value, nodeAttrs.DataType, nodeset)
+  local suc, code = pcall(attrs.checkDataType, nodeAttrs.Value, nodeAttrs.DataType, nodeset)
   if not suc then
     if errOn then traceE("Services:addNodes | DataType of Value invalid") end
     error(code)
@@ -974,11 +981,10 @@ function Svc:getObjectAttributes(nodeId, nodeAttrs)
   return result
 end
 
-
 local nextNodeIdentifier = math.floor(os.time())
 local function genNodeId()
   nextNodeIdentifier = nextNodeIdentifier + 1
-  return "i=" .. nextNodeIdentifier
+  return "ns=1;i=" .. nextNodeIdentifier
 end
 
 function Svc:addNode(node)
@@ -992,13 +998,13 @@ function Svc:addNode(node)
     error(BadParentNodeIdInvalid)
   end
 
-  local parent = self.nodeset:getNode(node.ParentNodeId)
+  local parent = self.nodeset[node.ParentNodeId]
   if parent == nil then
     if errOn then traceE("Services:addNode | Parent node absent") end
     error(BadParentNodeIdInvalid)
   end
 
-  local refNode = self.nodeset:getNode(node.ReferenceTypeId)
+  local refNode = self.nodeset[node.ReferenceTypeId]
   if refNode == nil or refNode.attrs[AttributeId.NodeClass] ~= ua.Types.NodeClass.ReferenceType then
     if errOn then traceE("Services:addNode | Invalid referenceTypeId") end
     error(BadReferenceTypeIdInvalid)
@@ -1014,7 +1020,7 @@ function Svc:addNode(node)
     error(BadNodeClassInvalid)
   end
 
-  local typeNode =self.nodeset:getNode(node.TypeDefinition)
+  local typeNode =self.nodeset[node.TypeDefinition]
   if typeNode == nil then
     if errOn then traceE("Services:addNode | Unknown TypeDefinition NodeID") end
     error(BadTypeDefinitionInvalid)
@@ -1029,7 +1035,7 @@ function Svc:addNode(node)
   if ua.NodeId.isNull(nodeId) then
     nodeId = genNodeId()
     if dbgOn then traceD(fmt("Services:addNode | generated new nodeId='%s'", nodeId)) end
-  elseif self.nodeset:getNode(nodeId) ~= nil then
+  elseif self.nodeset[nodeId] ~= nil then
     if errOn then traceE(fmt("Services:addNode | Node '%s' already exist", nodeId)) end
     error(BadNodeIdExists)
   end
@@ -1085,7 +1091,7 @@ function Svc:addNode(node)
         local nextId = ref.target
         -- check if target node mandatory during instantiating
         if dbgOn then traceD(fmt("Services:addNode | searching node '%s'", ref.target)) end
-        local instanceNode = self.nodeset:getNode(ref.target)
+        local instanceNode = self.nodeset[ref.target]
         if refId ~= HasTypeDefinition then
           local isMandatory = false
           assert(instanceNode, ref.target)
@@ -1190,7 +1196,7 @@ function Svc:setVariableSource(nodeId, func)
     error(BadInvalidArgument)
   end
 
-  local node = self.nodeset:getNode(nodeId)
+  local node = self.nodeset[nodeId]
   if nodeId == nil then
     if dbgOn then traceD(fmt("Setting source callback failed: nodeId '%s' unknown", nodeId)) end
     error(BadNodeIdUnknown)
@@ -1203,6 +1209,36 @@ function Svc:setVariableSource(nodeId, func)
   node.attrs.valueSource = func
   self.nodeset:saveNode(node)
   if dbgOn then traceD(fmt("Source callback for nodeId '%s' was set", nodeId)) end
+end
+
+function Svc:setWriteHook(nodeId, func)
+  local dbgOn = self.trace.dbgOn
+  if dbgOn then traceD(fmt("Setting write hook for node '%s'", nodeId)) end
+  if type(func) ~= 'function' then
+    error(BadInvalidArgument)
+  end
+
+  local nodeHooks = self.hooks[nodeId] or {}
+  nodeHooks.onWrite = func
+  self.hooks[nodeId] = nodeHooks
+  if dbgOn then traceD(fmt("Write hook for nodeId '%s' was set", nodeId)) end
+end
+
+function Svc:callWriteHook(nodeId, attributeId, value)
+  local hooks = self.hooks[nodeId]
+  if not (hooks and hooks.onWrite) then
+    return
+  end
+
+  local dbgOn = self.trace.dbgOn
+  local errOn = self.trace.errOn
+
+  if dbgOn then traceD(fmt("Services:Write | calling write hook for node '%s'", nodeId)) end
+  -- IMO failing of a hook should not be a fatal error
+  local ok, err = pcall(hooks.onWrite, nodeId, attributeId, t.copy(value))
+  if not ok and errOn then
+    traceE(fmt("Services:Write | write hook for node '%s' failed: %s", nodeId, err))
+  end
 end
 
 function Svc:getSession(req, channel)
@@ -1316,14 +1352,17 @@ function Svc:shutdown()
 end
 
 
-local function newServices(config)
-  assert(config ~= nil)
+local function newServices(config, model)
+  assert(config ~= nil, "no config")
+  assert(model ~= nil, "no model")
 
   local svc = {
     endpointUrl = config.endpointUrl,
     trace = config.logging.services,
     config = config,
-    sessions = {}
+    model = model,
+    sessions = {},
+    hooks = {},
   }
 
   setmetatable(svc, Svc)

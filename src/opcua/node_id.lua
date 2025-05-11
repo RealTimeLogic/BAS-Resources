@@ -1,7 +1,6 @@
 local fmt = string.format
 local sub = string.sub
 local match = string.match
-local sbyte = string.byte
 local schar = string.char
 local sfind = string.find
 
@@ -19,8 +18,11 @@ local function begins(s, i)
   return sub(s, 1, #i) == i
 end
 
-local function hexs(s)
-  return tonumber(s, 16)
+local function isGuid(v)
+  return match(v, "^%x%x%x%x%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%x%x%x%x%x%x%x%x$")
+end
+local function isIdGuid(v)
+  return match(v, "^g=%x%x%x%x%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%x%x%x%x%x%x%x%x$")
 end
 
 local compat = require("opcua.compat")
@@ -30,7 +32,7 @@ local b64encode = compat.b64encode
 
 local function fromString(s)
   assert(type(s) == 'string')
-  local ns
+  local ns = 0
   local ident
   local srv
   if begins(s,"svr=") then
@@ -53,44 +55,30 @@ local function fromString(s)
     ident = s
   end
 
+  local t
   if begins(ident, "i=") then
     ident = match(ident, "^i=(%d+)$")
     assert(ident ~= nil)
     ident = tonumber(ident)
+    t = Numeric
   elseif begins(ident, "s=") then
     ident = string.match(ident, "^s=(%g+)$")
     assert(ident ~= nil)
+    t = String
   elseif begins(ident, 'g=') then
-    local d1,d2,d3,d4,d5,d6,d7,d8,d9,d10,d11 =
-      match(ident, "^g=(%x%x%x%x%x%x%x%x)-(%x%x%x%x)-(%x%x%x%x)-(%x%x)(%x%x)-(%x%x)(%x%x)(%x%x)(%x%x)(%x%x)(%x%x)$")
-    assert(d1 and d2 and d3 and d4 and d5 and d6 and d7 and d8 and d9 and d10 and d11)
-    ident = {
-      Data1=hexs(d1),
-      Data2=hexs(d2),
-      Data3=hexs(d3),
-      Data4=hexs(d4),
-      Data5=hexs(d5),
-      Data6=hexs(d6),
-      Data7=hexs(d7),
-      Data8=hexs(d8),
-      Data9=hexs(d9),
-      Data10=hexs(d10),
-      Data11=hexs(d11),
-    }
+    ident = ident:sub(3)
+    assert(isGuid(ident))
+    t = Guid
   elseif begins(ident, 'b=') then
     local str = match(ident, "^b=([A-Za-z0-9+/=]+)$")
-    str = b64decode(str)
-    local data = {}
-    for i = 1,#str do
-      local b = sbyte(str, i)
-      tins(data, b)
-    end
-    ident = data
+    ident = b64decode(str)
+    t = ByteString
   else
     error("invalid node id string format")
   end
 
   return {
+    type=t,
     ns=ns,
     id=ident,
     srv=srv
@@ -102,6 +90,7 @@ local function toString(i, ns, srv, nodeIdType)
     assert(ns == nil and srv == nil)
     ns = i.ns
     srv = i.srv
+    nodeIdType = i.type
     i = i.id
   end
 
@@ -112,29 +101,37 @@ local function toString(i, ns, srv, nodeIdType)
     elseif nodeIdType == String then
       i = fmt("s=%s", i)
     elseif nodeIdType == Guid then
-      i = fmt('g=%08X-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X', i.Data1, i.Data2, i.Data3, i.Data4, i.Data5, i.Data6, i.Data7, i.Data8, i.Data9, i.Data10, i.Data11)
+      assert(isGuid(i))
+      i = fmt('g=%s', i)
     elseif nodeIdType == ByteString then
-      i = fmt('b=%s', b64encode(i))
-    end
-  else
-    if type(i) == "number" then
-      assert(i >= 0)
-      i = fmt("i=%u", i)
-    elseif type(i) == "string" then
-      i = fmt("s=%s", i)
-    elseif type(i) == "table" then
-      if i.Data1 ~= nil then
-        i = fmt('g=%08X-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X', i.Data1, i.Data2, i.Data3, i.Data4, i.Data5, i.Data6, i.Data7, i.Data8, i.Data9, i.Data10, i.Data11)
-      else
+      if type(i) == "table" then
         local data = {}
         for _, val in pairs(i) do
           local b = schar(val)
           tins(data, b)
         end
         local str = tconcat(data)
-
         i = fmt('b=%s', b64encode(str))
+      else
+        i = fmt('b=%s', b64encode(i))
       end
+    end
+  else
+    if type(i) == "number" then
+      assert(i >= 0)
+      i = fmt("i=%u", i)
+    elseif type(i) == "string" and isGuid(i) then
+      i = fmt('g=%s', i)
+    elseif type(i) == "string" then
+      i = fmt("s=%s", i)
+    elseif type(i) == "table" then
+      local data = {}
+      for _, val in pairs(i) do
+        local b = schar(val)
+        tins(data, b)
+      end
+      local str = tconcat(data)
+      i = fmt('b=%s', b64encode(str))
     end
   end
 
@@ -195,7 +192,7 @@ local function isValid(id)
       return true
     elseif sfind(ident, "^(s=)%g+$") ~= nil then
       return true
-    elseif sfind(ident, "^g=%x%x%x%x%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%x%x%x%x%x%x%x%x$") ~= nil then
+    elseif isIdGuid(ident) then
       return true
     elseif sfind(ident, "^b=([A-Za-z0-9+/=]+)$") ~= nil then
       return true

@@ -11,7 +11,7 @@ S.__index = S
 
 function S:initialize(initAddons)
   -- services responsible for buisness logic: sessions, address space etc.
-  self.services = require("opcua.services").new(self.config)
+  self.services = require("opcua.services").new(self.config, self.model)
   self.services:start()
 
   if type(initAddons) == "function" then
@@ -93,8 +93,8 @@ function S:browse(params)
 end
 
 local function allAttributes(nodeId, attrs)
-  for _,val in pairs(types.AttributeId) do
-    table.insert(attrs, {NodeId=nodeId, AttributeId=val})
+  for i = 0, types.AttributeId.Max do
+    table.insert(attrs, {NodeId=nodeId, AttributeId=i})
   end
 end
 
@@ -131,6 +131,15 @@ function S:setVariableSource(nodeId, callback)
   return self.services:setVariableSource(nodeId, callback)
 end
 
+function S:setWriteHook(nodeId, callback)
+  return self.services:setWriteHook(nodeId, callback)
+end
+
+function S:loadXmlModels(modelFiles)
+  self.model:loadXmlModels(modelFiles)
+  self.model:commit()
+end
+
 function S.new(config, model)
   if not config then
     config = {
@@ -164,7 +173,7 @@ function S.new(config, model)
   end
 
   if model == nil then
-    model = require("opcua.model.import").getBaseModel()
+    model = require("opcua.model.import").getBaseModel(config)
   end
 
   local srv = {

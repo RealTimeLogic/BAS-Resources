@@ -1,8 +1,8 @@
-local JsonDecoder = require("opcua.json.decoder")
 local Q = require("opcua.binary.queue")
 local ua = require("opcua.api")
 
 local traceI = ua.trace.inf
+local traceD = ua.trace.dbg
 local fmt = string.format
 
 local ch = {}
@@ -12,22 +12,28 @@ function ch:setBufferSize(size)
   local infOn = self.logging.infOn
   if infOn then traceI(fmt("json | New buffer size %d", size)) end
   self.data = Q.new(size)
-  self.JsonDecoder = JsonDecoder.new(self.data)
-  self.m.Deserializer = self.JsonDecoder
+  self.JsonDecoder = self.Model.createJsonDecoder(self.data)
 end
 
 function ch:message()
+  local dbgOn = self.logging.dbgOn
   local infOn = self.logging.infOn
-  if infOn then traceI("json | Receiving message") end
   if self.sock.json then
-    self.JsonDecoder.stack = {self.sock:json()}
+    if infOn then traceI(fmt("json | receiving json")) end
+    local json = self.sock:json()
+    if dbgOn then ua.Tools.printTable("json | received JSON table", json, traceD) end
+    self.JsonDecoder.Deserializer.stack = {json}
   else
+    if infOn then traceI(fmt("json | receiving string")) end
     local str = self.sock:receive()
+    if dbgOn then traceD(fmt("json | received string: %s", str)) end
     self.data:clear()
     self.data:pushBack(str)
   end
-  local msg = self.Model:DecodeExtensionObject()
-  if infOn then traceI("json | Message decoded") end
+  if infOn then traceI("json | decoding message") end
+  local msg = self.JsonDecoder:extensionObject()
+  if infOn then traceI("json | message decoded") end
+  if dbgOn then ua.Tools.printTable("json | message data:", msg, traceD) end
   return msg
 end
 
@@ -48,10 +54,6 @@ local function new(config, security, sock, hasChunks, model)
   assert(model ~= nil, "no model")
 
   local data = Q.new(config.bufSize)
-  local m = {
-    Deserializer = JsonDecoder.new(data)
-  }
-  setmetatable(m, {__index=model})
 
   local res = {
     config = config,
@@ -60,8 +62,8 @@ local function new(config, security, sock, hasChunks, model)
     sock = sock,
     -- buffer for Chunk.
     data = data,
-    Model = m,
-    JsonDecoder = m.Deserializer,
+    Model = model,
+    JsonDecoder = model:createJsonDecoder(data)
   }
 
   setmetatable(res, ch)
