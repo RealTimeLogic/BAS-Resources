@@ -9,7 +9,7 @@ local Srv = {}
 local function getValueAttribute(id, val)
   return {
     NodeId = id,
-    AttributeId = ua.Types.AttributeId.Value,
+    AttributeId = ua.AttributeId.Value,
     Value=val
   }
 end
@@ -34,7 +34,7 @@ function Srv:start(config, services)
   local status = {
     StartTime = compat.gettime(),
     CurrentTime = compat.gettime(),
-    State = ua.Types.ServerState.Running,
+    State = ua.ServerState.Running,
     BuildInfo = {
       ProductUri = ua.Version.ProductUri,
       ManufacturerName = ua.Version.ManufacturerName,
@@ -48,7 +48,7 @@ function Srv:start(config, services)
   }
   -- State structure
   local vServerStatus = {
-    Type = ua.Types.VariantType.ExtensionObject,
+    Type = ua.VariantType.ExtensionObject,
     Value = {
       TypeId = "i=862", --ServerStatusDataType
       Body = status
@@ -56,7 +56,7 @@ function Srv:start(config, services)
   }
 
   local vBuildInfo = {
-    Type = ua.Types.VariantType.ExtensionObject,
+    Type = ua.VariantType.ExtensionObject,
     Value = {
       TypeId = "i=338", --BuildInfo
       Body = status.BuildInfo
@@ -65,26 +65,26 @@ function Srv:start(config, services)
 
   local nodes = {
     -- Server_ServerArray
-    getValueAttribute("i=2254", {Type=ua.Types.VariantType.String, IsArray=true, Value={ua.Version.ApplicationUri}}),
+    getValueAttribute("i=2254", {Type=ua.VariantType.String, IsArray=true, Value={ua.Version.ApplicationUri}}),
     getValueAttribute("i=2256", vServerStatus),
     -- Server_ServerStatus_BuildInfo
     getValueAttribute("i=2260", vBuildInfo),
     -- Server_ServerStatus_BuildInfo_ProductName
-    getValueAttribute("i=2261", {Type=ua.Types.VariantType.String, Value=ua.Version.ProductName}),
+    getValueAttribute("i=2261", {Type=ua.VariantType.String, Value=ua.Version.ProductName}),
     -- Server_ServerStatus_BuildInfo_ProductUri
-    getValueAttribute("i=2262", {Type=ua.Types.VariantType.String, Value=ua.Version.ProductUri}),
+    getValueAttribute("i=2262", {Type=ua.VariantType.String, Value=ua.Version.ProductUri}),
     -- Server_ServerStatus_BuildInfo_ManufacturerName
-    getValueAttribute("i=2263", {Type=ua.Types.VariantType.String, Value=ua.Version.ManufacturerName}),
+    getValueAttribute("i=2263", {Type=ua.VariantType.String, Value=ua.Version.ManufacturerName}),
     -- Server_ServerStatus_BuildInfo_SoftwareVersion
-    getValueAttribute("i=2264", {Type=ua.Types.VariantType.String, Value=ua.Version.Version}),
+    getValueAttribute("i=2264", {Type=ua.VariantType.String, Value=ua.Version.Version}),
     -- Server_ServerStatus_BuildInfo_BuildNumber
-    getValueAttribute("i=2265", {Type=ua.Types.VariantType.String, Value=ua.Version.BuildNumber}),
+    getValueAttribute("i=2265", {Type=ua.VariantType.String, Value=ua.Version.BuildNumber}),
     -- Server_ServerStatus_BuildInfo_BuildDate
-    getValueAttribute("i=2266", {Type=ua.Types.VariantType.DateTime, Value=status.BuildInfo.BuildDate}),
+    getValueAttribute("i=2266", {Type=ua.VariantType.DateTime, Value=status.BuildInfo.BuildDate}),
     -- Server_ServerStatus_StartTime
-    getValueAttribute("i=2257", {Type=ua.Types.VariantType.DateTime, Value=status.StartTime}),
+    getValueAttribute("i=2257", {Type=ua.VariantType.DateTime, Value=status.StartTime}),
     -- Server_ServerStatus_CurrentTime
-    getValueAttribute("i=2258", {Type=ua.Types.VariantType.DateTime, Value=compat.gettime()}),
+    getValueAttribute("i=2258", {Type=ua.VariantType.DateTime, Value=compat.gettime()}),
   }
 
   if dbgOn then traceD("services | Saving server status in address space") end
@@ -107,7 +107,7 @@ function Srv:start(config, services)
   services:setVariableSource("i=2258",
     function()
         return {
-          Type=ua.Types.VariantType.DateTime,
+          Type=ua.VariantType.DateTime,
           Value=compat.gettime()
         }
     end)
@@ -120,7 +120,7 @@ function Srv:start(config, services)
   services:setVariableSource("i=2255"  , function()
     return {
       StatusCode = 0,
-      Type=ua.Types.VariantType.String,
+      Type=ua.VariantType.String,
       IsArray = true,
       Value=getNamespaceUries(services.model)
     }

@@ -120,7 +120,7 @@ function C:connect(endpointUrl, transportProfile, connectCallback)
 
   if url.scheme == "opc.tcp" then
     if transportProfile == nil then
-      transportProfile = ua.Types.TranportProfileUri.TcpBinary
+      transportProfile = ua.TranportProfileUri.TcpBinary
     end
 
     local binary = require("opcua.binary.client")
@@ -131,7 +131,7 @@ function C:connect(endpointUrl, transportProfile, connectCallback)
     url.scheme == "opc.https" or url.scheme == "https"
   then
     if transportProfile == nil then
-      transportProfile = ua.Types.TranportProfileUri.HttpsBinary
+      transportProfile = ua.TranportProfileUri.HttpsBinary
     end
 
     self.hasSecureChannel = false
@@ -327,7 +327,7 @@ function C:openSecureChannel(timeoutMs, securityPolicyUri, securityMode, remoteC
   local request, err = self.services:createRequest(MessageId.OPEN_SECURE_CHANNEL_REQUEST)
   if err then return nil, err end
   request.ClientProtocolVersion = 0
-  request.RequestType = ua.Types.SecurityTokenRequestType.Issue
+  request.RequestType = ua.SecurityTokenRequestType.Issue
   request.SecurityMode = securityMode
   request.ClientNonce = self.channelNonce
   request.RequestedLifetime = timeoutMs
@@ -350,7 +350,7 @@ function C:renewSecureChannel(timeoutMs, callback)
   if err then return nil, err end
 
   request.ClientProtocolVersion = 0
-  request.RequestType = ua.Types.SecurityTokenRequestType.Renew
+  request.RequestType = ua.SecurityTokenRequestType.Renew
   request.SecurityMode = self.securityMode
   request.ClientNonce = self.channelNonce
   request.RequestedLifetime = timeoutMs
@@ -403,7 +403,7 @@ function C:createSession(name, timeoutMs, callback)
           ApplicationName = {
             Text = self.config.applicationName
           },
-          ApplicationType = ua.Types.ApplicationType.Client,
+          ApplicationType = ua.ApplicationType.Client,
           GatewayServerUri = nil,
           DiscoveryProfileUri = nil,
           DiscoveryUrls = {},
@@ -516,7 +516,7 @@ function C:activateSession(params, token, token2, callback)
     assert(callback == nil)
     callback = params
     params = nil
-    tokenPolicy = findTokenPolicyType(self.session.userIdentityTokens, ua.Types.UserTokenType.Anonymous)
+    tokenPolicy = findTokenPolicyType(self.session.userIdentityTokens, ua.UserTokenType.Anonymous)
   else
     assert(type(params) == "string")
     tokenPolicy = findTokenPolicyId(self.session.userIdentityTokens, params)
@@ -546,9 +546,9 @@ function C:activateSession(params, token, token2, callback)
     end
 
     local authPolicy
-    if tokenPolicy.SecurityPolicyUri and tokenPolicy.SecurityPolicyUri ~= ua.Types.SecurityPolicy.None and self.session.serverCertificate then
+    if tokenPolicy.SecurityPolicyUri and tokenPolicy.SecurityPolicyUri ~= ua.SecurityPolicy.None and self.session.serverCertificate then
       authPolicy = self.security(tokenPolicy.SecurityPolicyUri)
-      if tokenPolicy.TokenType == ua.Types.UserTokenType.Certificate then
+      if tokenPolicy.TokenType == ua.UserTokenType.Certificate then
         authPolicy:setLocalCertificate(token, token2)
       end
       if not self.session.serverCertificate then
@@ -562,9 +562,9 @@ function C:activateSession(params, token, token2, callback)
       }
     end
 
-    if tokenPolicy.TokenType == ua.Types.UserTokenType.Anonymous then
+    if tokenPolicy.TokenType == ua.UserTokenType.Anonymous then
       activateParams.UserIdentityToken = tools.createAnonymousToken(tokenPolicy.PolicyId)
-    elseif tokenPolicy.TokenType == ua.Types.UserTokenType.UserName then
+    elseif tokenPolicy.TokenType == ua.UserTokenType.UserName then
       if type(token) ~= "string" or type(token2) ~= "string" then
         return nil, BadIdentityTokenInvalid
       end
@@ -573,9 +573,9 @@ function C:activateSession(params, token, token2, callback)
         token2 = encrypt(authPolicy, token2, self.session.nonce)
       end
       activateParams.UserIdentityToken = tools.createUsernameToken(tokenPolicy.PolicyId, token, token2, authPolicy and authPolicy.aEncryptionAlgorithm)
-    elseif tokenPolicy.TokenType == ua.Types.UserTokenType.Certificate then
+    elseif tokenPolicy.TokenType == ua.UserTokenType.Certificate then
       activateParams.UserIdentityToken = tools.createX509Token(tokenPolicy.PolicyId, createCert(token, self.config.io).der)
-    elseif tokenPolicy.TokenType == ua.Types.UserTokenType.IssuedToken then
+    elseif tokenPolicy.TokenType == ua.UserTokenType.IssuedToken then
       if authPolicy then
         token = encrypt(authPolicy, token, self.session.nonce)
       end
@@ -607,10 +607,10 @@ end
 local function browseParams(nodeId)
   return {
     NodeId = nodeId, -- nodeId we want to browse
-    BrowseDirection = ua.Types.BrowseDirection.Forward,
+    BrowseDirection = ua.BrowseDirection.Forward,
     ReferenceTypeId = "i=33", -- HierarchicalReferences,
-    NodeClassMask = ua.Types.NodeClass.Unspecified,
-    ResultMask = ua.Types.BrowseResultMask.All,
+    NodeClassMask = ua.NodeClass.Unspecified,
+    ResultMask = ua.BrowseResultMask.All,
     IncludeSubtypes = true,
   }
 end
@@ -663,7 +663,7 @@ function C:browse(params, callback)
 end
 
 local function allAttributes(nodeId, attrs)
-  for _,val in pairs(ua.Types.AttributeId) do
+  for _,val in pairs(ua.AttributeId) do
     attrs[val] = {NodeId=nodeId, AttributeId=val}
   end
 end

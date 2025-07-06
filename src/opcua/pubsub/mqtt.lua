@@ -9,8 +9,8 @@ local traceE = ua.trace.err
 local traceD = ua.trace.dbg
  local fmt = string.format
 
-local MqttJson = ua.Types.TranportProfileUri.MqttJson
-local MqttBinary = ua.Types.TranportProfileUri.MqttBinary
+local MqttJson = ua.TranportProfileUri.MqttJson
+local MqttBinary = ua.TranportProfileUri.MqttBinary
 local BadDataEncodingUnsupported = 0x80390000
 
 local C = {}

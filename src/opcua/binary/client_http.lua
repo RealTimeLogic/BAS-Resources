@@ -33,10 +33,10 @@ local function createSocket(url, transportProfile, config)
   local dbgOn = config.logging.socket.dbgOn
 
   local mimetype
-  if transportProfile == ua.Types.TranportProfileUri.HttpsBinary then
+  if transportProfile == ua.TranportProfileUri.HttpsBinary then
     mimetype = "application/opcua+uabinary"
     -- mimetype = "application/octet-stream"
-  elseif transportProfile == ua.Types.TranportProfileUri.HttpsJson then
+  elseif transportProfile == ua.TranportProfileUri.HttpsJson then
     mimetype = "application/opcua+uajson"
     -- mimetype = "application/json"
   else
@@ -55,7 +55,7 @@ local function createSocket(url, transportProfile, config)
       header = {
         ["User-Agent"] = "mako",
         ["Content-Type"] = mimetype,
-        ["OPCUA-SecurityPolicy"] = ua.Types.SecurityPolicy.None
+        ["OPCUA-SecurityPolicy"] = ua.SecurityPolicy.None
       },
       trusted = false
     },
@@ -175,10 +175,10 @@ function C:connectServer(endpointUrl, transportProfile, connectCallback)
 
   if self.dec == nil then
     local hasChunks = false
-    if transportProfile == ua.Types.TranportProfileUri.HttpsBinary then
+    if transportProfile == ua.TranportProfileUri.HttpsBinary then
       self.enc = BinaryMessageEncoder.new(config, self.security, self.sock, hasChunks, self.model)
       self.dec = BinaryMessageDecoder.new(config, self.security, self.sock, hasChunks, self.model)
-    elseif transportProfile == ua.Types.TranportProfileUri.HttpsJson then
+    elseif transportProfile == ua.TranportProfileUri.HttpsJson then
       self.enc = JsonMessageEncoder.new(config, self.security, self.sock, hasChunks, self.model)
       self.dec = JsonMessageDecoder.new(config, self.security, self.sock, hasChunks, self.model)
     else
@@ -187,13 +187,13 @@ function C:connectServer(endpointUrl, transportProfile, connectCallback)
 
     self.enc:setChannelId(0)
     self.enc:setTokenId(0)
-    self:setupPolicy(ua.Types.SecurityPolicy.None)
-    self:setSecureMode(ua.Types.MessageSecurityMode.None)
+    self:setupPolicy(ua.SecurityPolicy.None)
+    self:setSecureMode(ua.MessageSecurityMode.None)
 
-    self.enc:setupPolicy(ua.Types.SecurityPolicy.None)
-    self.dec:setupPolicy(ua.Types.SecurityPolicy.None)
-    self.enc:setSecureMode(ua.Types.MessageSecurityMode.None)
-    self.dec:setSecureMode(ua.Types.MessageSecurityMode.None)
+    self.enc:setupPolicy(ua.SecurityPolicy.None)
+    self.dec:setupPolicy(ua.SecurityPolicy.None)
+    self.enc:setSecureMode(ua.MessageSecurityMode.None)
+    self.dec:setSecureMode(ua.MessageSecurityMode.None)
   end
 
   return processConnect(nil, connectCallback)

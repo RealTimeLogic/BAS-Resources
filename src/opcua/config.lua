@@ -21,8 +21,8 @@ local function checkSecurePolicies(config)
     error("invalid securePolicies")
   end
 
-  local p = ua.Types.SecurityPolicy
-  local modes = ua.Types.MessageSecurityMode
+  local p = ua.SecurityPolicy
+  local modes = ua.MessageSecurityMode
   for _,policy in ipairs(securePolicies) do
     local uri = policy.securityPolicyUri
     if countPolicies(securePolicies, uri) ~= 1 then
@@ -201,7 +201,7 @@ local function identityTokens(config)
     config.userIdentityTokens = {
       {
         policyId = "anonymous",
-        tokenType = ua.Types.UserTokenType.Anonymous
+        tokenType = ua.UserTokenType.Anonymous
       }
     }
     return
@@ -231,7 +231,7 @@ local function identityTokens(config)
       return error(string.format("Policy #%i: policyId must be string", idx))
     end
 
-    if policy.tokenType == ua.Types.UserTokenType.Anonymous then
+    if policy.tokenType == ua.UserTokenType.Anonymous then
       if policy.issuedTokenType then
         error("Anonymous policy cannot have issuedTokenType")
       elseif policy.issuerEndpointUrl then
@@ -239,23 +239,23 @@ local function identityTokens(config)
       elseif policy.securityPolicyUri then
         error("Anonymous policy cannot have securityPolicyUri")
       end
-    elseif policy.tokenType == ua.Types.UserTokenType.Certificate then
+    elseif policy.tokenType == ua.UserTokenType.Certificate then
       if policy.issuedTokenType then
         error("Certificate policy cannot have issuedTokenType")
       elseif policy.issuerEndpointUrl then
         error("Certificate policy cannot have issuerEndpointUrl")
       end
-    elseif policy.tokenType == ua.Types.UserTokenType.UserName then
+    elseif policy.tokenType == ua.UserTokenType.UserName then
       if policy.issuedTokenType then
         error("UserName policy cannot have issuedTokenType")
       elseif policy.issuerEndpointUrl then
         error("UserName policy cannot have issuerEndpointUrl")
       end
-    elseif policy.tokenType == ua.Types.UserTokenType.IssuedToken then
-      if policy.issuedTokenType ~= ua.Types.IssuedTokenType.Azure  and
-         policy.issuedTokenType ~= ua.Types.IssuedTokenType.JWT    and
-         policy.issuedTokenType ~= ua.Types.IssuedTokenType.OAuth2 and
-         policy.issuedTokenType ~= ua.Types.IssuedTokenType.OPCUA
+    elseif policy.tokenType == ua.UserTokenType.IssuedToken then
+      if policy.issuedTokenType ~= ua.IssuedTokenType.Azure  and
+         policy.issuedTokenType ~= ua.IssuedTokenType.JWT    and
+         policy.issuedTokenType ~= ua.IssuedTokenType.OAuth2 and
+         policy.issuedTokenType ~= ua.IssuedTokenType.OPCUA
       then
         error(string.format("Token policy '%s' has invalid issuedTokenType", policy.policyId))
       end
@@ -263,7 +263,7 @@ local function identityTokens(config)
       error(string.format("Policy '%s' has unknown token type", policy.policyId))
     end
 
-    if policy.securityPolicyUri and policy.securityPolicyUri ~= ua.Types.SecurityPolicy.None then
+    if policy.securityPolicyUri and policy.securityPolicyUri ~= ua.SecurityPolicy.None then
       local found = false
       for _,security in ipairs(config.securePolicies) do
         if security.securityPolicyUri == policy.securityPolicyUri then

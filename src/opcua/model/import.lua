@@ -201,9 +201,8 @@ function Model:loadXmlModels(modelFiles)
   for _,path in ipairs(modelFiles) do
     local f, err
     if path:sub(1, 7) == "http://" or path:sub(1, 8) == "https://" then
-      local ok
       f = require"httpc".create()
-      ok,err=f:request{url=path, method="GET"}
+      _,err=f:request{url=path, method="GET"}
     elseif path:sub(1, 1) == "<?xml" then
       f = path -- this is the content of the file
     else
@@ -216,6 +215,18 @@ function Model:loadXmlModels(modelFiles)
 
     self:loadXml(f)
   end
+end
+
+function Model:createNamespace(namespaceUri)
+  for _, uri in ipairs(self.NamespaceUris) do
+    if uri == namespaceUri then
+      error("Namespace with URI " .. namespaceUri .. " already exists")
+    end
+  end
+
+  local index = #self.NamespaceUris + 1
+  self.NamespaceUris[index] = namespaceUri
+  return index
 end
 
 local function createModel()

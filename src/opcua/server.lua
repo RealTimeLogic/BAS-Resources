@@ -140,6 +140,10 @@ function S:loadXmlModels(modelFiles)
   self.model:commit()
 end
 
+function S:createNamespace(namespaceUri)
+  return self.model:createNamespace(namespaceUri)
+end
+
 function S.new(config, model)
   if not config then
     config = {

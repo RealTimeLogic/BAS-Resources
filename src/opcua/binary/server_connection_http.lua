@@ -34,8 +34,8 @@ function S:processData(securityPolicyUri)
     local channel = {
       getLocalPolicy = function()
         local policy = self.security(securityPolicyUri)
-        if securityPolicyUri ~= ua.Types.SecurityPolicy.None then
-          policy:setSecureMode(ua.Types.MessageSecurityMode.Sign)
+        if securityPolicyUri ~= ua.SecurityPolicy.None then
+          policy:setSecureMode(ua.MessageSecurityMode.Sign)
         end
         return policy
       end
@@ -183,12 +183,12 @@ function S:processHttp(request, response)
     -- CreateSession/Activate session calls: there are signatures
     -- of nonces calculated to prove certificate owing.
     local enc = BinaryMessageEncoder.new(self.config, self.security, sock, hasChunks, self.model)
-    enc:setupPolicy(ua.Types.SecurityPolicy.None)
-    enc:setSecureMode(ua.Types.MessageSecurityMode.None)
+    enc:setupPolicy(ua.SecurityPolicy.None)
+    enc:setSecureMode(ua.MessageSecurityMode.None)
 
     local dec = BinaryMessageDecoder.new(self.config, self.security, sock, hasChunks, self.model)
-    dec:setupPolicy(ua.Types.SecurityPolicy.None)
-    dec:setSecureMode(ua.Types.MessageSecurityMode.None)
+    dec:setupPolicy(ua.SecurityPolicy.None)
+    dec:setSecureMode(ua.MessageSecurityMode.None)
     self.encoder = enc
     self.decoder = dec
   elseif encoding == "application/opcua+uajson" then
@@ -242,7 +242,7 @@ local function newConnection(config, services, model)
   local securePolicies = {}
   local nonePolicyEnabled = false
   for _,p in ipairs(config.securePolicies) do
-    if p.securityPolicyUri == ua.Types.SecurityPolicy.None then
+    if p.securityPolicyUri == ua.SecurityPolicy.None then
       nonePolicyEnabled = true
     end
     table.insert(securePolicies, p)
@@ -251,8 +251,8 @@ local function newConnection(config, services, model)
   if nonePolicyEnabled == false then
     table.insert(securePolicies,
       {
-        securityPolicyUri = ua.Types.SecurityPolicy.None,
-        securityMode = {ua.Types.MessageSecurityMode.None}
+        securityPolicyUri = ua.SecurityPolicy.None,
+        securityMode = {ua.MessageSecurityMode.None}
       }
     )
   end

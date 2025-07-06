@@ -6,7 +6,7 @@
 local ua = require("opcua.api") -- REMOVE, Not used in encryption
 
 return {
-  policyUri = ua.Types.SecurityPolicy.Aes256_Sha256_RsaPss,
+  policyUri = ua.SecurityPolicy.Aes256_Sha256_RsaPss,
   aEncryptionAlgorithm = "http://www.w3.org/2001/04/xmlenc#rsa-oaep",
   aSignatureUri = "http://opcfoundation.org/UA/security/rsa-pss-sha2-256",
   rsaParams = {padding="oaep", hash="sha256"},
