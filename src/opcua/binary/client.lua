@@ -65,7 +65,7 @@ local function processConnect(err, callback)
 end
 
 function C:connectServer(endpointUrl, transportProfile, connectCallback)
-  assert(transportProfile == ua.Types.TranportProfileUri.TcpBinary)
+  assert(transportProfile == ua.TranportProfileUri.TcpBinary)
 
   local config = self.config
   local sock
@@ -142,7 +142,7 @@ end
 function C:coRun(endpointUrl, transportProfile, connectCallback, messageCallback)
   local infOn = self.config.logging.binary.infOn
 
-  if transportProfile ~= ua.Types.TranportProfileUri.TcpBinary then
+  if transportProfile ~= ua.TranportProfileUri.TcpBinary then
     error("Binary client with transport profile '"..tostring(transportProfile).."' not supported")
   end
 

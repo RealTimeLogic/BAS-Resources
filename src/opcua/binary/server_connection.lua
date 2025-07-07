@@ -108,14 +108,14 @@ function S:processOpenSecureChannel(msg)
     self:responseServiceFault(msg, s.BadRequestTypeInvalid)
     return
   elseif self.state == State.Hello then
-    if req.RequestType ~= ua.Types.SecurityTokenRequestType.Issue then
+    if req.RequestType ~= ua.SecurityTokenRequestType.Issue then
       if errOn then traceE(fmt("%s Received request type '%s' instead 'issue(0)'", self.logId, req.RequestType)) end
       self:responseServiceFault(msg, s.BadRequestTypeInvalid)
       return
     end
     if infOn then traceI(fmt("%s Issuing new channel token", self.logId)) end
   elseif self.state == State.Open then
-    if req.RequestType ~= ua.Types.SecurityTokenRequestType.Renew then
+    if req.RequestType ~= ua.SecurityTokenRequestType.Renew then
       if errOn then traceE(fmt("%s Received request type '%s' instead 'renew(1)'", self.logId, req.RequestType)) end
       self:responseServiceFault(msg, s.BadRequestTypeInvalid)
       return
@@ -245,7 +245,7 @@ function S:processMessage()
       return self:processOpenSecureChannel(msg)
     end
 
-    if self.nonePolicyEnabled == false and self.decoder.q.policy.uri == ua.Types.SecurityPolicy.None then
+    if self.nonePolicyEnabled == false and self.decoder.q.policy.uri == ua.SecurityPolicy.None then
       error(s.BadSecurityChecksFailed)
     end
 
@@ -378,7 +378,7 @@ local function newConnection(config, services, sock, model)
   local securePolicies = {}
   local nonePolicyEnabled = false
   for _,p in ipairs(config.securePolicies) do
-    if p.securityPolicyUri == ua.Types.SecurityPolicy.None then
+    if p.securityPolicyUri == ua.SecurityPolicy.None then
       nonePolicyEnabled = true
     end
     table.insert(securePolicies, p)
@@ -387,8 +387,8 @@ local function newConnection(config, services, sock, model)
   if nonePolicyEnabled == false then
     table.insert(securePolicies,
       {
-        securityPolicyUri = ua.Types.SecurityPolicy.None,
-        securityMode = {ua.Types.MessageSecurityMode.None}
+        securityPolicyUri = ua.SecurityPolicy.None,
+        securityMode = {ua.MessageSecurityMode.None}
       }
     )
   end

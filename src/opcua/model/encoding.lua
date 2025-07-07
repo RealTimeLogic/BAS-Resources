@@ -151,6 +151,11 @@ function Decoder:decodeStructure(dataTypeId)
   else
     for _, field in ipairs(definition) do
       if dbg then print(fmt("decoding field: %s (%s)", field.Name, field.DataType)) end
+
+      -- if field.Name == "AdditionalHeader" then
+      --   require("ldbgmon").connect({client=false})
+      -- end
+
       local dataType = field.DataType
       local baseId = self.model.ExtObjects[dataType].baseId
       local decF = self[baseId]

@@ -10,8 +10,8 @@ local srvObject = require("opcua.server_object")
 
 local s = ua.StatusCode
 local t = ua.Tools
-local AttributeId = ua.Types.AttributeId
-local NodeClass = ua.Types.NodeClass
+local AttributeId = ua.AttributeId
+local NodeClass = ua.NodeClass
 
 local traceD = ua.trace.dbg
 local traceI = ua.trace.inf
@@ -97,9 +97,9 @@ function Svc:getServerDescription()
     },
 
     ProductUri = ua.Version.ProductUri,
-    ApplicationType = ua.Types.ApplicationType.Server,
+    ApplicationType = ua.ApplicationType.Server,
     GatewayServerUri = nil,
-    DiscoveryProfileUri = ua.Types.ServerProfile.NanoEmbedded2017,
+    DiscoveryProfileUri = ua.ServerProfile.NanoEmbedded2017,
     DiscoveryUrls = endpointUrls
   }
 end
@@ -131,8 +131,8 @@ function Svc:addEndpointDescriptions(endpointUrl, transportProfileUri, policy, e
     local endpoint = {
       EndpointUrl = endpointUrl,
       ServerCertificate = der,
-      SecurityMode = ua.Types.MessageSecurityMode.None,
-      SecurityPolicyUri = ua.Types.SecurityPolicy.None,
+      SecurityMode = ua.MessageSecurityMode.None,
+      SecurityPolicyUri = ua.SecurityPolicy.None,
       Server = self:getServerDescription(),
       UserIdentityTokens = tokenPolicies,
       TransportProfileUri = transportProfileUri,
@@ -164,12 +164,12 @@ function Svc:listEndpoints()
     local endpointUrl = endpoint.endpointUrl
     if string.find(endpointUrl, "opc.tcp") == 1 then
       for _,policy in ipairs(self.config.securePolicies) do
-        self:addEndpointDescriptions(endpoint.endpointUrl, ua.Types.TranportProfileUri.TcpBinary, policy, endpoints)
+        self:addEndpointDescriptions(endpoint.endpointUrl, ua.TranportProfileUri.TcpBinary, policy, endpoints)
       end
     elseif string.find(endpointUrl, "http://") or string.find(endpointUrl, "https://") then
       local policy = {}
-      self:addEndpointDescriptions(endpoint.endpointUrl, ua.Types.TranportProfileUri.HttpsBinary, policy, endpoints)
-      self:addEndpointDescriptions(endpoint.endpointUrl, ua.Types.TranportProfileUri.HttpsJson, policy, endpoints)
+      self:addEndpointDescriptions(endpoint.endpointUrl, ua.TranportProfileUri.HttpsBinary, policy, endpoints)
+      self:addEndpointDescriptions(endpoint.endpointUrl, ua.TranportProfileUri.HttpsJson, policy, endpoints)
     else
       error("Unsupported endpoint uri scheme: ".. endpointUrl)
     end
@@ -238,7 +238,7 @@ function Svc:createSession(req, channel)
   resp.ServerEndpoints = self:listEndpoints()
   resp.ServerSoftwareCertificates = nil
 
-  if policy.uri ~= ua.Types.SecurityPolicy.None then
+  if policy.uri ~= ua.SecurityPolicy.None then
     resp.ServerSignature = {
       Algorithm = policy.aSignatureUri,
       Signature = policy:asymmetricSign(req.ClientCertificate..req.ClientNonce)
@@ -366,7 +366,7 @@ function Svc:activateSession(req, channel)
 
   if tokenTypeId == "i=319" then
     if infOn then traceI(fmt("Services:activateSession(%s) | Check anonymous token", sessionId)) end
-    if tokenPolicy.tokenType ~= ua.Types.UserTokenType.Anonymous then
+    if tokenPolicy.tokenType ~= ua.UserTokenType.Anonymous then
       if errOn then traceE(fmt("Services:activateSession(%s) | Not an anonymous token ", sessionId)) end
       error(BadIdentityTokenRejected)
     end
@@ -377,7 +377,7 @@ function Svc:activateSession(req, channel)
     allowed = authenticate("username", password, token.Body.UserName)
   elseif tokenTypeId == "i=325" then
     if infOn then traceI(fmt("Services:activateSession(%s) | Check x509 certificate", sessionId)) end
-    if tokenPolicy.securityPolicyUri and tokenPolicy.securityPolicyUri ~= ua.Types.SecurityPolicy.None or req.UserTokenSignature.Signature then
+    if tokenPolicy.securityPolicyUri and tokenPolicy.securityPolicyUri ~= ua.SecurityPolicy.None or req.UserTokenSignature.Signature then
       encryption = securePolicy(self.config)
       authPolicy = encryption(tokenPolicy.securityPolicyUri)
       if req.UserTokenSignature.Algorithm ~= authPolicy.aSignatureUri then
@@ -394,16 +394,16 @@ function Svc:activateSession(req, channel)
     allowed = authenticate("x509", token.Body.CertificateData)
   elseif tokenTypeId == "i=938" then -- IssuedToken
     local tokenData = decrypt(authPolicy, token.Body.TokenData)
-    if tokenPolicy.issuedTokenType == ua.Types.IssuedTokenType.Azure then
+    if tokenPolicy.issuedTokenType == ua.IssuedTokenType.Azure then
       if infOn then traceI(fmt("Services:activateSession(%s) | Check Azure token", sessionId)) end
       allowed = authenticate("azure", tokenData, tokenPolicy.issuerEndpointUrl)
-    elseif tokenPolicy.issuedTokenType == ua.Types.IssuedTokenType.JWT then
+    elseif tokenPolicy.issuedTokenType == ua.IssuedTokenType.JWT then
       if infOn then traceI(fmt("Services:activateSession(%s) | Check JWT token", sessionId)) end
       allowed = authenticate("jwt", tokenData, tokenPolicy.issuerEndpointUrl)
-    elseif tokenPolicy.issuedTokenType == ua.Types.IssuedTokenType.OAuth2 then
+    elseif tokenPolicy.issuedTokenType == ua.IssuedTokenType.OAuth2 then
       if infOn then traceI(fmt("Services:activateSession(%s) | Check OAuth2 token", sessionId)) end
       allowed = authenticate("oauth2", tokenData, tokenPolicy.issuerEndpointUrl)
-    elseif tokenPolicy.issuedTokenType == ua.Types.IssuedTokenType.OPCUA then
+    elseif tokenPolicy.issuedTokenType == ua.IssuedTokenType.OPCUA then
       if infOn then traceI(fmt("Services:activateSession(%s) | Check OPCUA token", sessionId)) end
       allowed = authenticate("opcua", tokenData, tokenPolicy.issuerEndpointUrl)
     else
@@ -562,7 +562,7 @@ function Svc:browse(req, channel)
 
       if dbgOn then traceD(fmt("Services:browse(%s) | node has %d refs", sessionId, #node.refs)) end
 
-      local isForward = n.BrowseDirection == ua.Types.BrowseDirection.Forward
+      local isForward = n.BrowseDirection == ua.BrowseDirection.Forward
       result.StatusCode = Good
       for _,ref in pairs(node.refs) do
         repeat
@@ -571,7 +571,7 @@ function Svc:browse(req, channel)
             traceD(fmt("Services:browse(%s) | TargetNodeId='%s', ReferenceID='%s', isForward='%s'", sessionId, ref.target, refType, ref.isForward))
           end
 
-          if refTypes[refType] == nil or (n.BrowseDirection ~= ua.Types.BrowseDirection.Both and ref.isForward ~= isForward) then
+          if refTypes[refType] == nil or (n.BrowseDirection ~= ua.BrowseDirection.Both and ref.isForward ~= isForward) then
             if dbgOn then traceD(fmt("Services:browse(%s) | reference has different direction from %d", sessionId, n.BrowseDirection)) end
             break
           end
@@ -585,12 +585,12 @@ function Svc:browse(req, channel)
           local displayName = attrs.getAttributeValue(targetNode.attrs, AttributeId.DisplayName, self.nodeset)
           local browseName = attrs.getAttributeValue(targetNode.attrs, AttributeId.BrowseName, self.nodeset)
 
-          if displayName.Type ~= ua.Types.VariantType.LocalizedText then
+          if displayName.Type ~= ua.VariantType.LocalizedText then
             if errOn then traceE(fmt("Services:browse(%s) |   Target node '%s' display name is not a LocalizedText", sessionId, ref.target)) end
             error(BadInternalError)
           end
 
-          if browseName.Type ~= ua.Types.VariantType.QualifiedName then
+          if browseName.Type ~= ua.VariantType.QualifiedName then
             if errOn then traceE(fmt("Services:browse(%s) |   Target node '%s' browse name is not a QualifiedName", sessionId, ref.target)) end
             error(BadInternalError)
           end
@@ -950,7 +950,7 @@ function Svc:getVariableAttributes(nodeId, allAttrs, nodeset)
     error(code)
   end
 
-  result[AttributeId.NodeClass] = ua.Types.NodeClass.Variable
+  result[AttributeId.NodeClass] = ua.NodeClass.Variable
   result[AttributeId.Value] = nodeAttrs.Value
   result[AttributeId.DataType] = nodeAttrs.DataType
   result[AttributeId.Rank] = nodeAttrs.ValueRank
@@ -976,7 +976,7 @@ function Svc:getObjectAttributes(nodeId, nodeAttrs)
   end
 
   local result = self:getCommonAttributes(nodeId, nodeAttrs)
-  result[AttributeId.NodeClass] = ua.Types.NodeClass.Object
+  result[AttributeId.NodeClass] = ua.NodeClass.Object
   result[AttributeId.EventNotifier] = nodeAttrs.EventNotifier
   return result
 end
@@ -1005,7 +1005,7 @@ function Svc:addNode(node)
   end
 
   local refNode = self.nodeset[node.ReferenceTypeId]
-  if refNode == nil or refNode.attrs[AttributeId.NodeClass] ~= ua.Types.NodeClass.ReferenceType then
+  if refNode == nil or refNode.attrs[AttributeId.NodeClass] ~= ua.NodeClass.ReferenceType then
     if errOn then traceE("Services:addNode | Invalid referenceTypeId") end
     error(BadReferenceTypeIdInvalid)
   end
@@ -1026,7 +1026,7 @@ function Svc:addNode(node)
     error(BadTypeDefinitionInvalid)
   end
 
-  if typeNode.attrs[AttributeId.NodeClass] ~= ua.Types.NodeClass.VariableType and typeNode.attrs[AttributeId.NodeClass] ~= ua.Types.NodeClass.ObjectType then
+  if typeNode.attrs[AttributeId.NodeClass] ~= ua.NodeClass.VariableType and typeNode.attrs[AttributeId.NodeClass] ~= ua.NodeClass.ObjectType then
     if errOn then traceE("Services:addNode | Invalid TypeDefinition. Only VariableType and ObjectType supported now.") end
     error(BadTypeDefinitionInvalid)
   end
@@ -1043,11 +1043,11 @@ function Svc:addNode(node)
   -- transform input parameters into array of new node attributes
   local resultAttrs
   local type
-  if node.NodeClass == ua.Types.NodeClass.Variable then
+  if node.NodeClass == ua.NodeClass.Variable then
     type = 'variable'
     if infOn then traceI("Services:addNode | Adding new variable node.") end
     resultAttrs = self:getVariableAttributes(nodeId, node, self.nodeset)
-  elseif node.NodeClass == ua.Types.NodeClass.Object then
+  elseif node.NodeClass == ua.NodeClass.Object then
     type = 'object'
     if infOn then traceI("Services:addNode | Adding new object.") end
     resultAttrs = self:getObjectAttributes(nodeId, node)
@@ -1201,7 +1201,7 @@ function Svc:setVariableSource(nodeId, func)
     if dbgOn then traceD(fmt("Setting source callback failed: nodeId '%s' unknown", nodeId)) end
     error(BadNodeIdUnknown)
   end
-  if node.attrs[ua.Types.AttributeId.NodeClass] ~= ua.Types.NodeClass.Variable then
+  if node.attrs[ua.AttributeId.NodeClass] ~= ua.NodeClass.Variable then
     if dbgOn then traceD(fmt("Setting source callback failed: nodeId '%s' is not a variable", nodeId)) end
     error(BadNodeClassInvalid)
   end

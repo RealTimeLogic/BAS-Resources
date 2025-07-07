@@ -14,7 +14,7 @@ end
 
 local function createPolicy(_--[[modes]], _--[[params]], fsIo)
   return {
-    uri = ua.Types.SecurityPolicy.None,
+    uri = ua.SecurityPolicy.None,
 
     setLocalCertificate = function(self, certificate, key)
       if not certificate or not key then

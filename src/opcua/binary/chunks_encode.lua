@@ -229,7 +229,7 @@ function ch:finishChunk(chunkType)
     elseif self.messageType == "OPN" then
       assert(self.requestId ~= 0 and self.requestId ~= nil)
       assert(policy)
-      if policy.uri ~= ua.Types.SecurityPolicy.None then
+      if policy.uri ~= ua.SecurityPolicy.None then
         header:asymmetricSecurityHeader(policy.uri, policy:getLocalCert(), policy:getRemoteThumbprint())
       else
         header:asymmetricSecurityHeader(policy.uri)

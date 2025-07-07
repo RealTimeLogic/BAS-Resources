@@ -203,29 +203,29 @@ local function getAttrValue(context, attrIdx, value, func, output)
 end
 
 local function saveAttributes(context, node, output)
-  getAttrValue(context, ua.Types.AttributeId.NodeId,            node.attrs[1], getNodeIdUaValue,   output)
-  getAttrValue(context, ua.Types.AttributeId.NodeClass,         node.attrs[2], getUInt32UaValue,   output)
-  getAttrValue(context, ua.Types.AttributeId.BrowseName,        node.attrs[3], getQualifiedNameUaValue, output)
-  getAttrValue(context, ua.Types.AttributeId.DisplayName,       node.attrs[4], getLocalizedTextUaValue, output)
-  getAttrValue(context, ua.Types.AttributeId.Description,       node.attrs[5], getLocalizedTextUaValue, output)
-  getAttrValue(context, ua.Types.AttributeId.WriteMask,         node.attrs[6], getUInt32UaValue,   output)
-  getAttrValue(context, ua.Types.AttributeId.UserWriteMask,     node.attrs[7], getUInt32UaValue,   output)
-  getAttrValue(context, ua.Types.AttributeId.IsAbstract,        node.attrs[8], getBooleanUaValue,  output)
-  getAttrValue(context, ua.Types.AttributeId.Symmetric,         node.attrs[9], getBooleanUaValue,  output)
-  getAttrValue(context, ua.Types.AttributeId.InverseName,       node.attrs[10], getLocalizedTextUaValue,output)
-  getAttrValue(context, ua.Types.AttributeId.ContainsNoLoops,   node.attrs[11], getBooleanUaValue, output)
-  getAttrValue(context, ua.Types.AttributeId.EventNotifier,     node.attrs[12], getUInt32UaValue,  output)
-  getAttrValue(context, ua.Types.AttributeId.Value,             node.attrs[13], getVariantUaValue, output)
-  getAttrValue(context, ua.Types.AttributeId.DataType,          node.attrs[14], getNodeIdUaValue,  output)
-  getAttrValue(context, ua.Types.AttributeId.Rank,              node.attrs[15], getUInt32UaValue,  output)
+  getAttrValue(context, ua.AttributeId.NodeId,            node.attrs[1], getNodeIdUaValue,   output)
+  getAttrValue(context, ua.AttributeId.NodeClass,         node.attrs[2], getUInt32UaValue,   output)
+  getAttrValue(context, ua.AttributeId.BrowseName,        node.attrs[3], getQualifiedNameUaValue, output)
+  getAttrValue(context, ua.AttributeId.DisplayName,       node.attrs[4], getLocalizedTextUaValue, output)
+  getAttrValue(context, ua.AttributeId.Description,       node.attrs[5], getLocalizedTextUaValue, output)
+  getAttrValue(context, ua.AttributeId.WriteMask,         node.attrs[6], getUInt32UaValue,   output)
+  getAttrValue(context, ua.AttributeId.UserWriteMask,     node.attrs[7], getUInt32UaValue,   output)
+  getAttrValue(context, ua.AttributeId.IsAbstract,        node.attrs[8], getBooleanUaValue,  output)
+  getAttrValue(context, ua.AttributeId.Symmetric,         node.attrs[9], getBooleanUaValue,  output)
+  getAttrValue(context, ua.AttributeId.InverseName,       node.attrs[10], getLocalizedTextUaValue,output)
+  getAttrValue(context, ua.AttributeId.ContainsNoLoops,   node.attrs[11], getBooleanUaValue, output)
+  getAttrValue(context, ua.AttributeId.EventNotifier,     node.attrs[12], getUInt32UaValue,  output)
+  getAttrValue(context, ua.AttributeId.Value,             node.attrs[13], getVariantUaValue, output)
+  getAttrValue(context, ua.AttributeId.DataType,          node.attrs[14], getNodeIdUaValue,  output)
+  getAttrValue(context, ua.AttributeId.Rank,              node.attrs[15], getUInt32UaValue,  output)
   -- UA_AttributeId_ArrayDimensions = 16,         /* UA_Type_Uint32(array), value.bPtr */
-  getAttrValue(context, ua.Types.AttributeId.AccessLevel,       node.attrs[17], getUInt32UaValue,  output)
-  getAttrValue(context, ua.Types.AttributeId.UserAccessLevel,   node.attrs[18], getUInt32UaValue,  output)
-  getAttrValue(context, ua.Types.AttributeId.MinimumSamplingInterval, node.attrs[19], getDoubleUaValue,  output)
-  getAttrValue(context, ua.Types.AttributeId.Historizing,       node.attrs[20], getBooleanUaValue, output)
-  getAttrValue(context, ua.Types.AttributeId.Executable,        node.attrs[21], getBooleanUaValue, output)
-  getAttrValue(context, ua.Types.AttributeId.UserExecutable,    node.attrs[22], getBooleanUaValue, output)
-  getAttrValue(context, ua.Types.AttributeId.DataTypeDefinition,node.attrs[23], getNodeIdUaValue,  output)
+  getAttrValue(context, ua.AttributeId.AccessLevel,       node.attrs[17], getUInt32UaValue,  output)
+  getAttrValue(context, ua.AttributeId.UserAccessLevel,   node.attrs[18], getUInt32UaValue,  output)
+  getAttrValue(context, ua.AttributeId.MinimumSamplingInterval, node.attrs[19], getDoubleUaValue,  output)
+  getAttrValue(context, ua.AttributeId.Historizing,       node.attrs[20], getBooleanUaValue, output)
+  getAttrValue(context, ua.AttributeId.Executable,        node.attrs[21], getBooleanUaValue, output)
+  getAttrValue(context, ua.AttributeId.UserExecutable,    node.attrs[22], getBooleanUaValue, output)
+  getAttrValue(context, ua.AttributeId.DataTypeDefinition,node.attrs[23], getNodeIdUaValue,  output)
 
   -- -- UA_AttributeId_RolePermissions = 24,
   -- -- UA_AttributeId_UserRolePermissions = 25,
@@ -285,7 +285,7 @@ local function saveNodes(self, context, output)
     local node = self.Nodes[nodeId]
     idx = idx + 1
 
-    if node.attrs[ua.Types.AttributeId.NodeClass] ~= ua.Types.NodeClass.DataType then
+    if node.attrs[ua.AttributeId.NodeClass] ~= ua.NodeClass.DataType then
       goto continue
     end
 

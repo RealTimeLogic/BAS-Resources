@@ -179,7 +179,7 @@ local function decodeFields(dec, DataSetMessageType, FieldEncoding)
     error("Unsupported FieldEncoding " .. tostring(FieldEncoding))
   end
 
-  local isValue = FieldEncoding == FIELD_ENCODING_DATA_VALUE
+  -- local isValue = FieldEncoding == FIELD_ENCODING_DATA_VALUE
   local fields
   if DataSetMessageType == DATA_KEY_FRAME then
     -- DataKeyFrame

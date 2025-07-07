@@ -10,7 +10,7 @@ local BadNodeClassInvalid = s.BadNodeClassInvalid
 local BadInternalError = s.BadInternalError
 
 local t = ua.Tools
-local AttributeId = ua.Types.AttributeId
+local AttributeId = ua.AttributeId
 
 local Boolean = "i=1"
 local SByte = "i=2"
@@ -62,54 +62,54 @@ local function getValue(attr, dataType)
 
   local variant = {}
   if dataType == Boolean then
-    variant.Type = ua.Types.VariantType.Boolean
+    variant.Type = ua.VariantType.Boolean
   elseif dataType == SByte then
-    variant.Type = ua.Types.VariantType.SByte
+    variant.Type = ua.VariantType.SByte
   elseif dataType == Byte then
-    variant.Type = ua.Types.VariantType.Byte
+    variant.Type = ua.VariantType.Byte
   elseif dataType == Int16 then
-    variant.Type = ua.Types.VariantType.Int16
+    variant.Type = ua.VariantType.Int16
   elseif dataType == UInt16 then
-    variant.Type = ua.Types.VariantType.UInt16
+    variant.Type = ua.VariantType.UInt16
   elseif dataType == Int32 then
-    variant.Type = ua.Types.VariantType.Int32
+    variant.Type = ua.VariantType.Int32
   elseif dataType == UInt32 then
-    variant.Type = ua.Types.VariantType.UInt32
+    variant.Type = ua.VariantType.UInt32
   elseif dataType == Int64 then
-    variant.Type = ua.Types.VariantType.Int64
+    variant.Type = ua.VariantType.Int64
   elseif dataType == UInt64 then
-    variant.Type = ua.Types.VariantType.UInt64
+    variant.Type = ua.VariantType.UInt64
   elseif dataType == Float then
-    variant.Type = ua.Types.VariantType.Float
+    variant.Type = ua.VariantType.Float
   elseif dataType == Double then
-    variant.Type = ua.Types.VariantType.Double
+    variant.Type = ua.VariantType.Double
   elseif dataType == String then
-    variant.Type = ua.Types.VariantType.String
+    variant.Type = ua.VariantType.String
   elseif dataType == DateTime or dataType == 294 then
-    variant.Type = ua.Types.VariantType.DateTime
+    variant.Type = ua.VariantType.DateTime
   elseif dataType == Guid then
-    variant.Type = ua.Types.VariantType.Guid
+    variant.Type = ua.VariantType.Guid
   elseif dataType == ByteString then
-    variant.Type = ua.Types.VariantType.ByteString
+    variant.Type = ua.VariantType.ByteString
   elseif dataType == XmlElement then
     return createBadAttribute()
   elseif dataType == NodeId then
-    variant.Type = ua.Types.VariantType.NodeId
+    variant.Type = ua.VariantType.NodeId
   elseif dataType == ExpandedNodeId then
-    variant.Type = ua.Types.VariantType.ExpandedNodeId
+    variant.Type = ua.VariantType.ExpandedNodeId
   elseif dataType == StatusCode then
-    variant.Type = ua.Types.VariantType.StatusCode
+    variant.Type = ua.VariantType.StatusCode
   elseif dataType == QualifiedName then
     assert(t.qualifiedNameValid(attr))
-    variant.Type = ua.Types.VariantType.QualifiedName
+    variant.Type = ua.VariantType.QualifiedName
     if (attr.ns == nil) then
       attr.ns = 0
     end
   elseif dataType == LocalizedText then
     assert(t.localizedTextValid(attr));
-    variant.Type = ua.Types.VariantType.LocalizedText
+    variant.Type = ua.VariantType.LocalizedText
   elseif dataType == ExtensionObject then
-    variant.Type = ua.Types.VariantType.ExtensionObject
+    variant.Type = ua.VariantType.ExtensionObject
   elseif dataType == DataValue then
     return createBadAttribute()
   elseif dataType == Variant then
@@ -420,21 +420,21 @@ return {
       error(BadNodeClassInvalid)
     end
 
-    if nodeClass == ua.Types.NodeClass.Object then
+    if nodeClass == ua.NodeClass.Object then
       val = getObjectAttribute(attrs, attrId)
-    elseif nodeClass == ua.Types.NodeClass.ObjectType then
+    elseif nodeClass == ua.NodeClass.ObjectType then
       val = getObjectTypeAttribute(attrs, attrId)
-    elseif nodeClass == ua.Types.NodeClass.ReferenceType then
+    elseif nodeClass == ua.NodeClass.ReferenceType then
       val = getRefTypeAttribute(attrs, attrId)
-    elseif nodeClass == ua.Types.NodeClass.Variable then
+    elseif nodeClass == ua.NodeClass.Variable then
       val = getVariableAttribute(attrs, attrId)
-    elseif nodeClass == ua.Types.NodeClass.VariableType then
+    elseif nodeClass == ua.NodeClass.VariableType then
       val = getVariableTypeAttribute(attrs, attrId)
-    elseif nodeClass == ua.Types.NodeClass.DataType then
+    elseif nodeClass == ua.NodeClass.DataType then
       val = getDataTypeAttribute(attrs, attrId)
-    elseif nodeClass == ua.Types.NodeClass.Method then
+    elseif nodeClass == ua.NodeClass.Method then
       val = getMethodAttribute(attrs, attrId)
-    elseif nodeClass == ua.Types.NodeClass.View then
+    elseif nodeClass == ua.NodeClass.View then
       val = getViewAttribute(attrs, attrId)
     else
       val = getCommonAttribute(attrs, attrId)
@@ -449,9 +449,9 @@ return {
     end
 
     local nodeClass = attrs[AttributeId.NodeClass]
-    if nodeClass == ua.Types.NodeClass.Variable then
+    if nodeClass == ua.NodeClass.Variable then
       checkVariableAttribute(attrs, attrId, dataValue, nodeset)
-    elseif nodeClass == ua.Types.NodeClass.Object then
+    elseif nodeClass == ua.NodeClass.Object then
       checkObjectAttribute(attrId, dataValue, nodeset)
     end
   end,

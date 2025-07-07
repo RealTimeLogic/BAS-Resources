@@ -251,7 +251,7 @@ local function new(config, security, sock, hasChunks, model)
         local secureHeader = self.binaryDecoder:asymmetricSecurityHeader()
 
         local securePolicy = self.security(secureHeader.SecurityPolicyUri)
-        if securePolicy.uri ~= ua.Types.SecurityPolicy.None and secureHeader.ReceiverCertificateThumbprint ~= securePolicy:getLocalThumbprint() then
+        if securePolicy.uri ~= ua.SecurityPolicy.None and secureHeader.ReceiverCertificateThumbprint ~= securePolicy:getLocalThumbprint() then
           if errOn then traceE("binary | Unknown local certificate thumbprint") end
           self:disconnect()
           error(BadSecurityChecksFailed)
