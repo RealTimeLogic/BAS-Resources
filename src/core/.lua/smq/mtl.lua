@@ -206,6 +206,7 @@ local msgT={
 
 local function sockThread(sock,self,statusCB)
    local peerAddr=peername(sock)
+   if not peerAddr then return end
    local peerT=self.peersT[peerAddr]
    if not peerT then
       peerT={socksT={}}
