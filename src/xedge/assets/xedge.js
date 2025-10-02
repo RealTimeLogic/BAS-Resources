@@ -433,7 +433,7 @@ function createEditor(pn,value,savecb,newElem) {
 		    addSaveBut=false;
 		    editorButtons.append($('<button>', { html: 'Save &amp; Run', type: 'submit'}).click(()=>saveData()));
 		}
-		else if('lsp' == ext || 'htm' == ext || 'html' == ext) {
+		else if(('lsp' == ext || 'htm' == ext || 'html' == ext) && rsp.lsp) {
 		    editorButtons.append($('<button>', { html: 'Open', type: 'submit'}).click( () => {
 			sendCmd("pn2url", (rsp) => {if(rsp.ok) window.open(rsp.url,'lsp');}, {fn:pn});
 		    }));
@@ -512,11 +512,11 @@ function initEditor() {
       logErr("Cannot load the Monaco Editor; <a target='_blank' href='https://realtimelogic.com/ba/doc/en/Xedge.html#monaco'>Help</a>\n")
     }
     let loaderScript = document.createElement('script');
-    loaderScript.src = 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.52.2/min/vs/loader.min.js';
+    loaderScript.src = 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.53/min/vs/loader.min.js';
     loaderScript.onload = function() {
 	monacoEnabled=true;
 	require.config({
-	    paths: {'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.52.2/min/vs'}
+	    paths: {'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.53/min/vs'}
 	});
 	require(['vs/editor/editor.main'],()=>{
 	    monaco.languages.register({ id: 'lsp' });

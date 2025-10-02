@@ -1,7 +1,8 @@
 local secret="See https://github.com/RealTimeLogic/BAS-Resources/tree/main/src/xedge"
 
 -- .preload for the LSP Application Manager
-local xinit,onunload=io:dofile(".lua/xedge.lua", _ENV)
+local xinit
+xinit,onunload=io:dofile(".lua/xedge.lua", _ENV)
 local symmetric=ba.crypto.symmetric
 
 local function cfgIo(key)

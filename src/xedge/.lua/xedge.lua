@@ -404,6 +404,7 @@ do
       runOnUnload(".preload",app.env,app.env)
       local ioIx=ioT[app.io]
       if ioIx then table.remove(package.searchers,ioIx) end
+      app.running=nil
       gc()
    end
 end
@@ -415,22 +416,8 @@ local function terminateApp(name, nosave)
    if not nosave then saveCfg() end
 end
 
-local function manageApp(name,isStartup) -- start/stop/restart
-   local err
-   local appc=appsCfg[name]
-   assert(appc)
-   local io,_,pn=fn2info(appc.url, true)
-   if io then io,err=ba.mkio(io, pn) end
-   if not io then
-      io="$" == appc.url and ba.mkio(name)
-      if io then
-	 log("Loading embedded ZIP file %s",name)
-      else
-	 err=sendErr("Opening app '%s' (%s) failed: %s ",name,appc.url,err or "invalid URL")
-	 appc.err=err
-	 io=noopIO(appc)
-      end
-   end
+ -- start/stop/restart app by giving it a name and by using appc and io
+local function controlApp(name,appc,io,isStartup)
    if apps[name] then stopApp(name) end
    local env=setmetatable({io=io},{__index=G})
    env.app=env
@@ -456,6 +443,7 @@ local function manageApp(name,isStartup) -- start/stop/restart
 	 dir:insert()
       end
       local cnt=0
+      app.running=true
       if io:stat".preload" then loadAndRunLua(io,".preload", app.env) end
       for path,fn in recDirIter(io,"") do
 	 if fn:find"%.xlua$" then
@@ -470,8 +458,28 @@ local function manageApp(name,isStartup) -- start/stop/restart
    else
       appc.running=false
    end
+   return app
 end
 
+ -- start/stop/restart app by using name found in appsCfg
+local function manageApp(name,isStartup)
+   local err
+   local appc=appsCfg[name]
+   assert(appc)
+   local io,_,pn=fn2info(appc.url, true)
+   if io then io,err=ba.mkio(io, pn) end
+   if not io then
+      io="$" == appc.url and ba.mkio(name)
+      if io then
+	 log("Loading embedded ZIP file %s",name)
+      else
+	 err=sendErr("Opening app '%s' (%s) failed: %s ",name,appc.url,err or "invalid URL")
+	 appc.err=err
+	 io=noopIO(appc)
+      end
+   end
+   controlApp(name,appc,io,isStartup)
+end
 
 local function newAppCfg(cfg)
    local name=cfg.name or "APP"
@@ -550,7 +558,7 @@ local function open(fn, mode)
 	 if "w" == mode and pn:find"%.xlua$" then
 	    local app=apps[ion]
 	    if app then
-	       if appsCfg[ion].running then
+	       if apps[ion].running then
 		  manageXLuaFile(pn,app)
 	       else
 		  log("parent app for %s not running!",pn)
@@ -884,6 +892,14 @@ local function execConfig(io)
    end
 end
 
+local function getCfg(io,ion)
+   local app = io and apps[ion]
+   if app then
+      return app,(appsCfg[ion] or app) -- appsCfg[ion] not set for aux apps (Ref-AUX1)
+   end
+end
+
+
 -- Used by command.lsp via xedge.command()
 local commands={
 
@@ -913,8 +929,8 @@ local commands={
    end,
    getappsstat=function(cmd)
       local t={}
-      for name,cfg in pairs(appsCfg) do
-	 t[name]=cfg.running;
+      for name,app in pairs(apps) do
+	 t[name]=app.running;
       end
       cmd:json{ok=true,apps=t}
    end,
@@ -948,7 +964,7 @@ local commands={
    pn2url=function(cmd,data)
       if data.fn then
 	 local io,ion,pn=fn2info(data.fn)
-	 local cfg = io and appsCfg[ion]
+	 local app,cfg=getCfg(io,ion)
 	 if cfg and cfg.running and cfg.dirname then
 	    cmd:json{ok=true,url=cfg.domainname and sfmt("http://%s/%s",cfg.domainname,pn) or (
 	       #cfg.dirname > 0 and sfmt("/%s/%s",cfg.dirname,pn) or "/"..pn)}
@@ -960,9 +976,9 @@ local commands={
    pn2info=function(cmd,data)
       if data.fn then
 	 local io,ion,pn=fn2info(data.fn)
-	 local cfg = io and appsCfg[ion]
-	 if cfg then
-	    cmd:json{ok=true,isapp=true,running=cfg.running,lsp=cfg.dirname and true or false,
+	 local app,cfg=getCfg(io,ion)
+	 if app then
+	    cmd:json{ok=true,isapp=true,running=app.running,lsp=cfg.dirname and true or false,
 	       url=cfg.dirname and not pn:find"%.xlua$" and (#cfg.dirname > 0 and sfmt("/%s/%s",cfg.dirname,pn) or "/"..pn)}
 	 end
 	 cmd:json{ok=true} -- not an app, but rsp must be OK
@@ -972,7 +988,7 @@ local commands={
       if data.fn then
 	 local _,ion,pn=fn2info(data.fn)
 	 local app=apps[ion]
-	 if app and appsCfg[ion].running then manageXLuaFile(pn,app) end
+	 if app and app.running then manageXLuaFile(pn,app) end
 	 cmd:json{ok=true}
       end
    end,
@@ -1222,6 +1238,19 @@ function xedge.getappcfg(name)
    return doUpgradeOrCfg(name,nil,true)
 end
 
+function xedge.auxapp(name,auxio,appc)
+   appc=appc or {} -- simulated config
+   name='$'..name
+   assert("function"==type(auxio.rmdir))
+   for n,io in pairs(ios) do if auxio==io then error"Cannot use default IOs" end end
+   if nil == appc.running then appc.running=true end
+   if appc.remove then appc.running=nil end
+   local app=controlApp(name,appc,auxio)
+   -- Add config (appc) to app: ref (Ref-AUX1)
+   if appc.running then for k,v in pairs(appc) do app[k]=v end
+   elseif appc.remove then apps[name]=nil end
+end
+
 function xedge.ui(enable)
    if enable then
       rtld:insert(tldir)
@@ -1261,7 +1290,7 @@ loadPlugins=function()
 end
 
 local function onunload()
-   for name,cfg in pairs(appsCfg) do if(cfg.running) then stopApp(name) end end
+   for name,app in pairs(apps) do if(app.running) then stopApp(name) end end
 end
 
 return xinit,onunload
