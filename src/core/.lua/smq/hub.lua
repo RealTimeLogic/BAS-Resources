@@ -377,7 +377,6 @@ local function lShutdown(_ENV,msg,etid)
 	 terminatePeerT(_ENV,sock)
       end
    end
-   onshutdown(msg)
 end
 
 
@@ -1011,7 +1010,7 @@ local function createPhantom(_ENV)
    return t
 end
 
-local function setcluster(_ENV,onsubC,nosubscribersC,onpubC,oncloseC,onshtdwnC)
+local function setcluster(_ENV,onsubC,nosubscribersC,onpubC,oncloseC)
    assert(not hasCluster) hasCluster=true
    if onpublish then
       local orgOnpublish=onpublish
@@ -1042,7 +1041,6 @@ local function setcluster(_ENV,onsubC,nosubscribersC,onpubC,oncloseC,onshtdwnC)
    end
    onsubscribe=onsubC
    nosubscribers=nosubscribersC -- ref:C1
-   onshutdown=onshtdwnC
    return { -- ref:CM
       a_substatus=function(tid) return substatus(_ENV,tid) end,
       a_createPhantom=function() return createPhantom(_ENV) end,
@@ -1134,7 +1132,6 @@ local function create(op)
       serverT={}, -- Server's simulated peerT
       onsubscribe=noop,
       nosubscribers=noop,
-      onshutdown=noop,
    }
    env.keepintv = "number" == type(op.keepintv) and op.keepintv or env.keepidle/10
    if env.keepintv < 3 then env.keepintv=3 end

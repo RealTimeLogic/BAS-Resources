@@ -267,7 +267,11 @@ local function ondata(cenv,sock,data)
    end
 end
 
-local Cluster={publish=onpubsrv,pubon=pubon}
+local function close(cenv,msg)
+   cenv.mtl:close(cenv.mtlname,msg or "close")
+end
+
+local Cluster={publish=onpubsrv,pubon=pubon,close=close}
 Cluster.__index=Cluster
 local createCntr=1
 
@@ -280,9 +284,8 @@ local function create(smq,pwdOrMtl,op)
       onpublish(env,data,ptid,tid,subtid)
    end
    local function oncls(tid) onclose(env,tid) end
-   local function onshutdown(msg) env.mtl:close(env.mtlname,msg) end
    -- env: ref:CM in smqbroker.lua
-   env=smq:setcluster(onsub,nosubs,onpub,oncls,onshutdown)
+   env=smq:setcluster(onsub,nosubs,onpub,oncls)
    env.conT={}
    env.ltidT={} -- Local tid table: k=tid (topic tid or etid) and v=sock(s)
    env.smq=smq
