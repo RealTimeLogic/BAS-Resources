@@ -19,7 +19,12 @@ shopt -s dotglob
 
 cp -R ../../src/core/* . || exit 1
 cp -R ../../src/mako/* . || exit 1
-cp -R ../../src/opcua .lua/ || exit 1
+if [ -z "$USE_OPCUA" ] || [ "$USE_OPCUA" != "0" ]; then
+    echo "Including OPCUA"
+    cp -R ../../src/opcua .lua/ || exit 1
+else
+    echo "Excluding OPCUA"
+fi
 
 for required in .lua/acme/runtime.lua .lua/acme/dns.lua .lua/acme/_server.lua; do
     if [ ! -f "$required" ]; then

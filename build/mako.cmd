@@ -24,7 +24,29 @@ mkdir MakoBuild || goto BuildFailed
 cd MakoBuild || goto BuildFailed
 xcopy ..\..\src\core . /eq || goto BuildFailed
 xcopy ..\..\src\mako . /eq || goto BuildFailed
+
+if defined USE_OPCUA (
+   if "%USE_OPCUA%" == "1" (
+      goto YesOPCUA
+   ) else (
+      goto NoOPCUA
+   )
+) else (
+   choice /C YN /M "Do you want to include OPC-UA "
+   if errorlevel 2 goto NoOPCUA
+   if errorlevel 1 goto YesOPCUA
+)
+
+:YesOPCUA
+echo Including OPC-UA.
 xcopy ..\..\src\opcua .lua\opcua\ /eq || goto BuildFailed
+goto ContinueAfterOPCUA
+
+:NoOPCUA
+echo OPC-UA inclusion skipped.
+goto ContinueAfterOPCUA
+
+:ContinueAfterOPCUA
 for %%i in (.lua\acme\runtime.lua .lua\acme\dns.lua .lua\acme\_server.lua) do (
    if not exist "%%i" (
       echo Required ACME module %%i was not packaged.

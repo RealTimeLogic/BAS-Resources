@@ -29,6 +29,13 @@ for %%i in (.lua\acme\runtime.lua .lua\acme\dns.lua .lua\acme\_server.lua) do (
    )
 )
 
+if defined USE_OPCUA (
+   if "%USE_OPCUA%" == "1" (
+      goto YesOPCUA
+   ) else (
+      goto NoOPCUA
+   )
+)
 if /i "%IncludeOpcUa%"=="yes" goto YesOPCUA
 if /i "%IncludeOpcUa%"=="no" goto NoOPCUA
 choice /C YN /M "Do you want to include OPC-UA "

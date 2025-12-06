@@ -31,9 +31,20 @@ for required in .lua/acme/runtime.lua .lua/acme/dns.lua .lua/acme/_server.lua; d
     fi
 done
 
-read -p "Do you want to include OPC-UA (y/n)? " userResponse
-if [ "$userResponse" = "y" ]; then
+if [ -z "$USE_OPCUA" ] ; then
+    read -p "Do you want to include OPC-UA (y/n)? " userResponse
+    if [ "$userResponse" = "y" ] ; then
+        USE_OPCUA=1
+    else
+        USE_OPCUA=0
+    fi
+fi
+
+if [ "$USE_OPCUA" != "0" ] ; then
+    echo "Including OPCUA"
     cp -R ../../src/opcua .lua/ || exit 1
+else
+    echo "Excluding OPCUA"
 fi
 
 if [ -n "$XedgeCaStore" ]; then
