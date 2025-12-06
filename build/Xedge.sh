@@ -23,9 +23,20 @@ cp -R ../../src/core/* . || exit 1
 cp -R ../../src/xedge/* . || exit 1
 cp -R ../../src/mako/.lua/acme/* .lua/acme || exit 1
 
-read -p "Do you want to include OPC-UA (y/n)? " userResponse
-if [ "$userResponse" = "y" ]; then
+if [ -z "$USE_OPCUA" ] ; then
+    read -p "Do you want to include OPC-UA (y/n)? " userResponse
+    if [ "$userResponse" = "y" ] ; then
+        USE_OPCUA=1
+    else
+        USE_OPCUA=0
+    fi
+fi
+
+if [ "$USE_OPCUA" != "0" ] ; then
+    echo "Including OPCUA"
     cp -R ../../src/opcua .lua/ || exit 1
+else
+    echo "Excluding OPCUA"
 fi
 
 read -p "Do you want to use the large cacert.shark or do you want to create a new with minimal certs: large/small (l/s)? " userResponse

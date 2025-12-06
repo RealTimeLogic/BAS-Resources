@@ -19,7 +19,12 @@ shopt -s dotglob
 
 cp -R ../../src/core/* . || exit 1
 cp -R ../../src/mako/* . || exit 1
-cp -R ../../src/opcua .lua/ || exit 1
+if [ -z "$USE_OPCUA" ] || [ "$USE_OPCUA" != "0" ]; then
+    echo "Including OPCUA"
+    cp -R ../../src/opcua .lua/ || exit 1
+else
+    echo "Excluding OPCUA"
+fi
 
 if [ -d "../../../lua-protobuf" ]; then
     echo "Including lua-protobuf and Sparkplug lib"

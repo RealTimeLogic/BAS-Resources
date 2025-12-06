@@ -21,8 +21,29 @@ mkdir MakoBuild || exit /b 2
 cd MakoBuild || exit /b 3
 xcopy ..\..\src\core . /eq || exit /b 4
 xcopy ..\..\src\mako . /eq || exit /b 5
-xcopy ..\..\src\opcua .lua\opcua\ /eq || exit /b 6
 
+if defined USE_OPCUA (
+   if "%USE_OPCUA%" == "1" (
+      goto YesOPCUA
+   ) else (
+      goto NoOPCUA
+   )
+) else (
+   choice /C YN /M "Do you want to include OPC-UA "
+   if errorlevel 2 goto NoOPCUA
+   if errorlevel 1 goto YesOPCUA
+)
+
+:YesOPCUA
+echo Including OPC-UA.
+xcopy ..\..\src\opcua .lua\opcua\ /eq || exit /b 7
+goto ContinueAfterOPCUA
+
+:NoOPCUA
+echo OPC-UA inclusion skipped.
+goto ContinueAfterOPCUA
+
+:ContinueAfterOPCUA
 if exist "..\..\..\lua-protobuf" (
    echo Including lua-protobuf and Sparkplug lib
    copy ..\..\..\lua-protobuf\protoc.lua .lua > nul || exit /b 7
