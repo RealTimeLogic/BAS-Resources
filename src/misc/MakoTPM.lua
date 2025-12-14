@@ -79,14 +79,18 @@ local function tpm(gpkey,upkey)
    ba.tpm=t
 end
 
-local klist={}
-return function(x)
+local gklist,uklist,tins={},{},table.insert
+return function(x,u)
    if true == x then
-      local hf=ba.crypto.hash(maxHash)
-      for _,k in ipairs(klist) do hf(k) end
-      tpm(ba.crypto.hash(maxHash)(klist[1])(true),hf(true))
-      klist=nil
+      local maxHash=pcall(function() ba.crypto.hash("sha512") end) and "sha512" or "sha256"
+      local ghf,uhf=ba.crypto.hash(maxHash),ba.crypto.hash(maxHash)
+      assert(#gklist > 0 and #uklist > 0)
+      for _,k in ipairs(gklist) do ghf(k) end
+      for _,k in ipairs(uklist) do uhf(k) end
+      tpm(ghf(true),uhf(true))
+      gklist,uklist=nil,nil
       return
    end
-   table.insert(klist,x)
+   tins(uklist,x)
+   if not u then tins(gklist,x) end
 end
