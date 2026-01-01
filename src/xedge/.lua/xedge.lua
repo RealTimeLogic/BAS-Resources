@@ -155,8 +155,7 @@ local function lsPlugins(ext)
    if io:stat(d) then
       for n in io:files(d) do
 	 if n:find("%."..ext.."$") then
-	    n=sfmt("%s/%s",d,n)
-	    tinsert(rsp,n)
+	    tinsert(rsp,sfmt("%s/%s",d,n))
 	 end
       end
    end
