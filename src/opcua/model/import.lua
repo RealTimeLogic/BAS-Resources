@@ -199,10 +199,10 @@ end
 
 function Model:loadXmlModels(modelFiles)
   for _,path in ipairs(modelFiles) do
-    local f, err
+    local f, err,tmp
     if path:sub(1, 7) == "http://" or path:sub(1, 8) == "https://" then
       f = require"httpc".create()
-      _,err=f:request{url=path, method="GET"}
+      tmp,err=f:request{url=path, method="GET"}
     elseif path:sub(1, 1) == "<?xml" then
       f = path -- this is the content of the file
     else
