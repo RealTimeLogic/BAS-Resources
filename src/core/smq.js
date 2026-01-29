@@ -590,7 +590,10 @@ SMQ.Client = function(url, opt) {
 	let tid;
 	if(typeof topic =="string") {
 	    tid = topic2tidT[topic];
-	    if( ! tid ) throw new Error("tid not found");
+	    if( ! tid ) {
+              if("self"==topic) tid=selfTid;
+              else throw new Error("tid not found");
+            }
 	}
 	else
 	    tid = topic;
