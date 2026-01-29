@@ -741,7 +741,7 @@ SMQ.Client = function(url, opt) {
 	let tid=getTid(topic);
 	if(onMsgCBT[tid]) {
 	    onMsgCBT[tid]=null;
-	    sendMsgWithTid(MSG_UNSUBSCRIBE, tid);
+	  if("self" != topic) sendMsgWithTid(MSG_UNSUBSCRIBE, tid);
 	}
     };
 
