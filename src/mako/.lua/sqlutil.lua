@@ -1,7 +1,7 @@
 
 -- A few useful SQL functions
 
-local type,unpack,fmt,coroutine=type,table.unpack,string.format,coroutine
+local type,pack,unpack,fmt,coroutine=type,table.pack,table.unpack,string.format,coroutine
 
 local sqlite = luasql.sqlite
 local dio=ba.openio"disk"
@@ -32,10 +32,10 @@ local function select(conn,sql,func)
       if cur or err ~="BUSY" then break end
    end
    if cur then
-      local t={func(cur)}
+      local t=pack(func(cur))
       cur:close()
       if env then close(env, conn) end
-      return unpack(t)
+      return unpack(t,1,t.n)
    end
    if env then close(env, conn) end
    if err2 then return nil,fmt("%s: %s",err,err2) end
