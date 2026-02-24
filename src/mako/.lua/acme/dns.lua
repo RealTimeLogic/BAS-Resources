@@ -215,7 +215,7 @@ local function createHttp(ext)
       local token,hash = calculateSecret()
       if not token then
 	 local err = rt.emsg() or hash
-	 abp.error(fmt("Err: %s",tostring(err)))
+	 abp.error(fmt("Err: %s",tostring(err) or "?"))
 	 return nil,-2,err
       end
       hT['X-Token'],hT['X-Hash']=token,hash
