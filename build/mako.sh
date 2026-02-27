@@ -20,8 +20,13 @@ shopt -s dotglob
 cp -R ../../src/core/* . || exit 1
 cp -R ../../src/mako/* . || exit 1
 if [ -z "$USE_OPCUA" ] || [ "$USE_OPCUA" != "0" ]; then
+    if [ -z "${OPCUA_ROOT}" ] ; then
+        OPCUA_SRC_ROOT = "../../src"
+    else
+        OPCUA_SRC_ROOT = ${OPCUA_ROOT}/lua
+    fi
     echo "Including OPCUA"
-    cp -R ../../src/opcua .lua/ || exit 1
+    cp -R ${OPCUA_SRC_ROOT}/opcua .lua/ || exit 1
 else
     echo "Excluding OPCUA"
 fi
