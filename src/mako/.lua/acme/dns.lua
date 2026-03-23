@@ -228,7 +228,7 @@ local function createHttp(ext)
 	 header=hT
       }
       if not ok then
-	 abp.error(fmt("%s Err: %s\nURL: %s",
+	 abp.error(fmt("%s Err: %s, URL: %s",
 		       httpOptions.proxy and "Proxy" or "HTTP",err,commandURL))
       end
       hT = http:header()
@@ -238,7 +238,10 @@ local function createHttp(ext)
 	 if not nolog and status and hT then
 	    abp.error(fmt("HTTP status=%d: %s\nURL: %s",status,hT["X-Reason"],commandURL))
 	 end
-	 return nil,status,(hT and hT["X-Reason"] or err or fmt("HTTP status=%s",status or err))
+         err=hT and hT["X-Reason"] or fmt("HTTP status=%s",status or err)
+         abp.error(fmt("%s Err: %s, URL: %s",
+                       httpOptions.proxy and "Proxy" or "HTTP",err,commandURL))
+         return nil,status,err
       end
       return hT
    end
