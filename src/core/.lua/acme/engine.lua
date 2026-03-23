@@ -82,7 +82,7 @@ end
 local function createAcmeHttp(op)
    local http=require"http".create(op)
    local function ahttp(url,json,getraw) -- ACME HTTP func
-      local ok,err
+      local ok,err,rsp
       if json then
 	 local data=jencode(json)
 	 ok,err=http:request{
@@ -102,9 +102,9 @@ local function createAcmeHttp(op)
       end
       local status=http:status()
       ok=status == 200 or status == 201 or status == 204
-      local rsp=http:read"*a"
+      rsp,err=http:read"*a"
       if not ok then
-	 err=rsp or string.format("HTTP err: %d",status)
+	 err=rsp or string.format("HTTP err: %s",status or err)
 	 return errlog(url,err)
       end
       if getraw then
