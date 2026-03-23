@@ -1,29 +1,42 @@
-local ua = require("opcua.api")
-local createCert = ua.crypto.createCert
+local tools = require("opcua.tools")
+local trace = require("opcua.trace")
+local nodeId = require("opcua.node_id")
+local const = require("opcua.const")
+local crypto = require("opcua.crypto")
 local compat = require("opcua.compat")
 local securePolicy = require("opcua.binary.crypto.policy")
 local Q = require("opcua.binary.queue")
 local BinaryEncoder = require("opcua.binary.encoder")
 local MessageId = require("opcua.binary.message_id")
-local tools = ua.Tools
+local StatusCode = require("opcua.status_codes")
 
-local traceI = ua.trace.inf
-local traceD = ua.trace.dbg
-local traceE = ua.trace.err
+local traceI = trace.inf
+local traceD = trace.dbg
+local traceE = trace.err
 local fmt = string.format
 
-local BadNotConnected = ua.StatusCode.BadNotConnected
-local BadSessionIdInvalid = ua.StatusCode.BadSessionIdInvalid
-local BadIdentityTokenRejected = ua.StatusCode.BadIdentityTokenRejected
-local BadIdentityTokenInvalid = ua.StatusCode.BadIdentityTokenInvalid
-local BadSecureChannelClosed = ua.StatusCode.BadSecureChannelClosed
+local BadNotConnected = StatusCode.BadNotConnected
+local BadSessionIdInvalid = StatusCode.BadSessionIdInvalid
+local BadIdentityTokenRejected = StatusCode.BadIdentityTokenRejected
+local BadIdentityTokenInvalid = StatusCode.BadIdentityTokenInvalid
+local BadSecureChannelClosed = StatusCode.BadSecureChannelClosed
+
+local UserTokenType = const.UserTokenType
+local TranportProfileUri = const.TranportProfileUri
+local SecurityTokenRequestType = const.SecurityTokenRequestType
+local ApplicationType = const.ApplicationType
+local SecurityPolicy = const.SecurityPolicy
+local BrowseDirection = const.BrowseDirection
+local NodeClass = const.NodeClass
+local BrowseResultMask = const.BrowseResultMask
+local AttributeId = const.AttributeId
 
 local C={} -- OpcUa Client
 C.__index=C
 
 local function syncExecRequest(self, request)
   local dbgOn = self.config.logging.services.dbgOn
-  if dbgOn then ua.Tools.printTable("services | execRequest", request, traceD) end
+  if dbgOn then tools.printTable("services | execRequest", request, traceD) end
 
   local suc, err = pcall(self.services.sendMessage, self.services, request, true)
   if not suc then
@@ -41,7 +54,7 @@ end
 
 local function coExecRequest(self, request, callback)
   local dbgOn = self.config.logging.services.dbgOn
-  if dbgOn then ua.Tools.printTable("services | execRequest", request, traceD) end
+  if dbgOn then tools.printTable("services | execRequest", request, traceD) end
 
   local defCallback
   local coSock = compat.socket.getsock()
@@ -112,7 +125,7 @@ function C:connect(endpointUrl, transportProfile, connectCallback)
 
   -- check url is valid before entering cosockets: we might hang there
   -- because of parsing URL is perofmed before first network call.
-  local url,err = ua.parseUrl(endpointUrl)
+  local url,err = tools.parseUrl(endpointUrl)
   if err then
     error(err)
   end
@@ -120,7 +133,7 @@ function C:connect(endpointUrl, transportProfile, connectCallback)
 
   if url.scheme == "opc.tcp" then
     if transportProfile == nil then
-      transportProfile = ua.TranportProfileUri.TcpBinary
+      transportProfile = TranportProfileUri.TcpBinary
     end
 
     local binary = require("opcua.binary.client")
@@ -131,7 +144,7 @@ function C:connect(endpointUrl, transportProfile, connectCallback)
     url.scheme == "opc.https" or url.scheme == "https"
   then
     if transportProfile == nil then
-      transportProfile = ua.TranportProfileUri.HttpsBinary
+      transportProfile = TranportProfileUri.HttpsBinary
     end
 
     self.hasSecureChannel = false
@@ -193,7 +206,7 @@ function C:processResponse(msg, err)
   local dbgOn = self.config.logging.services.dbgOn
 
   if dbgOn then
-    ua.Tools.printTable("services | processingResponse", msg, traceD)
+    tools.printTable("services | processingResponse", msg, traceD)
   end
   local response
   if msg then
@@ -244,8 +257,11 @@ function C:processOpenSecureChannelResponse(response)
 end
 
 function C:processCreateSessionResponse(response)
+  local dbgOn = self.config.logging.services.dbgOn
   local infOn = self.config.logging.services.infOn
-  if infOn then
+  local errOn = self.config.logging.services.errOn
+
+  if dbgOn then
     traceI("services | received CREATE_SESSION_RESPONSE SessionId='"..response.SessionId..
           "' MaxRequestMessageSize="..response.MaxRequestMessageSize..
           " AuthenticationToken='"..response.AuthenticationToken..
@@ -262,6 +278,13 @@ function C:processCreateSessionResponse(response)
       self.services.sessionId = response.SessionId
       self.services.sessionAuthToken = response.AuthenticationToken
 
+      if infOn then
+        traceI(fmt("services | activated session. SessionId='%s'", response.SessionId))
+      end
+      if dbgOn then
+        traceD(fmt("services | activated session. sessionAuthToken='%s'", response.AuthenticationToken))
+      end
+
       self.session = {
         userIdentityTokens = endpoint.UserIdentityTokens,
         serverCertificate = endpoint.ServerCertificate,
@@ -272,6 +295,7 @@ function C:processCreateSessionResponse(response)
   end
 
   if not self.session then
+    if errOn then traceE("services | failed to find session") end
     return BadSessionIdInvalid
   end
 end
@@ -327,7 +351,7 @@ function C:openSecureChannel(timeoutMs, securityPolicyUri, securityMode, remoteC
   local request, err = self.services:createRequest(MessageId.OPEN_SECURE_CHANNEL_REQUEST)
   if err then return nil, err end
   request.ClientProtocolVersion = 0
-  request.RequestType = ua.SecurityTokenRequestType.Issue
+  request.RequestType = SecurityTokenRequestType.Issue
   request.SecurityMode = securityMode
   request.ClientNonce = self.channelNonce
   request.RequestedLifetime = timeoutMs
@@ -350,7 +374,7 @@ function C:renewSecureChannel(timeoutMs, callback)
   if err then return nil, err end
 
   request.ClientProtocolVersion = 0
-  request.RequestType = ua.SecurityTokenRequestType.Renew
+  request.RequestType = SecurityTokenRequestType.Renew
   request.SecurityMode = self.securityMode
   request.ClientNonce = self.channelNonce
   request.RequestedLifetime = timeoutMs
@@ -403,7 +427,7 @@ function C:createSession(name, timeoutMs, callback)
           ApplicationName = {
             Text = self.config.applicationName
           },
-          ApplicationType = ua.ApplicationType.Client,
+          ApplicationType = ApplicationType.Client,
           GatewayServerUri = nil,
           DiscoveryProfileUri = nil,
           DiscoveryUrls = {},
@@ -478,7 +502,7 @@ local function encrypt(policy, password, nonce)
   encoder:array(nonce)
 
   local data = tostring(d)
-  local m,err = ua.crypto.encrypt(data, policy.remote, policy.params.rsaParams)
+  local m,err = crypto.crypto.encrypt(data, policy.remote, policy.params.rsaParams)
   if err then
     error(err)
   end
@@ -516,7 +540,7 @@ function C:activateSession(params, token, token2, callback)
     assert(callback == nil)
     callback = params
     params = nil
-    tokenPolicy = findTokenPolicyType(self.session.userIdentityTokens, ua.UserTokenType.Anonymous)
+    tokenPolicy = findTokenPolicyType(self.session.userIdentityTokens, UserTokenType.Anonymous)
   else
     assert(type(params) == "string")
     tokenPolicy = findTokenPolicyId(self.session.userIdentityTokens, params)
@@ -546,9 +570,9 @@ function C:activateSession(params, token, token2, callback)
     end
 
     local authPolicy
-    if tokenPolicy.SecurityPolicyUri and tokenPolicy.SecurityPolicyUri ~= ua.SecurityPolicy.None and self.session.serverCertificate then
+    if tokenPolicy.SecurityPolicyUri and tokenPolicy.SecurityPolicyUri ~= SecurityPolicy.None and self.session.serverCertificate then
       authPolicy = self.security(tokenPolicy.SecurityPolicyUri)
-      if tokenPolicy.TokenType == ua.UserTokenType.Certificate then
+      if tokenPolicy.TokenType == UserTokenType.Certificate then
         authPolicy:setLocalCertificate(token, token2)
       end
       if not self.session.serverCertificate then
@@ -562,9 +586,9 @@ function C:activateSession(params, token, token2, callback)
       }
     end
 
-    if tokenPolicy.TokenType == ua.UserTokenType.Anonymous then
+    if tokenPolicy.TokenType == UserTokenType.Anonymous then
       activateParams.UserIdentityToken = tools.createAnonymousToken(tokenPolicy.PolicyId)
-    elseif tokenPolicy.TokenType == ua.UserTokenType.UserName then
+    elseif tokenPolicy.TokenType == UserTokenType.UserName then
       if type(token) ~= "string" or type(token2) ~= "string" then
         return nil, BadIdentityTokenInvalid
       end
@@ -573,9 +597,9 @@ function C:activateSession(params, token, token2, callback)
         token2 = encrypt(authPolicy, token2, self.session.nonce)
       end
       activateParams.UserIdentityToken = tools.createUsernameToken(tokenPolicy.PolicyId, token, token2, authPolicy and authPolicy.aEncryptionAlgorithm)
-    elseif tokenPolicy.TokenType == ua.UserTokenType.Certificate then
-      activateParams.UserIdentityToken = tools.createX509Token(tokenPolicy.PolicyId, createCert(token, self.config.io).der)
-    elseif tokenPolicy.TokenType == ua.UserTokenType.IssuedToken then
+    elseif tokenPolicy.TokenType == UserTokenType.Certificate then
+      activateParams.UserIdentityToken = tools.createX509Token(tokenPolicy.PolicyId, crypto.crypto.createCert(token, self.config.io).der)
+    elseif tokenPolicy.TokenType == UserTokenType.IssuedToken then
       if authPolicy then
         token = encrypt(authPolicy, token, self.session.nonce)
       end
@@ -604,13 +628,13 @@ function C:activateSession(params, token, token2, callback)
   return self:execRequest(request, callback)
 end
 
-local function browseParams(nodeId)
+local function browseParams(nid)
   return {
-    NodeId = nodeId, -- nodeId we want to browse
-    BrowseDirection = ua.BrowseDirection.Forward,
+    NodeId = nid, -- nodeId we want to browse
+    BrowseDirection =  BrowseDirection.Forward,
     ReferenceTypeId = "i=33", -- HierarchicalReferences,
-    NodeClassMask = ua.NodeClass.Unspecified,
-    ResultMask = ua.BrowseResultMask.All,
+    NodeClassMask = NodeClass.Unspecified,
+    ResultMask = BrowseResultMask.All,
     IncludeSubtypes = true,
   }
 end
@@ -637,8 +661,8 @@ function C:browse(params, callback)
     request.NodesToBrowse[1] = browseParams(params)
   -- array of nodeIDs
   elseif type(params) == 'table' and params[1] ~= nil then
-    for _,nodeId in ipairs(params) do
-      table.insert(request.NodesToBrowse, browseParams(nodeId))
+    for _,nid in ipairs(params) do
+      table.insert(request.NodesToBrowse, browseParams(nid))
     end
   else
     -- manual
@@ -647,7 +671,7 @@ function C:browse(params, callback)
 
   if request.View == nil then
     request.View = {
-      ViewId = ua.NodeId.Null,
+      ViewId = nodeId.Null,
       Timestamp = nil, -- not specified ~1600 year
       ViewVersion = 0
     }
@@ -662,9 +686,9 @@ function C:browse(params, callback)
   return self:execRequest(request, callback)
 end
 
-local function allAttributes(nodeId, attrs)
-  for _,val in pairs(ua.AttributeId) do
-    attrs[val] = {NodeId=nodeId, AttributeId=val}
+local function allAttributes(nid, attrs)
+  for _,val in pairs(AttributeId) do
+    attrs[val] = {NodeId=nid, AttributeId=val}
   end
 end
 
@@ -689,8 +713,8 @@ function C:read(params, callback)
   elseif type(params) == 'table' then
     if type(params[1]) == 'string' then
       local attrs = {}
-      for _,nodeId in ipairs(params) do
-        allAttributes(nodeId, attrs)
+      for _,nid in ipairs(params) do
+        allAttributes(nid, attrs)
       end
       readParams.NodesToRead = attrs
     else
@@ -892,6 +916,36 @@ function C:getEndpoints(params, callback)
 
   local request
   request, err = self.services:createRequest(MessageId.GET_ENDPOINTS_REQUEST, params)
+  if err then return nil, err end
+  request.LocaleIds = {}
+  request.ProfileUris = {}
+
+  return self:execRequest(request, callback)
+end
+
+function C:call(ojectId, methodId, inputArguments, callback)
+
+  if not self:connected() then
+    return nil, BadNotConnected
+  end
+
+  local err = self:checkSecureChannel()
+  if err then
+    return nil, err
+  end
+
+  local params = {
+    MethodsToCall = {
+      {
+        ObjectId = ojectId,
+        MethodId = methodId,
+        InputArguments = inputArguments
+      }
+    }
+  }
+
+  local request
+  request, err = self.services:createRequest(MessageId.CALL_REQUEST, params)
   if err then return nil, err end
   request.LocaleIds = {}
   request.ProfileUris = {}

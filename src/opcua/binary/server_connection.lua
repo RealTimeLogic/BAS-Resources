@@ -2,16 +2,24 @@ local encoder = require("opcua.binary.chunks_encode")
 local decoder = require("opcua.binary.chunks_decode")
 local securePolicy = require("opcua.binary.crypto.policy")
 local Msg = require("opcua.binary.message_id")
-local ua = require("opcua.api")
+local trace = require("opcua.trace")
+local const = require("opcua.const")
+local StatusCode = require("opcua.status_codes")
 local compat = require("opcua.compat")
 
-local s = ua.StatusCode
-local trace = ua.trace
 local fmt = string.format
-local traceD = ua.trace.dbg
-local traceE = ua.trace.err
-local traceI = ua.trace.inf
+local traceD = trace.dbg
+local traceE = trace.err
+local traceI = trace.inf
 
+local Good = StatusCode.Good
+local BadSecureChannelClosed = StatusCode.BadSecureChannelClosed
+local BadTcpMessageTypeInvalid = StatusCode.BadTcpMessageTypeInvalid
+local BadRequestTypeInvalid = StatusCode.BadRequestTypeInvalid
+local BadInternalError = StatusCode.BadInternalError
+local BadSecureChannelTokenUnknown = StatusCode.BadSecureChannelTokenUnknown
+local BadSecurityChecksFailed = StatusCode.BadSecurityChecksFailed
+local BadNotImplemented = StatusCode.BadNotImplemented
 
 local S = {}
 S.__index = S
@@ -43,10 +51,10 @@ function S:processData()
   elseif self.state == State.Open then
     self:processMessage()
   elseif self.state == State.Closed then
-    error(s.BadSecureChannelClosed)
+    error(BadSecureChannelClosed)
   else
     if errOn then traceE(fmt("%s Unknown message", self.logId)) end
-    error(s.BadTcpMessageTypeInvalid)
+    error(BadTcpMessageTypeInvalid)
   end
 
   if dbgOn then traceD(fmt("%s data processed", self.logId)) end
@@ -105,29 +113,29 @@ function S:processOpenSecureChannel(msg)
 
   if self.state == State.New then
     if errOn then traceE(fmt("%s Failed to open secure channel: Client didn't send hello", self.logId)) end
-    self:responseServiceFault(msg, s.BadRequestTypeInvalid)
+    self:responseServiceFault(msg, BadRequestTypeInvalid)
     return
   elseif self.state == State.Hello then
-    if req.RequestType ~= ua.SecurityTokenRequestType.Issue then
+    if req.RequestType ~= const.SecurityTokenRequestType.Issue then
       if errOn then traceE(fmt("%s Received request type '%s' instead 'issue(0)'", self.logId, req.RequestType)) end
-      self:responseServiceFault(msg, s.BadRequestTypeInvalid)
+      self:responseServiceFault(msg, BadRequestTypeInvalid)
       return
     end
     if infOn then traceI(fmt("%s Issuing new channel token", self.logId)) end
   elseif self.state == State.Open then
-    if req.RequestType ~= ua.SecurityTokenRequestType.Renew then
+    if req.RequestType ~= const.SecurityTokenRequestType.Renew then
       if errOn then traceE(fmt("%s Received request type '%s' instead 'renew(1)'", self.logId, req.RequestType)) end
-      self:responseServiceFault(msg, s.BadRequestTypeInvalid)
+      self:responseServiceFault(msg, BadRequestTypeInvalid)
       return
     end
     if infOn then traceI(fmt("%s Renew channel token", self.logId)) end
   elseif self.state == State.Closed then
     if errOn then traceE(fmt("%s Failed to renew closed channel", self.logId)) end
-    self:responseServiceFault(msg, s.BadSecureChannelClosed)
+    self:responseServiceFault(msg, BadSecureChannelClosed)
     return
   else
     if errOn then traceE(fmt("Internal errror: Secure channel %d is in invalid state: %d", self.logId, self.state)) end
-    error(s.BadInternalError)
+    error(BadInternalError)
   end
 
 
@@ -153,7 +161,7 @@ function S:processOpenSecureChannel(msg)
     SertificateThumbprint = self.encoder.policy:getRemoteThumbprint(),
     RequestHandle = req.RequestHeader.RequestHandle,
     RequestCreatedAt = compat.gettime(),
-    ServiceResult = s.Good,
+    ServiceResult = Good,
   }
 
   local lifeTime = req.RequestedLifetime -- ms
@@ -210,7 +218,7 @@ function S:processCloseSecureChannel(msg)
 
   self.state = State.Hello
   if infOn then traceI(fmt("%s Secure channel closed", self.logId)) end
-  self:responseServiceFault(msg, s.BadSecureChannelClosed)
+  self:responseServiceFault(msg, BadSecureChannelClosed)
 
   self.encoder:setChannelId(nil)
   self.encoder:setTokenId(nil)
@@ -221,10 +229,9 @@ function S:processMessage()
   local errOn = self.trace.errOn
 
   local msg = self.decoder:message()
-
   if self.state ~= State.Open then
     if errOn then traceE(fmt("%s Secure channel is not in opened state.", self.logId)) end
-    error(s.BadTcpMessageTypeInvalid)
+    error(BadTcpMessageTypeInvalid)
   end
 
   if dbgOn then traceD(fmt("%s Processing message ID: %s", self.logId, msg.RequestId)) end
@@ -245,8 +252,8 @@ function S:processMessage()
       return self:processOpenSecureChannel(msg)
     end
 
-    if self.nonePolicyEnabled == false and self.decoder.q.policy.uri == ua.SecurityPolicy.None then
-      error(s.BadSecurityChecksFailed)
+    if self.nonePolicyEnabled == false and self.decoder.q.policy.uri == const.SecurityPolicy.None then
+      error(BadSecurityChecksFailed)
     end
 
     if i == Msg.CREATE_SESSION_REQUEST then
@@ -267,14 +274,16 @@ function S:processMessage()
       self:processRequest(msg, Msg.TRANSLATE_BROWSE_PATHS_TO_NODE_IdS_RESPONSE, self.services.translateBrowsePaths, "TranslateBrowsePathsToNodeIds")
     elseif i == Msg.ADD_NODES_REQUEST then
       self:processRequest(msg, Msg.ADD_NODES_RESPONSE, self.services.addNodes, "AddNodes")
+    elseif i == Msg.CALL_REQUEST then
+      self:processRequest(msg, Msg.CALL_RESPONSE, self.services.call, "Call")
     else
       -- TODO NEED REMOVE EXTRA DATA OF NOT IMPLEMENTED REQUEST BODY
       if errOn then traceE(fmt("%s Invalid message ID: %d", self.logId, i)) end
-      self:responseServiceFault(msg, s.BadNotImplemented)
+      self:responseServiceFault(msg, BadNotImplemented)
     end
   else
     if errOn then traceE(fmt("%s Received message for closed secure channel.", self.logId)) end
-    error(s.BadSecureChannelClosed)
+    error(BadSecureChannelClosed)
   end
 end
 
@@ -313,7 +322,7 @@ function S.fillResponseParams(_, msg, statusCode)
     ChannelId = msg.ChannelId,
     RequestHandle = msg.Body.RequestHeader.RequestHandle,
     RequestCreatedAt = compat.gettime(),
-    ServiceResult = statusCode or s.Good
+    ServiceResult = statusCode or Good
   }
 end
 
@@ -331,17 +340,17 @@ function S:setToken(tokenId)
   local token = self.tokens[tokenId]
   if token == nil then
     if errOn then traceE(fmt("%s Unknown token %d", self.logId, tokenId)) end
-    error(s.BadSecureChannelTokenUnknown)
+    error(BadSecureChannelTokenUnknown)
   end
 
   if time > token.expiresAt then
     if errOn then traceE(fmt("%s Secure token %d expired.", self.logId, tokenId)) end
-    error(s.BadSecurityChecksFailed)
+    error(BadSecurityChecksFailed)
   end
 
   self.encoder.secureHeader.tokenId = tokenId
   self.logId = fmt("binary | %s:%s", self.channelId, tokenId)
-  return s.Good
+  return Good
 end
 
 
@@ -378,7 +387,7 @@ local function newConnection(config, services, sock, model)
   local securePolicies = {}
   local nonePolicyEnabled = false
   for _,p in ipairs(config.securePolicies) do
-    if p.securityPolicyUri == ua.SecurityPolicy.None then
+    if p.securityPolicyUri == const.SecurityPolicy.None then
       nonePolicyEnabled = true
     end
     table.insert(securePolicies, p)
@@ -387,8 +396,8 @@ local function newConnection(config, services, sock, model)
   if nonePolicyEnabled == false then
     table.insert(securePolicies,
       {
-        securityPolicyUri = ua.SecurityPolicy.None,
-        securityMode = {ua.MessageSecurityMode.None}
+        securityPolicyUri = const.SecurityPolicy.None,
+        securityMode = {const.MessageSecurityMode.None}
       }
     )
   end

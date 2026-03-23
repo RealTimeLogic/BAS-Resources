@@ -4,9 +4,8 @@
 -- SecureChannelNonceLength: 32 bytes
 
 local compat = require("opcua.compat")
-local ua = require("opcua.api") -- REMOVE, Not used in encryption
-local createCert = ua.crypto.createCert
-local createKey = ua.crypto.createKey
+local crypto = require("opcua.crypto") -- REMOVE, Not used in encryption
+local tools = require("opcua.tools")
 local bytearray = compat.bytearray
 
 local BadSecurityChecksFailed = 0x80130000
@@ -18,13 +17,13 @@ local function aDecrypt(data, cert, key, params)
   local _,si,ei = bytearray.size(data)
   bytearray.setsize(data,1,ei)
 
-  local keySize = ua.crypto.keysize(key)
+  local keySize = crypto.crypto.keysize(key)
   local blockSize = keySize
 
   local len = 0
   for i = si,ei,blockSize do
     local e = bytearray.tostring(data, i, i + blockSize - 1)
-    local m,err = ua.crypto.decrypt(e, key, params.rsaParams)
+    local m,err = crypto.crypto.decrypt(e, key, params.rsaParams)
     if err then
       -- if dbgOn then traceD("binary | decrypt error: "..err) end
       error(BadDecodingError)
@@ -48,7 +47,7 @@ local function aDecrypt(data, cert, key, params)
 end
 
 local function asymmetricMessageSize(sz, headerSize, key)
-  local keySize = ua.crypto.keysize(key)
+  local keySize = crypto.crypto.keysize(key)
   local encSz = sz - headerSize
   local alignedSize = (encSz + keySize - 1) & 0xFFFFFF00
   local msgSz = headerSize + alignedSize + keySize
@@ -56,7 +55,7 @@ local function asymmetricMessageSize(sz, headerSize, key)
 end
 
 local function aEncrypt(data, cert, key, pos, params)
-  local keySize = ua.crypto.keysize(key)
+  local keySize = crypto.crypto.keysize(key)
   local blockSize = keySize
   local dataBlockSize = blockSize - params.aPaddingSize
 
@@ -88,7 +87,7 @@ local function aEncrypt(data, cert, key, pos, params)
   local srcPos = encPos
   for _ = 1,blocks do
     local msg = bytearray.tostring(data, srcPos, srcPos + dataBlockSize - 1)
-    local enc,err = ua.crypto.encrypt(msg, cert, params.rsaParams)
+    local enc,err = crypto.crypto.encrypt(msg, cert, params.rsaParams)
     if err then
       error(BadEncodingError)
     end
@@ -148,18 +147,18 @@ local function sDecrypt(keys, cipher, secureMode, params)
   if sDebug == 1 then
     print("----------------------------------")
     print("encrypted block")
-    ua.Tools.hexPrint(cipher)
+    tools.hexPrint(cipher)
     print("----------------------------------")
   end
 
   if secureMode == 3 then
-    local decryptor = ua.crypto.symmetric("CBC", keys.encryptKey, keys.encryptIV, "decrypt")
+    local decryptor = crypto.crypto.symmetric("CBC", keys.encryptKey, keys.encryptIV, "decrypt")
     local msg = decryptor:decrypt(tostring(cipher))
 
     if sDebug == 1 then
       print("----------------------------------")
       print("decrypted block")
-      ua.Tools.hexPrint(msg)
+      tools.hexPrint(msg)
       print("----------------------------------")
     end
 
@@ -173,7 +172,7 @@ local function sDecrypt(keys, cipher, secureMode, params)
   if sDebug == 1 then
     print("----------------------------------")
     print("expected sign")
-    ua.Tools.hexPrint(sum1)
+    tools.hexPrint(sum1)
     print("----------------------------------")
   end
 
@@ -181,14 +180,14 @@ local function sDecrypt(keys, cipher, secureMode, params)
   if sDebug == 1 then
     print("----------------------------------")
     print("data to check sign")
-    ua.Tools.hexPrint(cipher)
+    tools.hexPrint(cipher)
     print("----------------------------------")
   end
 
   if sDebug == 1 then
     print("----------------------------------")
     print("sign key")
-    ua.Tools.hexPrint(keys.signKey)
+    tools.hexPrint(keys.signKey)
     print("----------------------------------")
   end
 
@@ -197,7 +196,7 @@ local function sDecrypt(keys, cipher, secureMode, params)
   if sDebug == 1 then
     print("----------------------------------")
     print("calculated sign")
-    ua.Tools.hexPrint(sum2)
+    tools.hexPrint(sum2)
     print("----------------------------------")
   end
 
@@ -215,7 +214,7 @@ local function sDecrypt(keys, cipher, secureMode, params)
   if sDebug == 1 then
     print("----------------------------------")
     print("decrypted Data")
-    ua.Tools.hexPrint(cipher)
+    tools.hexPrint(cipher)
     print("----------------------------------")
   end
 end
@@ -247,7 +246,7 @@ local function sEncrypt(keys, data, headerSize, secureMode, params)
   if k == 1 then
     print("----------------------------------")
     print("encrypting Data")
-    ua.Tools.hexPrint(data)
+    tools.hexPrint(data)
     print("----------------------------------")
   end
 
@@ -271,7 +270,7 @@ local function sEncrypt(keys, data, headerSize, secureMode, params)
   if k == 1 then
     print("----------------------------------")
     print("data to sign")
-    ua.Tools.hexPrint(data)
+    tools.hexPrint(data)
     print("----------------------------------")
   end
 
@@ -279,7 +278,7 @@ local function sEncrypt(keys, data, headerSize, secureMode, params)
   if k == 1 then
     print("----------------------------------")
     print("sign key")
-    ua.Tools.hexPrint(keys.signKey)
+    tools.hexPrint(keys.signKey)
     print("----------------------------------")
   end
 
@@ -289,7 +288,7 @@ local function sEncrypt(keys, data, headerSize, secureMode, params)
   if k == 1 then
     print("----------------------------------")
     print("sign hmacSum")
-    ua.Tools.hexPrint(sum)
+    tools.hexPrint(sum)
     print("----------------------------------")
   end
 
@@ -299,7 +298,7 @@ local function sEncrypt(keys, data, headerSize, secureMode, params)
   if k == 1 then
     print("------------------------")
     print("data block:")
-    ua.Tools.hexPrint(data)
+    tools.hexPrint(data)
     print("------------------------")
   end
 
@@ -307,16 +306,16 @@ local function sEncrypt(keys, data, headerSize, secureMode, params)
 
   if secureMode == 3 then
     assert((ei - headerSize) % dataBlockSize == 0)
-    local encryptor = ua.crypto.symmetric("CBC", keys.encryptKey, keys.encryptIV, "encrypt")
+    local encryptor = crypto.crypto.symmetric("CBC", keys.encryptKey, keys.encryptIV, "encrypt")
     for i=headerSize,ei-1,dataBlockSize do
       local msg = bytearray.tostring(data, i + 1, i + dataBlockSize)
       local cipher = encryptor:encrypt(msg)
       if k == 1 then
         print("------------------------")
         print("encrypting data:")
-        ua.Tools.hexPrint(msg)
+        tools.hexPrint(msg)
         print("cipher data:")
-        ua.Tools.hexPrint(cipher)
+        tools.hexPrint(cipher)
         print("------------------------")
       end
       data[i+1] = cipher
@@ -326,7 +325,7 @@ local function sEncrypt(keys, data, headerSize, secureMode, params)
   if k == 1 then
     print("------------------------")
     print("encrypted block:")
-    ua.Tools.hexPrint(data)
+    tools.hexPrint(data)
     print("------------------------")
   end
 end
@@ -344,23 +343,23 @@ local function createPolicy(modes, params, fsIo)
     setLocalCertificate = function(self, certificate, key)
       assert(certificate)
       assert(key)
-      key = createKey(key, fsIo)
+      key = crypto.crypto.createKey(key, fsIo)
       assert(key)
 
-      local size,t = ua.crypto.keysize(key)
+      local size,t = crypto.crypto.keysize(key)
       -- TODO: check error is thrown
       -- if err then error(err) end
       if t ~= "RSA" or size < self.params.minKeySize or size > self.params.maxKeySize then
         error(BadSecurityChecksFailed)
       end
-      self.certificate = createCert(certificate, fsIo)
+      self.certificate = crypto.crypto.createCert(certificate, fsIo)
       assert(self.certificate)
       self.key = key
     end,
 
     setRemoteCertificate = function(self, remoteCert)
       assert(remoteCert, "Remote certificate empty")
-      self.remote = createCert(remoteCert, fsIo)
+      self.remote = crypto.crypto.createCert(remoteCert, fsIo)
     end,
 
     geLocalCertLen = function(self)
@@ -439,7 +438,7 @@ local function createPolicy(modes, params, fsIo)
     end,
 
     genNonce = function(self, len)
-      return ua.crypto.rndbs(len or self.params.nonceSize)
+      return crypto.crypto.rndbs(len or self.params.nonceSize)
     end,
 
     tailSize = function(self)

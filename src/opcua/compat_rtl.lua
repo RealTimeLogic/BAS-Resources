@@ -69,17 +69,55 @@ local compat = {
     event = ba.socket.event
   },
 
-  gettime = function()
-    local dt = ba.datetime("NOW")
+  to_timestamp = function(str)
+    if type(str) == "number" then
+      return str
+    end
+
+    local dt = ba.datetime(str or "NOW")
     local secs, ns = dt:ticks()
     local t = secs + ns / 1e9
     return t
   end,
+
+  gettime = function(str)
+    if type(str) == "number" then
+      return str
+    end
+    local dt = ba.datetime(str or "NOW"):ticks()
+    return dt
+  end,
+
+  to_datestring = function(ts)
+    local secs = math.floor(ts)
+    local ms = math.floor(ts*1e6)
+    ms = math.floor(ms - secs * 1e6)
+    local dt = os.date("!%Y-%m-%dT%H:%M:%S", secs)
+    if ms == 0 then
+      return dt .. "Z"
+    else
+      local digits = 6
+      while ms % 10 == 0 do
+        ms = math.tointeger(ms / 10)
+        digits = digits - 1
+      end
+
+      ms = tostring(ms)
+      digits = digits - #ms
+      local zeroes = string.rep("0", digits)
+      return string.format("%s.%s%sZ", dt, zeroes, ms)
+    end
+  end,
+
   clock = ba.clock,
   sleep = function(secs) ba.sleep(secs * 1000) end,
   bytearray = ba.bytearray,
   timer = ba.timer,
-  thread = ba.thread
+  thread = ba.thread,
+  xparser = xparser,
+  xml2table = require("xml2table"),
+  parseJson = ba.json.decode,
+  jsonNull = ba.json.null,
 }
 
 return compat

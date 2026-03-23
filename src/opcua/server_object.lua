@@ -1,30 +1,24 @@
-local ua = require("opcua.api")
 local compat = require("opcua.compat")
+local trace = require("opcua.trace")
+local const = require("opcua.const")
+local version = require("opcua.version")
 
-local traceE = ua.trace.err
-local traceD = ua.trace.dbg
+local traceD = trace.dbg
+
+local VariantType = const.VariantType
 
 local Srv = {}
 
-local function getValueAttribute(id, val)
-  return {
-    NodeId = id,
-    AttributeId = ua.AttributeId.Value,
-    Value=val
-  }
-end
-
 local function getNamespaceUries(model)
   local uries = {}
-  for i = 0,#model.NamespaceUris do
-    table.insert(uries, model.NamespaceUris[i])
+  for i = 0,#model.Namespaces do
+    table.insert(uries, model.Namespaces[i].NamespaceUri)
   end
   return uries
 end
 
 function Srv:start(config, services)
   local dbgOn = config.logging.services.dbgOn
-  local errOn = config.logging.services.errOn
 
   if dbgOn then traceD("services | Starting server object") end
   self.Services = services
@@ -34,13 +28,13 @@ function Srv:start(config, services)
   local status = {
     StartTime = compat.gettime(),
     CurrentTime = compat.gettime(),
-    State = ua.ServerState.Running,
+    State = const.ServerState.Running,
     BuildInfo = {
-      ProductUri = ua.Version.ProductUri,
-      ManufacturerName = ua.Version.ManufacturerName,
-      ProductName = ua.Version.ProductName,
-      SoftwareVersion = ua.Version.Version,
-      BuildNumber = ua.Version.BuildNumber,
+      ProductUri = version.ProductUri,
+      ManufacturerName = version.ManufacturerName,
+      ProductName = version.ProductName,
+      SoftwareVersion = version.Version,
+      BuildNumber = version.BuildNumber,
       BuildDate = compat.gettime(),
     },
     SecondsTillShutdown = 0,
@@ -48,7 +42,7 @@ function Srv:start(config, services)
   }
   -- State structure
   local vServerStatus = {
-    Type = ua.VariantType.ExtensionObject,
+    Type = VariantType.ExtensionObject,
     Value = {
       TypeId = "i=862", --ServerStatusDataType
       Body = status
@@ -56,75 +50,66 @@ function Srv:start(config, services)
   }
 
   local vBuildInfo = {
-    Type = ua.VariantType.ExtensionObject,
+    Type = VariantType.ExtensionObject,
     Value = {
       TypeId = "i=338", --BuildInfo
       Body = status.BuildInfo
     }
   }
 
-  local nodes = {
-    -- Server_ServerArray
-    getValueAttribute("i=2254", {Type=ua.VariantType.String, IsArray=true, Value={ua.Version.ApplicationUri}}),
-    getValueAttribute("i=2256", vServerStatus),
-    -- Server_ServerStatus_BuildInfo
-    getValueAttribute("i=2260", vBuildInfo),
-    -- Server_ServerStatus_BuildInfo_ProductName
-    getValueAttribute("i=2261", {Type=ua.VariantType.String, Value=ua.Version.ProductName}),
-    -- Server_ServerStatus_BuildInfo_ProductUri
-    getValueAttribute("i=2262", {Type=ua.VariantType.String, Value=ua.Version.ProductUri}),
-    -- Server_ServerStatus_BuildInfo_ManufacturerName
-    getValueAttribute("i=2263", {Type=ua.VariantType.String, Value=ua.Version.ManufacturerName}),
-    -- Server_ServerStatus_BuildInfo_SoftwareVersion
-    getValueAttribute("i=2264", {Type=ua.VariantType.String, Value=ua.Version.Version}),
-    -- Server_ServerStatus_BuildInfo_BuildNumber
-    getValueAttribute("i=2265", {Type=ua.VariantType.String, Value=ua.Version.BuildNumber}),
-    -- Server_ServerStatus_BuildInfo_BuildDate
-    getValueAttribute("i=2266", {Type=ua.VariantType.DateTime, Value=status.BuildInfo.BuildDate}),
-    -- Server_ServerStatus_StartTime
-    getValueAttribute("i=2257", {Type=ua.VariantType.DateTime, Value=status.StartTime}),
-    -- Server_ServerStatus_CurrentTime
-    getValueAttribute("i=2258", {Type=ua.VariantType.DateTime, Value=compat.gettime()}),
-  }
-
   if dbgOn then traceD("services | Saving server status in address space") end
-  local results = services:write({NodesToWrite=nodes})
 
-  local code = 0
-  assert(#results.Results == #nodes)
-  for i,c in ipairs(results.Results) do
-    if c ~= 0 then
-      if errOn then traceE(string.format("services | Node '%s' write finished with code 0x%X",nodes[i].NodeId,c)) end
-      code = c
-    end
-  end
-
-  if code ~= 0 then
-    error(code)
-  end
-
-  -- Server_ServerStatus_CurrentTime = "i=2258"
-  services:setVariableSource("i=2258",
-    function()
-        return {
-          Type=ua.VariantType.DateTime,
-          Value=compat.gettime()
-        }
-    end)
-  services:setVariableSource("i=2256",
+  local editor = self.Services.model:edit()
+  -- Server_ServerArray
+  editor:getNode("i=2254").Attrs.Value = {Type=VariantType.String, IsArray=true, Value={version.ApplicationUri}}
+  -- Server_ServerStatus
+  local serverStatusNode = editor:getNode("i=2256")
+  serverStatusNode.Attrs.Value = vServerStatus
+  serverStatusNode:setValueCallback(
     function()
       status.CurrentTime = compat.gettime()
       return vServerStatus
     end)
 
-  services:setVariableSource("i=2255"  , function()
+  -- Server_ServerStatus_BuildInfo
+  editor:getNode("i=2260").Attrs.Value = vBuildInfo
+  -- Server_ServerStatus_BuildInfo_ProductName
+  editor:getNode("i=2261").Attrs.Value = {Type=VariantType.String, Value=version.ProductName}
+  -- Server_ServerStatus_BuildInfo_ProductUri
+  editor:getNode("i=2262").Attrs.Value = {Type=VariantType.String, Value=version.ProductUri}
+  -- Server_ServerStatus_BuildInfo_ManufacturerName
+  editor:getNode("i=2263").Attrs.Value = {Type=VariantType.String, Value=version.ManufacturerName}
+  -- Server_ServerStatus_BuildInfo_SoftwareVersion
+  editor:getNode("i=2264").Attrs.Value = {Type=VariantType.String, Value=version.Version}
+  -- Server_ServerStatus_BuildInfo_BuildNumber
+  editor:getNode("i=2265").Attrs.Value = {Type=VariantType.String, Value=version.BuildNumber}
+  -- Server_ServerStatus_BuildInfo_BuildDate
+  editor:getNode("i=2266").Attrs.Value = {Type=VariantType.DateTime, Value=status.BuildInfo.BuildDate}
+  -- Server_ServerStatus_StartTime
+  editor:getNode("i=2257").Attrs.Value = {Type=VariantType.DateTime, Value=status.StartTime}
+  -- Server_ServerStatus_CurrentTime
+  editor:getNode("i=2258").Attrs.Value = {Type=VariantType.DateTime, Value=compat.gettime()}
+
+  if dbgOn then traceD("services | Saving server status in address space") end
+
+  editor:getNode("i=2258"):setValueCallback(
+    function()
+      return {
+        Type=VariantType.DateTime,
+        Value=compat.gettime()
+      }
+    end)
+
+  editor:getNode("i=2255"):setValueCallback(function()
     return {
       StatusCode = 0,
-      Type=ua.VariantType.String,
+      Type=VariantType.String,
       IsArray = true,
       Value=getNamespaceUries(services.model)
     }
   end)
+
+  editor:save()
 
   if dbgOn then traceD("services | Server object started sucessfully") end
 end

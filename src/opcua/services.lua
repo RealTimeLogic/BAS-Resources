@@ -1,29 +1,28 @@
-local ua = require("opcua.api")
-local attrs = require("opcua.services_attributes")
+local tools = require("opcua.tools")
 local compat = require("opcua.compat")
-local createCert = ua.crypto.createCert
+local crypto = require("opcua.crypto").crypto
 local securePolicy = require("opcua.binary.crypto.policy")
 local Q = require("opcua.binary.queue")
 local BinaryDecoder = require("opcua.binary.decoder")
 local srvObject = require("opcua.server_object")
+local trace = require("opcua.trace")
+local const = require("opcua.const")
+local version = require("opcua.version")
+local s = require("opcua.status_codes")
+local NodeId = require("opcua.node_id")
 
+local AttributeId = const.AttributeId
+local NodeClass = const.NodeClass
 
-local s = ua.StatusCode
-local t = ua.Tools
-local AttributeId = ua.AttributeId
-local NodeClass = ua.NodeClass
-
-local traceD = ua.trace.dbg
-local traceI = ua.trace.inf
-local traceE = ua.trace.err
+local traceD = trace.dbg
+local traceI = trace.inf
+local traceE = trace.err
 
 local fmt = string.format
 local tins = table.insert
 
 local HasSubtype = "i=45"
 local HasTypeDefinition = "i=40"
-local HasModellingRule = "i=37"
-local ModellingRule_Mandatory = "i=78"
 
 local Good = s.Good
 local BadInvalidArgument = s.BadInvalidArgument
@@ -31,13 +30,10 @@ local BadNodeIdUnknown = s.BadNodeIdUnknown
 local BadNodeClassInvalid = s.BadNodeClassInvalid
 local BadBrowseDirectionInvalid = s.BadBrowseDirectionInvalid
 local BadReferenceTypeIdInvalid =  s.BadReferenceTypeIdInvalid
-local BadBrowseNameInvalid = s.BadBrowseNameInvalid
 local BadNothingToDo = s.BadNothingToDo
 local BadNoMatch = s.BadNoMatch
-local BadNodeAttributesInvalid = s.BadNodeAttributesInvalid
 local BadParentNodeIdInvalid = s.BadParentNodeIdInvalid
 local BadTypeDefinitionInvalid = s.BadTypeDefinitionInvalid
-local BadNodeIdExists = s.BadNodeIdExists
 local BadServiceUnsupported = s.BadServiceUnsupported
 local BadInternalError = s.BadInternalError
 local BadUserAccessDenied = s.BadUserAccessDenied
@@ -49,6 +45,7 @@ local BadTooManySessions = s.BadTooManySessions
 local BadSessionClosed = s.BadSessionClosed
 local BadRequestHeaderInvalid = s.BadRequestHeaderInvalid
 local BadSessionNotActivated = s.BadSessionNotActivated
+local BadNodeIdInvalid = s.BadNodeIdInvalid
 
 local Svc = {}
 Svc.__index = Svc
@@ -96,10 +93,10 @@ function Svc:getServerDescription()
       Text = self.config.applicationName
     },
 
-    ProductUri = ua.Version.ProductUri,
-    ApplicationType = ua.ApplicationType.Server,
+    ProductUri = version.ProductUri,
+    ApplicationType = const.ApplicationType.Server,
     GatewayServerUri = nil,
-    DiscoveryProfileUri = ua.ServerProfile.NanoEmbedded2017,
+    DiscoveryProfileUri = const.ServerProfile.NanoEmbedded2017,
     DiscoveryUrls = endpointUrls
   }
 end
@@ -120,7 +117,7 @@ end
 
 function Svc:addEndpointDescriptions(endpointUrl, transportProfileUri, policy, endpoints)
   local certificate = policy.certificate or self.config.certificate
-  local der = certificate and createCert(certificate, self.config.io).der
+  local der = certificate and crypto.createCert(certificate, self.config.io).der
   local tokenPolicies = {}
 
   for _,p in ipairs(self.config.userIdentityTokens) do
@@ -131,8 +128,8 @@ function Svc:addEndpointDescriptions(endpointUrl, transportProfileUri, policy, e
     local endpoint = {
       EndpointUrl = endpointUrl,
       ServerCertificate = der,
-      SecurityMode = ua.MessageSecurityMode.None,
-      SecurityPolicyUri = ua.SecurityPolicy.None,
+      SecurityMode = const.MessageSecurityMode.None,
+      SecurityPolicyUri = const.SecurityPolicy.None,
       Server = self:getServerDescription(),
       UserIdentityTokens = tokenPolicies,
       TransportProfileUri = transportProfileUri,
@@ -164,12 +161,12 @@ function Svc:listEndpoints()
     local endpointUrl = endpoint.endpointUrl
     if string.find(endpointUrl, "opc.tcp") == 1 then
       for _,policy in ipairs(self.config.securePolicies) do
-        self:addEndpointDescriptions(endpoint.endpointUrl, ua.TranportProfileUri.TcpBinary, policy, endpoints)
+        self:addEndpointDescriptions(endpoint.endpointUrl, const.TranportProfileUri.TcpBinary, policy, endpoints)
       end
     elseif string.find(endpointUrl, "http://") or string.find(endpointUrl, "https://") then
       local policy = {}
-      self:addEndpointDescriptions(endpoint.endpointUrl, ua.TranportProfileUri.HttpsBinary, policy, endpoints)
-      self:addEndpointDescriptions(endpoint.endpointUrl, ua.TranportProfileUri.HttpsJson, policy, endpoints)
+      self:addEndpointDescriptions(endpoint.endpointUrl, const.TranportProfileUri.HttpsBinary, policy, endpoints)
+      self:addEndpointDescriptions(endpoint.endpointUrl, const.TranportProfileUri.HttpsJson, policy, endpoints)
     else
       error("Unsupported endpoint uri scheme: ".. endpointUrl)
     end
@@ -238,7 +235,7 @@ function Svc:createSession(req, channel)
   resp.ServerEndpoints = self:listEndpoints()
   resp.ServerSoftwareCertificates = nil
 
-  if policy.uri ~= ua.SecurityPolicy.None then
+  if policy.uri ~= const.SecurityPolicy.None then
     resp.ServerSignature = {
       Algorithm = policy.aSignatureUri,
       Signature = policy:asymmetricSign(req.ClientCertificate..req.ClientNonce)
@@ -263,7 +260,7 @@ local function decrypt(policy, data)
   if not policy then
     return data
   end
-  local m,err = ua.crypto.decrypt(data, policy.key, policy.params.rsaParams)
+  local m,err = crypto.decrypt(data, policy.key, policy.params.rsaParams)
   if err then
     traceE(fmt("failed to decrypt token len #%s bytes: %s", #data, err))
     error(BadIdentityTokenInvalid)
@@ -366,7 +363,7 @@ function Svc:activateSession(req, channel)
 
   if tokenTypeId == "i=319" then
     if infOn then traceI(fmt("Services:activateSession(%s) | Check anonymous token", sessionId)) end
-    if tokenPolicy.tokenType ~= ua.UserTokenType.Anonymous then
+    if tokenPolicy.tokenType ~= const.UserTokenType.Anonymous then
       if errOn then traceE(fmt("Services:activateSession(%s) | Not an anonymous token ", sessionId)) end
       error(BadIdentityTokenRejected)
     end
@@ -377,7 +374,7 @@ function Svc:activateSession(req, channel)
     allowed = authenticate("username", password, token.Body.UserName)
   elseif tokenTypeId == "i=325" then
     if infOn then traceI(fmt("Services:activateSession(%s) | Check x509 certificate", sessionId)) end
-    if tokenPolicy.securityPolicyUri and tokenPolicy.securityPolicyUri ~= ua.SecurityPolicy.None or req.UserTokenSignature.Signature then
+    if tokenPolicy.securityPolicyUri and tokenPolicy.securityPolicyUri ~= const.SecurityPolicy.None or req.UserTokenSignature.Signature then
       encryption = securePolicy(self.config)
       authPolicy = encryption(tokenPolicy.securityPolicyUri)
       if req.UserTokenSignature.Algorithm ~= authPolicy.aSignatureUri then
@@ -394,16 +391,16 @@ function Svc:activateSession(req, channel)
     allowed = authenticate("x509", token.Body.CertificateData)
   elseif tokenTypeId == "i=938" then -- IssuedToken
     local tokenData = decrypt(authPolicy, token.Body.TokenData)
-    if tokenPolicy.issuedTokenType == ua.IssuedTokenType.Azure then
+    if tokenPolicy.issuedTokenType == const.IssuedTokenType.Azure then
       if infOn then traceI(fmt("Services:activateSession(%s) | Check Azure token", sessionId)) end
       allowed = authenticate("azure", tokenData, tokenPolicy.issuerEndpointUrl)
-    elseif tokenPolicy.issuedTokenType == ua.IssuedTokenType.JWT then
+    elseif tokenPolicy.issuedTokenType == const.IssuedTokenType.JWT then
       if infOn then traceI(fmt("Services:activateSession(%s) | Check JWT token", sessionId)) end
       allowed = authenticate("jwt", tokenData, tokenPolicy.issuerEndpointUrl)
-    elseif tokenPolicy.issuedTokenType == ua.IssuedTokenType.OAuth2 then
+    elseif tokenPolicy.issuedTokenType == const.IssuedTokenType.OAuth2 then
       if infOn then traceI(fmt("Services:activateSession(%s) | Check OAuth2 token", sessionId)) end
       allowed = authenticate("oauth2", tokenData, tokenPolicy.issuerEndpointUrl)
-    elseif tokenPolicy.issuedTokenType == ua.IssuedTokenType.OPCUA then
+    elseif tokenPolicy.issuedTokenType == const.IssuedTokenType.OPCUA then
       if infOn then traceI(fmt("Services:activateSession(%s) | Check OPCUA token", sessionId)) end
       allowed = authenticate("opcua", tokenData, tokenPolicy.issuerEndpointUrl)
     else
@@ -472,10 +469,10 @@ function Svc:getSubtypes(parent, cont)
     return cont
   end
 
-  cont[parent.attrs[AttributeId.NodeId]] = 1
+  cont[parent.Attrs.NodeId] = 1
 
-  local nodeClass = parent.attrs[AttributeId.NodeClass] -- node class of an inspecting type hierarchy
-  for _,ref in ipairs(parent.refs) do
+  local nodeClass = parent.Attrs.NodeClass -- node class of an inspecting type hierarchy
+  for _,ref in ipairs(parent.Refs) do
     if ref.type ~= HasSubtype then
       goto continue
     end
@@ -492,7 +489,7 @@ function Svc:getSubtypes(parent, cont)
     end
 
     -- Collect only the same node class
-    if subtype.attrs[AttributeId.NodeClass] ~= nodeClass then
+    if subtype.Attrs.NodeClass ~= nodeClass then
       goto continue
     end
 
@@ -560,18 +557,18 @@ function Svc:browse(req, channel)
         refTypes[n.ReferenceTypeId] = 1
       end
 
-      if dbgOn then traceD(fmt("Services:browse(%s) | node has %d refs", sessionId, #node.refs)) end
+      if dbgOn then traceD(fmt("Services:browse(%s) | node has %d refs", sessionId, #node.Refs)) end
 
-      local isForward = n.BrowseDirection == ua.BrowseDirection.Forward
+      local isForward = n.BrowseDirection == const.BrowseDirection.Forward
       result.StatusCode = Good
-      for _,ref in pairs(node.refs) do
+      for _,ref in pairs(node.Refs) do
         repeat
           local refType = ref.type
           if dbgOn then
             traceD(fmt("Services:browse(%s) | TargetNodeId='%s', ReferenceID='%s', isForward='%s'", sessionId, ref.target, refType, ref.isForward))
           end
 
-          if refTypes[refType] == nil or (n.BrowseDirection ~= ua.BrowseDirection.Both and ref.isForward ~= isForward) then
+          if refTypes[refType] == nil or (n.BrowseDirection ~= const.BrowseDirection.Both and ref.isForward ~= isForward) then
             if dbgOn then traceD(fmt("Services:browse(%s) | reference has different direction from %d", sessionId, n.BrowseDirection)) end
             break
           end
@@ -582,28 +579,17 @@ function Svc:browse(req, channel)
             error(BadInternalError)
           end
 
-          local displayName = attrs.getAttributeValue(targetNode.attrs, AttributeId.DisplayName, self.nodeset)
-          local browseName = attrs.getAttributeValue(targetNode.attrs, AttributeId.BrowseName, self.nodeset)
-
-          if displayName.Type ~= ua.VariantType.LocalizedText then
-            if errOn then traceE(fmt("Services:browse(%s) |   Target node '%s' display name is not a LocalizedText", sessionId, ref.target)) end
-            error(BadInternalError)
-          end
-
-          if browseName.Type ~= ua.VariantType.QualifiedName then
-            if errOn then traceE(fmt("Services:browse(%s) |   Target node '%s' browse name is not a QualifiedName", sessionId, ref.target)) end
-            error(BadInternalError)
-          end
-
+          local displayName = targetNode.Attrs.DisplayName
+          local browseName = targetNode.Attrs.BrowseName
           if dbgOn then
-            traceD(fmt("Services:browse(%s) |   Target node browseName='%s'", sessionId, browseName.Value.Name))
+            traceD(fmt("Services:browse(%s) |   Target node browseName='%s'", sessionId, browseName.Name))
           end
 
-          local nodeClass = targetNode.attrs[AttributeId.NodeClass]
-          local typeDefinition = ua.NodeId.Null
+          local nodeClass = targetNode.Attrs.NodeClass
+          local typeDefinition = NodeId.Null
 
           if nodeClass == NodeClass.Object or nodeClass == NodeClass.Variable then
-            for _, r in ipairs(targetNode.refs) do
+            for _, r in ipairs(targetNode.Refs) do
               if r.type == HasTypeDefinition then
                 typeDefinition = r.target
                 break
@@ -616,9 +602,9 @@ function Svc:browse(req, channel)
             ReferenceTypeId = refType,
             IsForward = ref.isForward,
             NodeClass = nodeClass,
-            BrowseName = browseName.Value,
+            BrowseName = browseName,
             TypeDefinition = typeDefinition,
-            DisplayName = displayName.Value
+            DisplayName = displayName
           }
 
           tins(result.References, r)
@@ -646,85 +632,11 @@ function Svc:translateBrowsePath(path, sessionId)
     error(BadNoMatch)
   end
 
-  local targetId = path.StartingNode
-  if dbgOn then traceD(fmt("Services:translateBrowsePath(%s) | target node %s", sessionId, targetId)) end
-  local targetNode = self.nodeset[targetId]
-  if targetNode == nil then
-    if dbgOn then traceD(fmt("Services:translateBrowsePath(%s) | target node not found", sessionId)) end
-    error(BadNodeIdUnknown)
-  end
+  local root = self.model:browse(path.StartingNode)
+  local node = root:path(path.RelativePath.Elements)
 
   local targets = {}
-
-  if dbgOn then traceD(fmt("Services:translateBrowsePath(%s) | elements %d", sessionId, #path.RelativePath.Elements)) end
-
-  for rel_idx,rel in ipairs(path.RelativePath.Elements) do
-    -- Collect all reference type we should follow: Requested reference and its Sybtypes
-    if dbgOn then
-      traceD(fmt("Services:translateBrowsePath(%s) | element %d: browseName=%s, referenceTypeId=%s, includeSubtypes=%s",
-        sessionId, rel_idx, rel.TargetName.Name, rel.ReferenceTypeId, rel.IncludeSubtypes))
-    end
-
-    local refTypes = {}
-    local refId = rel.ReferenceTypeId
-    if rel.IncludeSubtypes == true then
-      if dbgOn then traceD(fmt("Services:translateBrowsePath(%s) | Collecting subtypes of reference %s", sessionId, rel.ReferenceTypeId)) end
-      self:getSubtypes(self.nodeset[refId], refTypes)
-    else
-      refTypes[refId] = 1
-    end
-
-    local nextTargetId = nil
-    -- follow all referencies of a node and compare it with selected reference types
-    for _,nodeRef in ipairs(targetNode.refs) do
-      repeat
-        local refType = nodeRef.type
-        if dbgOn then traceD(fmt("Services:translateBrowsePath(%s) | Processing reference %s", sessionId, refType)) end
-
-        if nodeRef.isForward == rel.IsInverse then
-          if dbgOn then traceD(fmt("Services:translateBrowsePath(%s) | Invalid direction", sessionId)) end
-          break
-        end
-
-        if refTypes[refType] ~= 1 then
-          if dbgOn then traceD(fmt("Services:translateBrowsePath(%s) | Not a suitable reference type", sessionId)) end
-          break
-        end
-
-        local nodeId = nodeRef.target
-        if dbgOn then traceD(fmt("Services:translateBrowsePath(%s) | target node id %s", sessionId, nodeId)) end
-        local node = self.nodeset[nodeId]
-        if node == nil then
-          if dbgOn then traceD(fmt("Services:translateBrowsePath | node %s not found", sessionId, nodeId)) end
-          break
-        end
-
-        if node.attrs[AttributeId.BrowseName].Name ~= rel.TargetName.Name then
-          if dbgOn then traceD(fmt("Services:translateBrowsePath(%s) | browse name %s different", sessionId, node.attrs[AttributeId.BrowseName].Name)) end
-          break
-        end
-
-        nextTargetId = nodeId
-        targetNode = node
-        if dbgOn then traceD(fmt("Services:translateBrowsePath(%s) | Next target node '%s'", sessionId, nodeId)) end
-      until true
-
-      if nextTargetId ~= nil then
-        break
-      end
-    end
-
-    targetId = nextTargetId
-    if targetId == nil then
-      if dbgOn then traceD(fmt("Services:translateBrowsePath(%s) | No match", sessionId)) end
-      error(BadNoMatch)
-    end
-  end
-
-  if targetId ~= nil then
-    tins(targets, {TargetId=targetId, RemainingPathIndex=0xFFFFFFFF})
-  end
-
+  tins(targets, {TargetId=node.Attrs.NodeId, RemainingPathIndex=0xFFFFFFFF})
   return targets
 end
 
@@ -792,14 +704,17 @@ function Svc:read(req, channel)
       val.StatusCode = BadNodeIdUnknown
     else
       if dbgOn then traceD(fmt("Services:Read(%s) | Node id '%s' attribute %d ", sessionId, r.NodeId, r.AttributeId)) end
-      local suc,result = pcall(attrs.getAttributeValue, node.attrs, r.AttributeId, self.nodeset)
-      if not suc then
-        val.StatusCode = result
-      else
-        val = result
-        if val.StatusCode == nil then
-          val.StatusCode = 0
+      if r.AttributeId == AttributeId.Value and node.Attrs.NodeClass == const.NodeClass.Variable and node.Attrs.NodeCallback then
+        if dbgOn then traceD(fmt("Services:Read(%s) | reading value node '%s' from custom source", sessionId, r.NodeId)) end
+        val = node.Attrs.NodeCallback(r.NodeId)
+        if not tools.dataValueValid(val) then
+          val = { StatusCode = const.StatusCode.BadInternalError }
         end
+      else
+        val = node.VAttrs[r.AttributeId]
+      end
+      if val.StatusCode == nil then
+        val.StatusCode = s.Good
       end
     end
 
@@ -826,18 +741,13 @@ function Svc:writeNode(val)
   end
 
   if dbgOn then traceD(fmt("Services:Write | updating attribute '%d' of node '%s' ", attributeId, nodeId)) end
-  if attributeId == AttributeId.Value then
-    attrs.checkAttributeValue(n.attrs, attributeId, value, self.nodeset)
-    n.attrs[attributeId] = value
-    local valueSource = n.attrs.valueSource
-    if valueSource then
-      if dbgOn then traceD(fmt("Services:Write | writing value node '%s' to custom source", attributeId, nodeId)) end
-      valueSource(nodeId, value)
-    end
+  if attributeId == AttributeId.Value and n.Attrs.NodeCallback then
+    if dbgOn then traceD(fmt("Services:Write | writing value node '%s' to custom source", attributeId, nodeId)) end
+    n.Attrs.NodeCallback(nodeId, value)
   else
-    attrs.checkAttributeValue(n.attrs, attributeId, value, self.nodeset)
-    n.attrs[attributeId] = value.Value
+    n.Attrs[attributeId] = value
   end
+
   self.nodeset:saveNode(n)
   self:callWriteHook(nodeId, attributeId, value)
   if dbgOn then traceD(fmt("Services:Write | updated attribute '%d' of node '%s' ", attributeId, nodeId)) end
@@ -872,119 +782,33 @@ function Svc:write(req, channel)
   return {Results=results}
 end
 
--- Create node attributes array from parameters of new node.
-function Svc:getCommonAttributes(nodeId, nodeAttrs)
-  local errOn = self.trace.errOn
-  if not t.localizedTextValid(nodeAttrs.NodeAttributes.Body.DisplayName) then
-    if errOn then traceE("Services:addNodes | displayName invalid") end
-    error(BadNodeAttributesInvalid)
-  end
-  if not t.localizedTextValid(nodeAttrs.NodeAttributes.Body.Description) then
-    if errOn then traceE("Services:addNodes | Description invalid") end
-    error(BadNodeAttributesInvalid)
-  end
-  if not t.uint32Valid(nodeAttrs.NodeAttributes.Body.WriteMask) then
-    if errOn then traceE("Services:addNodes | WriteMask invalid") end
-    error(BadNodeAttributesInvalid)
-  end
-  if not t.uint32Valid(nodeAttrs.NodeAttributes.Body.UserWriteMask) then
-    if errOn then traceE("Services:addNodes | UserWriteMask invalid") end
-    error(BadNodeAttributesInvalid)
-  end
-
-  local result = {}
-  result[AttributeId.NodeId] = nodeId
-  result[AttributeId.BrowseName] = nodeAttrs.BrowseName
-  result[AttributeId.DisplayName] = nodeAttrs.NodeAttributes.Body.DisplayName
-  result[AttributeId.Description] = nodeAttrs.NodeAttributes.Body.Description
-  result[AttributeId.WriteMask] = nodeAttrs.NodeAttributes.Body.WriteMask
-  result[AttributeId.UserWriteMask] = nodeAttrs.NodeAttributes.Body.UserWriteMask
-  return result
+local function setCommonAttributes(node, nodeAttrs)
+  node.Attrs.DisplayName = nodeAttrs.NodeAttributes.Body.DisplayName
+  node.Attrs.Description = nodeAttrs.NodeAttributes.Body.Description
+  node.Attrs.WriteMask = nodeAttrs.NodeAttributes.Body.WriteMask
+  node.Attrs.UserWriteMask = nodeAttrs.NodeAttributes.Body.UserWriteMask
 end
 
--- Create variable node attributes array from new node parameters
-function Svc:getVariableAttributes(nodeId, allAttrs, nodeset)
-  local dbgOn = self.trace.dbgOn
-  local errOn = self.trace.errOn
-
-  if dbgOn then traceD("Services:addNodes | Creating variable node attributes") end
-
-  local result = self:getCommonAttributes(nodeId, allAttrs)
-
+local function setVariableAttributes(node, allAttrs)
+  setCommonAttributes(node, allAttrs)
   local nodeAttrs = allAttrs.NodeAttributes.Body
-  if not t.nodeIdValid(nodeAttrs.DataType)  then
-    if errOn then traceE("Services:addNodes | DataType invalid") end
-    error(BadNodeAttributesInvalid)
+  node.Attrs.AccessLevel = nodeAttrs.AccessLevel
+  if nodeAttrs.AccessLevel ~= nil then
+    node.Attrs.UserAccessLevel = nodeAttrs.UserAccessLevel
   end
-  if not t.dataValueValid(nodeAttrs.Value) then
-    if errOn then traceE("Services:addNodes | Value invalid") end
-    error(BadNodeAttributesInvalid)
+  if nodeAttrs.MinimumSamplingInterval ~= nil then
+    node.Attrs.MinimumSamplingInterval = nodeAttrs.MinimumSamplingInterval
   end
-  if not t.valueRankValid(nodeAttrs.ValueRank) then
-    if errOn then traceE("Services:addNodes | ValueRank invalid") end
-    error(BadNodeAttributesInvalid)
-  end
-  if not t.arrayDimensionsValid(nodeAttrs.Value, nodeAttrs.ArrayDimensions, nodeAttrs.ValueRank) then
-    if errOn then traceE("Services:addNodes | ArrayDimensions invalid") end
-    error(BadNodeAttributesInvalid)
-  end
-  if not t.uint32Valid(nodeAttrs.AccessLevel) then
-    if errOn then traceE("Services:addNodes | AccessLevel invalid") end
-    error(BadNodeAttributesInvalid)
-  end
-  if not t.uint32Valid(nodeAttrs.UserAccessLevel) then
-    if errOn then traceE("Services:addNodes | UserAccessLevel invalid") end
-    error(BadNodeAttributesInvalid)
-  end
-  if not t.uint32Valid(nodeAttrs.MinimumSamplingInterval) then
-    if errOn then traceE("Services:addNodes | MinimumSamplingInterval invalid") end
-    error(BadNodeAttributesInvalid)
-  end
-  if not t.booleanValid(nodeAttrs.Historizing) then
-    if errOn then traceE("Services:addNodes | Historizing invalid") end
-    error(BadNodeAttributesInvalid)
-  end
-  local suc, code = pcall(attrs.checkDataType, nodeAttrs.Value, nodeAttrs.DataType, nodeset)
-  if not suc then
-    if errOn then traceE("Services:addNodes | DataType of Value invalid") end
-    error(code)
-  end
-
-  result[AttributeId.NodeClass] = ua.NodeClass.Variable
-  result[AttributeId.Value] = nodeAttrs.Value
-  result[AttributeId.DataType] = nodeAttrs.DataType
-  result[AttributeId.Rank] = nodeAttrs.ValueRank
-  result[AttributeId.ArrayDimensions] = nodeAttrs.ArrayDimensions
-  result[AttributeId.AccessLevel] = nodeAttrs.AccessLevel
-  result[AttributeId.UserAccessLevel] = nodeAttrs.UserAccessLevel
-  result[AttributeId.MinimumSamplingInterval] = nodeAttrs.MinimumSamplingInterval
-  result[AttributeId.Historizing] = nodeAttrs.Historizing
-
-  return result
+  node.Attrs.Rank = nodeAttrs.ValueRank
+  node.Attrs.Historizing = nodeAttrs.Historizing
 end
 
 -- Create Object node attributes from new object parameters
-function Svc:getObjectAttributes(nodeId, nodeAttrs)
-  local dbgOn = self.trace.dbgOn
-  local errOn = self.trace.errOn
-
-  if dbgOn then traceD("Services:addNodes | Creating object node attributes") end
-
-  if not t.byteValid(nodeAttrs.NodeAttributes.Body.EventNotifier) then
-    if errOn then traceE("Services:addNodes | AccessLevel invalid") end
-    error(BadNodeAttributesInvalid)
+local function setObjectAttributes(node, nodeAttrs)
+  setCommonAttributes(node, nodeAttrs)
+  if nodeAttrs.EventNotifier then
+    node.Attrs.EventNotifier = nodeAttrs.EventNotifier
   end
-
-  local result = self:getCommonAttributes(nodeId, nodeAttrs)
-  result[AttributeId.NodeClass] = ua.NodeClass.Object
-  result[AttributeId.EventNotifier] = nodeAttrs.EventNotifier
-  return result
-end
-
-local nextNodeIdentifier = math.floor(os.time())
-local function genNodeId()
-  nextNodeIdentifier = nextNodeIdentifier + 1
-  return "ns=1;i=" .. nextNodeIdentifier
 end
 
 function Svc:addNode(node)
@@ -993,157 +817,48 @@ function Svc:addNode(node)
   local infOn = self.trace.infOn
   if dbgOn then traceD("Services:addNode |") end
 
-  if node.ParentNodeId == nil then
-    if errOn then traceE("Services:addNode | nil parent node ID") end
+  local editor = self.model:edit()
+
+  local parent = editor:findNode(node.ParentNodeId)
+  if not parent then
+    if errOn then traceE(fmt("Services:addNode | Parent node '%s' not found", node.ParentNodeId)) end
     error(BadParentNodeIdInvalid)
   end
 
-  local parent = self.nodeset[node.ParentNodeId]
-  if parent == nil then
-    if errOn then traceE("Services:addNode | Parent node absent") end
-    error(BadParentNodeIdInvalid)
+  local typeDefinition
+  if node.TypeDefinition then
+    typeDefinition = editor:findNode(node.TypeDefinition)
+    local nodeClass = typeDefinition.Attrs.NodeClass
+    if not typeDefinition or (nodeClass ~= const.NodeClass.VariableType and nodeClass ~= const.NodeClass.ObjectType) then
+      if errOn then traceE(fmt("Services:addNode | Type definition node '%s' is not a variable type or object type", node.TypeDefinition)) end
+      error(BadTypeDefinitionInvalid)
+    end
   end
 
-  local refNode = self.nodeset[node.ReferenceTypeId]
-  if refNode == nil or refNode.attrs[AttributeId.NodeClass] ~= ua.NodeClass.ReferenceType then
-    if errOn then traceE("Services:addNode | Invalid referenceTypeId") end
+  local refType = editor:findNode(node.ReferenceTypeId)
+  if not refType or refType.Attrs.NodeClass ~= const.NodeClass.ReferenceType then
+    if errOn then traceE(fmt("Services:addNode | Reference type node '%s' not found", node.ReferenceTypeId)) end
     error(BadReferenceTypeIdInvalid)
   end
 
-  if not ua.Tools.browseNameValid(node.BrowseName) then
-    if errOn then traceE("Services:addNode | Invalid BrowseName") end
-    error(BadBrowseNameInvalid)
-  end
-
-  if not ua.Tools.nodeClassValid(node.NodeClass) then
-    if errOn then traceE("Services:addNode | Invalid NodeClass") end
-    error(BadNodeClassInvalid)
-  end
-
-  local typeNode =self.nodeset[node.TypeDefinition]
-  if typeNode == nil then
-    if errOn then traceE("Services:addNode | Unknown TypeDefinition NodeID") end
-    error(BadTypeDefinitionInvalid)
-  end
-
-  if typeNode.attrs[AttributeId.NodeClass] ~= ua.NodeClass.VariableType and typeNode.attrs[AttributeId.NodeClass] ~= ua.NodeClass.ObjectType then
-    if errOn then traceE("Services:addNode | Invalid TypeDefinition. Only VariableType and ObjectType supported now.") end
-    error(BadTypeDefinitionInvalid)
-  end
-
-  local nodeId = node.RequestedNewNodeId
-  if ua.NodeId.isNull(nodeId) then
-    nodeId = genNodeId()
-    if dbgOn then traceD(fmt("Services:addNode | generated new nodeId='%s'", nodeId)) end
-  elseif self.nodeset[nodeId] ~= nil then
-    if errOn then traceE(fmt("Services:addNode | Node '%s' already exist", nodeId)) end
-    error(BadNodeIdExists)
-  end
-
-  -- transform input parameters into array of new node attributes
-  local resultAttrs
-  local type
-  if node.NodeClass == ua.NodeClass.Variable then
-    type = 'variable'
+  local newNode
+  if node.NodeClass == const.NodeClass.Variable then
     if infOn then traceI("Services:addNode | Adding new variable node.") end
-    resultAttrs = self:getVariableAttributes(nodeId, node, self.nodeset)
-  elseif node.NodeClass == ua.NodeClass.Object then
-    type = 'object'
+    newNode = parent:addVariable(node.BrowseName, node.NodeAttributes.Body.Value, typeDefinition, node.RequestedNewNodeId, refType)
+    setVariableAttributes(newNode, node)
+  elseif node.NodeClass == const.NodeClass.Object then
     if infOn then traceI("Services:addNode | Adding new object.") end
-    resultAttrs = self:getObjectAttributes(nodeId, node)
+    newNode = parent:addObject(node.BrowseName, node.TypeDefinition, node.RequestedNewNodeId, node.ReferenceTypeId)
+    setObjectAttributes(newNode, node)
   else
-    if infOn then traceI("Services:addNode | Invalid Node class.") end
     error(BadNodeClassInvalid)
   end
 
-  if infOn then traceI(fmt("Services:addNode | adding %s: nodID='%s' parent='%s', refId='%s', name='%s'", type, nodeId, node.ParentNodeId, node.ReferenceTypeId, node.BrowseName.Name)) end
+  editor:save()
 
-  local newNodes = {}
+  if infOn then traceI(fmt("Services:addNode | new node '%s' added", newNode.Attrs.NodeId)) end
 
-  -- New object skeleton
-  -- Add type definition becuase we instantiating a type which has no typedefinition reference
-  -- Other references will be filled up further
-  local n = {
-    attrs = resultAttrs,
-    refs = {
-      {target=node.TypeDefinition, type=HasTypeDefinition, isForward=true},
-    }
-  }
-
-  -- queue newNode -> referencies from instance declaration we should mirror
-  local nodes = { {n = n, refs=typeNode.refs} }
-
-  -- Depth First Search for all references to children nodes.
-  while #nodes ~= 0 do
-    local skel = nodes[#nodes]
-    nodes[#nodes] = nil
-
-    local curParent = skel.n
-    -- enumerate all nodes with modelling rule Mandatory and create target node.
-    for _,ref in pairs(skel.refs) do
-      repeat
-        --print(k, ref.target, ref.type, ref.isForward)
-        if ref.isForward == false then
-          break -- continue
-        end
-
-        local refId = ref.type
-        local nextId = ref.target
-        -- check if target node mandatory during instantiating
-        if dbgOn then traceD(fmt("Services:addNode | searching node '%s'", ref.target)) end
-        local instanceNode = self.nodeset[ref.target]
-        if refId ~= HasTypeDefinition then
-          local isMandatory = false
-          assert(instanceNode, ref.target)
-          for _,iref in ipairs(instanceNode.refs) do
-            if iref.type == HasModellingRule then
-              isMandatory = iref.target == ModellingRule_Mandatory
-              break
-            end
-          end
-
-          if not isMandatory then
-            break -- continue processing next refefence
-          end
-
-          local newNode = {
-            attrs = {},
-            refs = {}
-          }
-
-          nextId = genNodeId()
-          for i,attr in pairs(instanceNode.attrs) do
-            if i == AttributeId.NodeId then
-              newNode.attrs[i] = nextId
-            else
-              newNode.attrs[i] = attr
-            end
-          end
-          tins(nodes, {n=newNode, refs=instanceNode.refs})
-        end
-
-        local newRef = {
-          isForward = ref.isForward,
-          target = nextId,
-          type = refId
-        }
-
-        tins(curParent.refs, newRef)
-      until true
-    end
-    tins(newNodes, curParent)
-  end
-
-  -- add collected nodes hierarchy to
-  tins(parent.refs, {target=nodeId, type=node.ReferenceTypeId, isForward=true})
-  self.nodeset:saveNode(parent)
-
-  for _,newNode in ipairs(newNodes) do
-    self.nodeset:saveNode(newNode)
-  end
-  if infOn then traceI(fmt("Services:addNode | new node '%s' added",nodeId)) end
-
-  return nodeId
+  return newNode.Attrs.NodeId
 end
 
 function Svc:addNodes(req, channel)
@@ -1160,8 +875,8 @@ function Svc:addNodes(req, channel)
     error(BadNothingToDo)
   end
 
-  local results = {}
 
+  local results = {}
   for _, node in ipairs(req.NodesToAdd) do
     local suc, result = pcall(self.addNode, self, node)
     if suc == true then
@@ -1189,7 +904,104 @@ function Svc:createSubscription(req, channel)
   error(BadServiceUnsupported)
 end
 
-function Svc:setVariableSource(nodeId, func)
+function Svc:callMethod(method)
+  local dbgOn = self.trace.dbgOn
+  local errOn = self.trace.errOn
+  if dbgOn then traceD("Services:callMethod |") end
+
+  local response = {
+    StatusCode = Good,
+    InputArgumentResults = {},
+    InputArgumentDiagnosticInfos = {},
+    OutputArguments = nil
+  }
+
+  local browser = self.model:browse()
+  local objectNode = browser:getNode(method.ObjectId)
+  if objectNode.Attrs.NodeClass ~= const.NodeClass.Object then
+    if errOn then traceE(fmt("Services:callMethod | ObjectId '%s' is not an object", method.ObjectId)) end
+    response.StatusCode = BadNodeIdInvalid
+    return response
+  end
+
+  local methodNode = browser:getNode(method.MethodId)
+  if methodNode.Attrs.NodeClass ~= const.NodeClass.Method then
+    if errOn then traceE(fmt("Services:callMethod | MethodId '%s' is not a method", method.MethodId)) end
+    response.StatusCode = s.BadMethodInvalid
+    return response
+  end
+
+  local inputArgumentsNode = methodNode:path("InputArguments")
+  if inputArgumentsNode.Attrs.NodeClass ~= const.NodeClass.Variable then
+    if errOn then traceE(fmt("Services:callMethod | InputArguments[1].NodeId '%s' is not a variable", method.InputArguments[1].NodeId)) end
+    response.StatusCode = BadNodeIdInvalid
+    return response
+  end
+
+  local func = methodNode.Attrs.NodeCallback
+  if func == nil then
+    if errOn then traceE(fmt("Services:callMethod | Node callback is nil")) end
+    response.StatusCode = BadInternalError
+    return response
+  end
+
+  local inputArgsDef = inputArgumentsNode.Attrs.Value.Value
+  if #method.InputArguments < #inputArgsDef then
+    if errOn then traceE(fmt("Services:callMethod | InputArguments count mismatch")) end
+    response.StatusCode = s.BadArgumentsMissing
+    return response
+  end
+
+  if #method.InputArguments > #inputArgsDef then
+    if errOn then traceE(fmt("Services:callMethod | InputArguments count mismatch")) end
+    response.StatusCode = s.BadTooManyArguments
+    return response
+  end
+
+  for idx, field in ipairs(inputArgsDef) do
+    local inputArgument = method.InputArguments[idx]
+    if field.Body.DataType ~= string.format("i=%s", inputArgument.Type) then
+      if errOn then traceE(fmt("Services:callMethod | InputArguments[%d].DataType '%s' is not a %s", idx, inputArgument.Type, field.DataType)) end
+      response.StatusCode = BadInvalidArgument
+      response.InputArgumentResults[idx] = BadInvalidArgument
+    else
+      response.InputArgumentResults[idx] = Good
+    end
+  end
+
+  if response.StatusCode ~= Good then
+    return response
+  end
+
+  local ok, result = pcall(func, method.ObjectId, method.MethodId, method.InputArguments)
+  if ok then
+    response.OutputArguments = result
+    if dbgOn then traceD(fmt("Services:callMethod | Node callback result: %s", result)) end
+  else
+    if errOn then traceE(fmt("Services:callMethod | Node callback failed: %s", result)) end
+    response.StatusCode = result
+  end
+
+  if errOn then traceD(fmt("Services:callMethod | Result: %s", response)) end
+
+  return response
+end
+
+function Svc:call(req, channel)
+  local dbgOn = self.trace.dbgOn
+  if dbgOn then traceI("Services:call |") end
+
+  self:checkSession(req, channel)
+
+  local results = {}
+  for _, method in ipairs(req.MethodsToCall) do
+    local response = self:callMethod(method)
+    tins(results, response)
+  end
+  return {Results=results}
+end
+
+function Svc:setValueCallback(nodeId, func)
   local dbgOn = self.trace.dbgOn
   if dbgOn then traceD(fmt("Setting source callback for node '%s'", nodeId)) end
   if type(func) ~= 'function' then
@@ -1201,12 +1013,12 @@ function Svc:setVariableSource(nodeId, func)
     if dbgOn then traceD(fmt("Setting source callback failed: nodeId '%s' unknown", nodeId)) end
     error(BadNodeIdUnknown)
   end
-  if node.attrs[ua.AttributeId.NodeClass] ~= ua.NodeClass.Variable then
+  if node.Attrs[AttributeId.NodeClass] ~= const.NodeClass.Variable then
     if dbgOn then traceD(fmt("Setting source callback failed: nodeId '%s' is not a variable", nodeId)) end
     error(BadNodeClassInvalid)
   end
 
-  node.attrs.valueSource = func
+  node.Attrs.NodeCallback = func
   self.nodeset:saveNode(node)
   if dbgOn then traceD(fmt("Source callback for nodeId '%s' was set", nodeId)) end
 end
@@ -1235,7 +1047,7 @@ function Svc:callWriteHook(nodeId, attributeId, value)
 
   if dbgOn then traceD(fmt("Services:Write | calling write hook for node '%s'", nodeId)) end
   -- IMO failing of a hook should not be a fatal error
-  local ok, err = pcall(hooks.onWrite, nodeId, attributeId, t.copy(value))
+  local ok, err = pcall(hooks.onWrite, nodeId, attributeId, tools.copy(value))
   if not ok and errOn then
     traceE(fmt("Services:Write | write hook for node '%s' failed: %s", nodeId, err))
   end

@@ -1,4 +1,5 @@
 local uadp = require("opcua.pubsub.uadp")
+local compat = require("opcua.compat")
 
 local function getPublisherType(t)
   if type(t) == 'number' then
@@ -48,7 +49,7 @@ end
 local function decodeField(dec, decF, name)
   dec:beginField(name)
   local field
-  if dec:stackLast() ~= ba.json.null then
+  if dec:stackLast() ~= compat.jsonNull then
     field = decF(dec)
   end
   dec:endField(name)

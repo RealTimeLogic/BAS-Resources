@@ -1,11 +1,11 @@
 local Connections = require("opcua.binary.server_connection")
-local ua = require("opcua.api")
+local trace = require("opcua.trace")
 
 local S = {}
 S.__index = S
 
 function S:acceptConnection(out)
-  if self.trace.infOn then ua.trace.inf("binary | new connection accepted") end
+  if self.trace.infOn then trace.inf("binary | new connection accepted") end
   assert(out ~= nil and out.send ~= nil)
   return Connections.new(self.config, self.services, out, self.model)
 end
@@ -15,7 +15,7 @@ local function newServer(endpoint, config, services, model)
   assert(services ~= nil)
 
   if config.logging.binary.infOn then
-    ua.trace.inf("binary: Creating new endpoint '"..endpoint.endpointUrl.."'")
+    trace.inf("binary: Creating new endpoint '"..endpoint.endpointUrl.."'")
   end
 
   local srv = {

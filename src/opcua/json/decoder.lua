@@ -1,4 +1,4 @@
-local tools = require("opcua.binary.tools")
+local tools = require("opcua.tools")
 local compat = require("opcua.compat")
 local n = require("opcua.node_id")
 local s = require("opcua.status_codes")
@@ -37,7 +37,7 @@ function dec:stackLastValue()
     return val
   end
 
-  return val ~= ba.json.null and val or nil
+  return val ~= compat.jsonNull and val or nil
 end
 
 function dec:int8()
@@ -124,23 +124,7 @@ function dec:dateTime()
     return nil
   end
 
-  local year, month, day, hour, min, sec, msec = str:match("(%d+)-(%d+)-(%d+)T(%d+):(%d+):(%d+)Z")
-  if not year then
-    year, month, day, hour, min, sec, msec = str:match("(%d+)-(%d+)-(%d+)T(%d+):(%d+):(%d+).(%d+)Z")
-  end
-
-  local date = {
-    year = year,
-    month = month,
-    day = day,
-    hour = hour,
-    min = min,
-    sec = sec,
-  }
-
-  sec = ba.datetime(date):ticks()
-  msec = msec and (tonumber("0."..msec)) or 0
-  return sec + msec
+  return compat.to_timestamp(str)
 end
 
 function dec:string()
@@ -526,11 +510,11 @@ function dec:extensionObject(decoder)
 
   local extObject = decoder:getExtObject(encodedId)
   local v = {
-    TypeId = extObject and extObject.dataTypeId or encodedId
+    TypeId = extObject and extObject.DataTypeId or encodedId
   }
 
   if extObject then
-    if self:stackLast()["Encoding"] ~= ba.json.nullt then
+    if self:stackLast()["Encoding"] ~= compat.jsonNull then
       self:beginField("Encoding")
       local encoding = self:uint32()
       if encoding ~= 0 then
@@ -540,7 +524,7 @@ function dec:extensionObject(decoder)
     end
 
     self:beginField("Body")
-    if self:stackLast() ~= ba.json.null then
+    if self:stackLast() ~= compat.jsonNull then
       v.Body = decoder:Decode(v.TypeId)
     end
     self:endField("Body")
@@ -557,7 +541,7 @@ function dec:beginField(name)
   if type(val) == 'boolean' then
     self:stackPush(val)
   else
-    self:stackPush(val or ba.json.null)
+    self:stackPush(val or compat.jsonNull)
   end
 end
 
@@ -568,7 +552,7 @@ end
 function dec:beginObject()
   if self.stack == nil then
     local data = tostring(self.data)
-    self.stack = {ba.json.decode(data)}
+    self.stack = {compat.parseJson(data)}
   end
   self:stackPush(self:stackLastValue())
 end
@@ -582,7 +566,7 @@ end
 
 function dec:beginArray()
   local last = self:stackLast()
-  if last == ba.json.null then
+  if last == compat.jsonNull then
     return -1
   end
   if type(last) ~= "table" then
@@ -594,7 +578,7 @@ end
 
 function dec:endArray()
   local last = self:stackLast()
-  if last == ba.json.null then
+  if last == compat.jsonNull then
     return
   end
   if type(last) ~= "table" then
@@ -617,11 +601,11 @@ function dec:stackLast()
   if self.stack == nil then
     local data = tostring(self.data)
     local err
-    data, err = ba.json.decode(data)
-    if err then
+    local ok, res = pcall(compat.parseJson, data)
+    if not ok then
       error(BadDecodingError)
     end
-    self.stack = {data}
+    self.stack = {res}
   end
 
   local stack = self.stack

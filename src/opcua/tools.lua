@@ -2,8 +2,14 @@ local tins = table.insert
 local tconcat = table.concat
 local fmt = string.format
 
-local types = require("opcua.types")
 local nodeId = require("opcua.node_id")
+local c = require("opcua.const")
+local crypto = require("opcua.crypto")
+local VariantType = c.VariantType
+local ValueRank = c.ValueRank
+local ObjectAttributesMask = c.ObjectAttributesMask
+local VariableAttributesMask = c.VariableAttributesMask
+
 
 local T = {}
 T.__index = T
@@ -36,7 +42,7 @@ function T.makeTable(str)
 end
 
 
-local function s(b)
+local function ch(b)
   local num = tonumber(b)
   if num < 0x20 or num > 0x7F then
     return ' '
@@ -76,7 +82,7 @@ function T.hexPrint(d, f)
         "%04X | 0x%02X, 0x%02X, 0x%02X, 0x%02X,  0x%02X, 0x%02X, 0x%02X, 0x%02X,  0x%02X, 0x%02X, 0x%02X, 0x%02X,  0x%02X, 0x%02X, 0x%02X, 0x%02X, |%s%s%s%s%s%s%s%s %s%s%s%s%s%s%s%s|%s",
         i-1,
         v1,v2,v3,v4,v5,v6,v7,v8,v9,v10,v11,v12,v13,v14,v15,v16,
-        s(v1),s(v2),s(v3),s(v4),s(v5),s(v6),s(v7),s(v8),s(v9),s(v10),s(v11),s(v12),s(v13),s(v14),s(v15),s(v16),
+        ch(v1),ch(v2),ch(v3),ch(v4),ch(v5),ch(v6),ch(v7),ch(v8),ch(v9),ch(v10),ch(v11),ch(v12),ch(v13),ch(v14),ch(v15),ch(v16),
         eol
       )
     f(text)
@@ -105,7 +111,7 @@ function T.hexPrint(d, f)
     for i=1,17 do
       if off+i <= len then
         local v = x(d,off+i)
-        tins(tail, s(v))
+        tins(tail, ch(v))
       else
         tins(tail, " ")
       end
@@ -183,11 +189,11 @@ end
 function T.localizedTextValid(v)
   return type(v) == 'table' and
          (v.Locale == nil or type(v.Locale) == 'string') and
-         type(v.Text) == 'string'
+         (v.Text == nil or type(v.Text) == 'string')
 end
 
 function T.qualifiedNameValid(v)
-  return type(v) == 'table' and (v.ns == nil or T.uint16Valid(v.ns)) and type(v.Name) == 'string'
+  return type(v) == 'table' and (v.ns == nil or T.uint16Valid(v.ns)) and type(v.Name) == 'string' and v.Name ~= ""
 end
 
 function T.byteStringValid(v)
@@ -207,7 +213,7 @@ function T.byteStringValid(v)
 end
 
 function T.stringValid(v)
-  return type(v) == 'string'
+  return v == nil or type(v) == 'string'
 end
 
 T.xmlElementValid = T.stringValid
@@ -246,7 +252,7 @@ function T.diagnosticInfoValid(v)
 end
 
 local function variantDataValid(data, f, sz)
-  if type(data) == "table" and #data > 0 then
+  if type(data) == "table" and sz ~= nil then
     if sz ~= nil and #data ~= sz then
       return false
     end
@@ -257,21 +263,18 @@ local function variantDataValid(data, f, sz)
     end
     return true
   else
-    if sz ~= nil then
-      return false
-    end
     return f(data)
   end
 end
 
 function T.variantValid(val)
-  if type(val) ~= 'table' or val == {} then
+  if type(val) ~= 'table' then
     return false
   end
 
   local sz
   if val.IsArray then
-    if type(val.Value) ~= "table" or val.Value[1] == nil then
+    if type(val.Value) ~= "table" then
       return false
     end
     sz = #val.Value
@@ -293,35 +296,35 @@ function T.variantValid(val)
     end
   end
 
-  if val.Type == types.VariantType.Boolean then
+  if val.Type == VariantType.Boolean then
     return variantDataValid(val.Value, T.booleanValid, sz)
-  elseif val.Type == types.VariantType.SByte then
+  elseif val.Type == VariantType.SByte then
     return variantDataValid(val.Value, T.sbyteValid, sz)
-  elseif val.Type == types.VariantType.Byte then
+  elseif val.Type == VariantType.Byte then
     return variantDataValid(val.Value, T.byteValid, sz)
-  elseif val.Type == types.VariantType.Int16 then
+  elseif val.Type == VariantType.Int16 then
     return variantDataValid(val.Value, T.int16Valid, sz)
-  elseif val.Type == types.VariantType.UInt16 then
+  elseif val.Type == VariantType.UInt16 then
     return variantDataValid(val.Value, T.uint16Valid, sz)
-  elseif val.Type == types.VariantType.Int32 then
+  elseif val.Type == VariantType.Int32 then
     return variantDataValid(val.Value, T.int32Valid, sz)
-  elseif val.Type == types.VariantType.UInt32 then
+  elseif val.Type == VariantType.UInt32 then
     return variantDataValid(val.Value, T.uint32Valid, sz)
-  elseif val.Type == types.VariantType.Int64 then
+  elseif val.Type == VariantType.Int64 then
     return variantDataValid(val.Value, T.int64Valid, sz)
-  elseif val.Type == types.VariantType.UInt64 then
+  elseif val.Type == VariantType.UInt64 then
     return variantDataValid(val.Value, T.uint64Valid, sz)
-  elseif val.Type == types.VariantType.Float then
+  elseif val.Type == VariantType.Float then
     return variantDataValid(val.Value, T.floatValid, sz)
-  elseif val.Type == types.VariantType.Double then
+  elseif val.Type == VariantType.Double then
     return variantDataValid(val.Value, T.doubleValid, sz)
-  elseif val.Type == types.VariantType.String then
+  elseif val.Type == VariantType.String then
     return variantDataValid(val.Value, T.stringValid, sz)
-  elseif val.Type == types.VariantType.DateTime then
+  elseif val.Type == VariantType.DateTime then
     return variantDataValid(val.Value, T.doubleValid, sz)
-  elseif val.Type == types.VariantType.Guid then
+  elseif val.Type == VariantType.Guid then
     return variantDataValid(val.Value, T.guidValid, sz)
-  elseif val.Type == types.VariantType.ByteString then
+  elseif val.Type == VariantType.ByteString then
     if type(val.Value) == 'table' then
       if #val.Value == 0 then
         return true
@@ -341,25 +344,25 @@ function T.variantValid(val)
       end
     end
     return type(val.Value) == 'string'
-  elseif val.Type == types.VariantType.XmlElement then
+  elseif val.Type == VariantType.XmlElement then
     return variantDataValid(val.Value, T.xmlElementValid, sz)
-  elseif val.Type == types.VariantType.NodeId then
+  elseif val.Type == VariantType.NodeId then
     return variantDataValid(val.Value, T.nodeIdValid, sz)
-  elseif val.Type == types.VariantType.ExpandedNodeId then
+  elseif val.Type == VariantType.ExpandedNodeId then
     return variantDataValid(val.Value, T.nodeIdValid, sz)
-  elseif val.Type == types.VariantType.StatusCode then
+  elseif val.Type == VariantType.StatusCode then
     return variantDataValid(val.Value, T.uint32Valid, sz)
-  elseif val.Type == types.VariantType.QualifiedName then
+  elseif val.Type == VariantType.QualifiedName then
     return variantDataValid(val.Value, T.qualifiedNameValid, sz)
-  elseif val.Type == types.VariantType.LocalizedText then
+  elseif val.Type == VariantType.LocalizedText then
     return variantDataValid(val.Value, T.localizedTextValid, sz)
-  elseif val.Type == types.VariantType.ExtensionObject then
+  elseif val.Type == VariantType.ExtensionObject then
     return variantDataValid(val.Value, T.extensionObjectValid, sz)
-  elseif val.Type == types.VariantType.DataValue then
+  elseif val.Type == VariantType.DataValue then
     return variantDataValid(val.Value, T.dataValueValid, sz)
-  elseif val.Type == types.VariantType.Variant then
+  elseif val.Type == VariantType.Variant then
     return variantDataValid(val.Value, T.variantValid, sz)
-  elseif val.Type == types.VariantType.DiagnosticInfo then
+  elseif val.Type == VariantType.DiagnosticInfo then
     return variantDataValid(val.Value, T.diagnosticInfoValid, sz)
   end
 
@@ -369,55 +372,55 @@ end
 
 function T.getVariantTypeId(val)
   local t = val.Type
-  if t == types.VariantType.Boolean then
+  if t == VariantType.Boolean then
     return "i=1"
-  elseif t == types.VariantType.SByte then
+  elseif t == VariantType.SByte then
     return "i=2"
-  elseif t == types.VariantType.Byte then
+  elseif t == VariantType.Byte then
     return "i=3"
-  elseif t == types.VariantType.Int16 then
+  elseif t == VariantType.Int16 then
     return "i=4"
-  elseif t == types.VariantType.UInt16 then
+  elseif t == VariantType.UInt16 then
     return "i=5"
-  elseif t == types.VariantType.Int32 then
+  elseif t == VariantType.Int32 then
     return "i=6"
-  elseif t == types.VariantType.UInt32 then
+  elseif t == VariantType.UInt32 then
     return "i=7"
-  elseif t == types.VariantType.Int64 then
+  elseif t == VariantType.Int64 then
     return "i=8"
-  elseif t == types.VariantType.UInt64 then
+  elseif t == VariantType.UInt64 then
     return "i=9"
-  elseif t == types.VariantType.Float then
+  elseif t == VariantType.Float then
     return "i=10"
-  elseif t == types.VariantType.Double then
+  elseif t == VariantType.Double then
     return "i=11"
-  elseif t == types.VariantType.String then
+  elseif t == VariantType.String then
     return "i=12"
-  elseif t == types.VariantType.DateTime then
+  elseif t == VariantType.DateTime then
     return "i=13"
-  elseif t == types.VariantType.Guid then
+  elseif t == VariantType.Guid then
     return "i=14"
-  elseif t == types.VariantType.ByteString then
+  elseif t == VariantType.ByteString then
     return "i=15"
-  elseif t == types.VariantType.XmlElement then
+  elseif t == VariantType.XmlElement then
     return "i=16"
-  elseif t == types.VariantType.NodeId then
+  elseif t == VariantType.NodeId then
     return "i=17"
-  elseif t == types.VariantType.ExpandedNodeId then
+  elseif t == VariantType.ExpandedNodeId then
     return "i=18"
-  elseif t == types.VariantType.StatusCode then
+  elseif t == VariantType.StatusCode then
     return "i=19"
-  elseif t == types.VariantType.QualifiedName then
+  elseif t == VariantType.QualifiedName then
     return "i=20"
-  elseif t == types.VariantType.LocalizedText then
+  elseif t == VariantType.LocalizedText then
     return "i=21"
-  elseif t == types.VariantType.ExtensionObject then
+  elseif t == VariantType.ExtensionObject then
     return "i=22"
-  elseif t == types.VariantType.DataValue then
+  elseif t == VariantType.DataValue then
     return "i=23"
-  elseif t == types.VariantType.Variant then
+  elseif t == VariantType.Variant then
     return "i=24"
-  elseif t == types.VariantType.DiagnosticInfo then
+  elseif t == VariantType.DiagnosticInfo then
     return "i=25"
   end
 
@@ -459,7 +462,6 @@ function T.valueRankValid(v)
   return T.int32Valid(v) and v >=-3 and v <= 2
 end
 
-
 local function scalarValid(val, arrayDimensions)
   return val == nil or (arrayDimensions == nil or arrayDimensions[1] == -1 or arrayDimensions[1] == nil) and (type(val) ~= 'table' or #val == 0 or T.byteStringValid(val))
 end
@@ -494,12 +496,12 @@ function T.arrayDimensionsValid(value, arrayDimensions, valueRank)
 
   -- Search for the value field: it can be any except ArraySimensions
   local val= value.Value
-  if valueRank == types.ValueRank.Scalar then
-    return scalarValid(val, arrayDimensions, valueRank)
-  elseif valueRank == types.ValueRank.OneDimension then
-    return oneDimensionValid(val, arrayDimensions, valueRank)
-  elseif valueRank == types.ValueRank.ScalarOrOneDimension then
-    return scalarValid(val, arrayDimensions, valueRank) or oneDimensionValid(val, arrayDimensions, valueRank)
+  if valueRank == ValueRank.Scalar then
+    return scalarValid(val, arrayDimensions)
+  elseif valueRank == ValueRank.OneDimension then
+    return oneDimensionValid(val, arrayDimensions)
+  elseif valueRank == ValueRank.ScalarOrOneDimension then
+    return scalarValid(val, arrayDimensions) or oneDimensionValid(val, arrayDimensions)
   end
 
   return false
@@ -610,6 +612,173 @@ function T.createIssuedToken(policyId, token, encryptionAlgorithm)
       EncryptionAlgorithm = encryptionAlgorithm
     }
   }
+end
+
+local function checkCommonAttributes(parentNodeId, browseName, displayName, newNodeId)
+  if not T.qualifiedNameValid(browseName) then
+    error(0x80600000) -- BadBrowseNameInvalid
+  end
+
+  if not T.nodeIdValid(parentNodeId) then
+    error(0x805B0000) -- BadParentNodeIdInvalid
+  end
+
+  if newNodeId ~= nil and not T.nodeIdValid(newNodeId) then
+    error(0x80330000) -- BadBrowseNameInvalid
+  end
+
+  if not T.localizedTextValid(displayName) then
+    error(0x80620000) -- BadNodeAttributesInvalid
+  end
+end
+
+T.newFolderParams = function(parentNodeId, name, newNodeId)
+  local displayName
+  local browseName
+  if type(name) == "table" then
+    displayName = name.DisplayName
+    browseName = name.BrowseName
+  elseif type(name) == "string" then
+    displayName = {Text=name}
+    browseName = {Name=name, ns=name.ns or 0}
+  else
+    error(0x80620000) -- BadNodeAttributesInvalid
+  end
+
+  checkCommonAttributes(parentNodeId, browseName, displayName, newNodeId)
+
+  local params = {
+    RequestedNewNodeId = newNodeId,
+    ParentNodeId = parentNodeId,
+    ReferenceTypeId = "i=35", --Organizes,
+    BrowseName = browseName,
+    NodeClass = 1, -- ua.NodeClass.Object,
+    TypeDefinition = "i=61", -- ids.FolderType,
+    NodeAttributes = {
+      TypeId = "i=354",
+      Body = {
+        SpecifiedAttributes = ObjectAttributesMask,
+        DisplayName = displayName,
+        Description = displayName,
+        WriteMask = 0,
+        UserWriteMask = 0,
+        EventNotifier = 0,
+      }
+    }
+  }
+
+  return params
+end
+
+T.newVariableParams = function(parentNodeId, name, val, newNodeId)
+  local displayName
+  local browseName
+  if type(name) == "table" then
+    displayName = name.DisplayName
+    browseName = name.BrowseName
+  elseif type(name) == "string" then
+    displayName = {Text=name}
+    browseName = {Name=name, ns=name.ns or 0}
+  else
+    error(0x80620000) -- BadNodeAttributesInvalid
+  end
+
+  checkCommonAttributes(parentNodeId, browseName, displayName, newNodeId)
+
+  if not T.dataValueValid(val) then
+    error(0x80620000) --BadNodeAttributesInvalid
+  end
+
+  local arrayDimensions = val.ArrayDimensions
+
+  local valueRank
+  if val.IsArray then
+    if arrayDimensions == nil then
+      valueRank = 1 -- OneDimension
+      arrayDimensions = {#val.Value}
+    else
+      valueRank = 0 -- Unknown Dimensions
+    end
+  else
+    valueRank = -1 -- Scalar
+  end
+
+  local params = {
+    ParentNodeId = parentNodeId,
+    ReferenceTypeId = "i=35", --Organizes,
+    RequestedNewNodeId = newNodeId,
+    BrowseName = browseName,
+    NodeClass = 2, --ua.NodeClass.Variable,
+    TypeDefinition = "i=63", -- ids.BaseDataVariableType,
+    NodeAttributes =
+    {
+      TypeId = "i=355",
+      Body = {
+        SpecifiedAttributes = VariableAttributesMask,
+        DisplayName = displayName,
+        Description = displayName,
+        WriteMask = 0,
+        UserWriteMask = 0,
+        Value = val,
+        DataType = T.getVariantTypeId(val),
+        ValueRank = valueRank,
+        ArrayDimensions = arrayDimensions,
+        AccessLevel = 0,
+        UserAccessLevel = 0,
+        MinimumSamplingInterval = 1000,
+        Historizing = false,
+      }
+    }
+  }
+
+  return params
+end
+
+T.createGuid = function()
+  local crypto = crypto.crypto
+  local n1 = crypto.rnds(8) & 0xFFFFFFFF
+  local n2 = crypto.rnds(4) & 0xFFFF
+  local n3 = crypto.rnds(4) & 0xFFFF
+  local n4 = crypto.rnds(4) & 0xFFFF
+  local n5 = crypto.rnds(4) & 0xFFFF
+  local n6 = crypto.rnds(4) & 0xFFFF
+  local n7 = crypto.rnds(4) & 0xFFFF
+  -- print(n1,n2,n3,n4,n5,n6)
+  local guid <const> =  string.format("%0.8x-%0.4x-%0.4x-%0.4x-%0.4x%0.4x%0.4x",n1,n2,n3,n4,n5,n6,n7)
+  -- print(guid)
+  return guid
+end
+
+T.parseUrl = function(endpointUrl)
+  if type(endpointUrl) ~= "string" then
+    error("invalid endpointUrl")
+  end
+
+  local s,h,p,pt
+  s,h = string.match(endpointUrl, "^([%a.]+)://([%w.-]+)$")
+  if s == nil then
+    s,h,pt = string.match(endpointUrl, "^([%a.]+)://([%w.-]+)(/.*)$")
+  end
+  if s == nil then
+      s,h,p,pt = string.match(endpointUrl, "^([%a.]+)://([%w.-]+):(%d+)$")
+  end
+  if s == nil then
+    s,h,p,pt = string.match(endpointUrl, "^([%a.]+)://([%w.-]+):(%d+)(/.*)$")
+  end
+  if s == nil then
+    return nil, 0x80830000 -- BadTcpEndpointUrlInvalid
+  end
+
+  return {
+    scheme = s,
+    host = h,
+    port = tonumber(p),
+    path = pt
+  }
+end
+
+T.debug = function()
+  require("ldbgmon").connect({client=false})
 end
 
 

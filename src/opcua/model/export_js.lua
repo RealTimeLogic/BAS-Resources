@@ -1,4 +1,6 @@
-local ua = require("opcua.api")
+local const = require("opcua.const")
+local AttributeId = const.AttributeId
+local NodeClass = const.NodeClass
 
 local function newVariableName(context)
   local count = context.varCount
@@ -203,29 +205,29 @@ local function getAttrValue(context, attrIdx, value, func, output)
 end
 
 local function saveAttributes(context, node, output)
-  getAttrValue(context, ua.AttributeId.NodeId,            node.attrs[1], getNodeIdUaValue,   output)
-  getAttrValue(context, ua.AttributeId.NodeClass,         node.attrs[2], getUInt32UaValue,   output)
-  getAttrValue(context, ua.AttributeId.BrowseName,        node.attrs[3], getQualifiedNameUaValue, output)
-  getAttrValue(context, ua.AttributeId.DisplayName,       node.attrs[4], getLocalizedTextUaValue, output)
-  getAttrValue(context, ua.AttributeId.Description,       node.attrs[5], getLocalizedTextUaValue, output)
-  getAttrValue(context, ua.AttributeId.WriteMask,         node.attrs[6], getUInt32UaValue,   output)
-  getAttrValue(context, ua.AttributeId.UserWriteMask,     node.attrs[7], getUInt32UaValue,   output)
-  getAttrValue(context, ua.AttributeId.IsAbstract,        node.attrs[8], getBooleanUaValue,  output)
-  getAttrValue(context, ua.AttributeId.Symmetric,         node.attrs[9], getBooleanUaValue,  output)
-  getAttrValue(context, ua.AttributeId.InverseName,       node.attrs[10], getLocalizedTextUaValue,output)
-  getAttrValue(context, ua.AttributeId.ContainsNoLoops,   node.attrs[11], getBooleanUaValue, output)
-  getAttrValue(context, ua.AttributeId.EventNotifier,     node.attrs[12], getUInt32UaValue,  output)
-  getAttrValue(context, ua.AttributeId.Value,             node.attrs[13], getVariantUaValue, output)
-  getAttrValue(context, ua.AttributeId.DataType,          node.attrs[14], getNodeIdUaValue,  output)
-  getAttrValue(context, ua.AttributeId.Rank,              node.attrs[15], getUInt32UaValue,  output)
+  getAttrValue(context, AttributeId.NodeId,            node.Attrs[1], getNodeIdUaValue,   output)
+  getAttrValue(context, AttributeId.NodeClass,         node.Attrs[2], getUInt32UaValue,   output)
+  getAttrValue(context, AttributeId.BrowseName,        node.Attrs[3], getQualifiedNameUaValue, output)
+  getAttrValue(context, AttributeId.DisplayName,       node.Attrs[4], getLocalizedTextUaValue, output)
+  getAttrValue(context, AttributeId.Description,       node.Attrs[5], getLocalizedTextUaValue, output)
+  getAttrValue(context, AttributeId.WriteMask,         node.Attrs[6], getUInt32UaValue,   output)
+  getAttrValue(context, AttributeId.UserWriteMask,     node.Attrs[7], getUInt32UaValue,   output)
+  getAttrValue(context, AttributeId.IsAbstract,        node.Attrs[8], getBooleanUaValue,  output)
+  getAttrValue(context, AttributeId.Symmetric,         node.Attrs[9], getBooleanUaValue,  output)
+  getAttrValue(context, AttributeId.InverseName,       node.Attrs[10], getLocalizedTextUaValue,output)
+  getAttrValue(context, AttributeId.ContainsNoLoops,   node.Attrs[11], getBooleanUaValue, output)
+  getAttrValue(context, AttributeId.EventNotifier,     node.Attrs[12], getUInt32UaValue,  output)
+  getAttrValue(context, AttributeId.Value,             node.Attrs[13], getVariantUaValue, output)
+  getAttrValue(context, AttributeId.DataType,          node.Attrs[14], getNodeIdUaValue,  output)
+  getAttrValue(context, AttributeId.Rank,              node.Attrs[15], getUInt32UaValue,  output)
   -- UA_AttributeId_ArrayDimensions = 16,         /* UA_Type_Uint32(array), value.bPtr */
-  getAttrValue(context, ua.AttributeId.AccessLevel,       node.attrs[17], getUInt32UaValue,  output)
-  getAttrValue(context, ua.AttributeId.UserAccessLevel,   node.attrs[18], getUInt32UaValue,  output)
-  getAttrValue(context, ua.AttributeId.MinimumSamplingInterval, node.attrs[19], getDoubleUaValue,  output)
-  getAttrValue(context, ua.AttributeId.Historizing,       node.attrs[20], getBooleanUaValue, output)
-  getAttrValue(context, ua.AttributeId.Executable,        node.attrs[21], getBooleanUaValue, output)
-  getAttrValue(context, ua.AttributeId.UserExecutable,    node.attrs[22], getBooleanUaValue, output)
-  getAttrValue(context, ua.AttributeId.DataTypeDefinition,node.attrs[23], getNodeIdUaValue,  output)
+  getAttrValue(context, AttributeId.AccessLevel,       node.Attrs[17], getUInt32UaValue,  output)
+  getAttrValue(context, AttributeId.UserAccessLevel,   node.Attrs[18], getUInt32UaValue,  output)
+  getAttrValue(context, AttributeId.MinimumSamplingInterval, node.Attrs[19], getDoubleUaValue,  output)
+  getAttrValue(context, AttributeId.Historizing,       node.Attrs[20], getBooleanUaValue, output)
+  getAttrValue(context, AttributeId.Executable,        node.Attrs[21], getBooleanUaValue, output)
+  getAttrValue(context, AttributeId.UserExecutable,    node.Attrs[22], getBooleanUaValue, output)
+  getAttrValue(context, AttributeId.DataTypeDefinition,node.Attrs[23], getNodeIdUaValue,  output)
 
   -- -- UA_AttributeId_RolePermissions = 24,
   -- -- UA_AttributeId_UserRolePermissions = 25,
@@ -234,8 +236,8 @@ local function saveAttributes(context, node, output)
 end
 
 local function saveRefs(_, node, output)
-  if node.refs[1] then
-    for _, ref in ipairs(node.refs) do
+  if node.Refs[1] then
+    for _, ref in ipairs(node.Refs) do
       local targetNodeId = ref.target
       local refId = ref.type
       local isForward = ref.isForward and 'true' or 'false'
@@ -246,7 +248,7 @@ end
 
 
 local function saveDefinition(self, _, node, output)
-  for _, field in ipairs(node.definition) do
+  for _, field in ipairs(node.Attrs.DataTypeDefinition) do
     if field.Value == nil then
       local baseType = self:getBaseDatatype(field.DataType)
       output(string.format('      new ns.StructField("%s", "%s", "%s", %s, %s),',
@@ -285,21 +287,21 @@ local function saveNodes(self, context, output)
     local node = self.Nodes[nodeId]
     idx = idx + 1
 
-    if node.attrs[ua.AttributeId.NodeClass] ~= ua.NodeClass.DataType then
+    if node.Attrs[AttributeId.NodeClass] ~= NodeClass.DataType then
       goto continue
     end
 
-    if node.attrs[1] == nil then
+    if node.Attrs[1] == nil then
       goto continue
     end
 
     local nodeVarName = "node"..idx
     table.insert(jsNodes, {nodeId, nodeVarName})
-    if node.binaryId then
-      table.insert(jsNodes, {node.binaryId, nodeVarName})
+    if node.BinaryId then
+      table.insert(jsNodes, {node.BinaryId, nodeVarName})
     end
-    if node.jsonId then
-      table.insert(jsNodes, {node.jsonId, nodeVarName})
+    if node.JsonId then
+      table.insert(jsNodes, {node.JsonId, nodeVarName})
     end
 
     output(string.format('const %s = {', nodeVarName))
@@ -312,17 +314,17 @@ local function saveNodes(self, context, output)
     saveRefs(context, node, output)
     output('    ],')
 
-    if node.definition then
+    if node.Attrs.DataTypeDefinition then
       output('    Definition: [')
       saveDefinition(self, context, node, output)
       output('    ],')
 
-      if node.binaryId then
-        output(string.format('    BinaryId: "%s",', node.binaryId))
+      if node.BinaryId then
+        output(string.format('    BinaryId: "%s",', node.BinaryId))
       end
 
-      if node.jsonId then
-        output(string.format('    JsonId: "%s",', node.jsonId))
+      if node.JsonId then
+        output(string.format('    JsonId: "%s",', node.JsonId))
       end
     end
 

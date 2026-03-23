@@ -43,7 +43,7 @@ return {
   WRITE_REQUEST  = "i=671",
   WRITE_RESPONSE = "i=674",
 
-  CALL_REQUEST  = "i=711",
+  CALL_REQUEST  = "i=710",
   CALL_RESPONSE = "i=713",
 
   ADD_NODES_REQUEST = "i=486",

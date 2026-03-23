@@ -74,7 +74,7 @@ local function fromString(s)
     ident = b64decode(str)
     t = ByteString
   else
-    error("invalid node id string format")
+    error("invalid node id string format: '"..s.."'")
   end
 
   return {

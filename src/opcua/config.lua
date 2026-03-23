@@ -1,5 +1,8 @@
-local ua = require("opcua.api")
 local compat = require("opcua.compat")
+local const = require("opcua.const")
+local crypto = require("opcua.crypto")
+local version = require("opcua.version")
+local tools = require("opcua.tools")
 
 local function countPolicies(securePolicies, uri)
   local count = 0
@@ -21,8 +24,8 @@ local function checkSecurePolicies(config)
     error("invalid securePolicies")
   end
 
-  local p = ua.SecurityPolicy
-  local modes = ua.MessageSecurityMode
+  local p = const.SecurityPolicy
+  local modes = const.MessageSecurityMode
   for _,policy in ipairs(securePolicies) do
     local uri = policy.securityPolicyUri
     if countPolicies(securePolicies, uri) ~= 1 then
@@ -74,10 +77,10 @@ local function checkSecurePolicies(config)
 
       -- Try to load certificate and key
       if policy.certificate then
-        ua.crypto.createCert(policy.certificate, config.io)
+        crypto.crypto.createCert(policy.certificate, config.io)
       end
       if policy.key then
-        ua.crypto.createKey(policy.key, config.io)
+        crypto.crypto.createKey(policy.key, config.io)
       end
     else
       error("unsupported securityPolicyUri "..tostring(policy.securityPolicyUri))
@@ -99,19 +102,19 @@ local function commonConfig(config)
   end
 
   if config.applicationName == nil then
-    config.applicationName = ua.Version.ApplicationName
+    config.applicationName = version.ApplicationName
   elseif type(config.applicationName) ~= "string" then
     error("applicationName")
   end
 
   if config.applicationUri == nil then
-    config.applicationUri = ua.Version.ApplicationUri
+    config.applicationUri = version.ApplicationUri
   elseif type(config.applicationUri) ~= "string" then
     error("applicationUri")
   end
 
   if config.productUri == nil then
-    config.productUri = ua.Version.ProductUri
+    config.productUri = version.ProductUri
   elseif type(config.productUri) ~= "string" then
     error("invalid productUri")
   end
@@ -201,7 +204,7 @@ local function identityTokens(config)
     config.userIdentityTokens = {
       {
         policyId = "anonymous",
-        tokenType = ua.UserTokenType.Anonymous
+        tokenType = const.UserTokenType.Anonymous
       }
     }
     return
@@ -231,7 +234,7 @@ local function identityTokens(config)
       return error(string.format("Policy #%i: policyId must be string", idx))
     end
 
-    if policy.tokenType == ua.UserTokenType.Anonymous then
+    if policy.tokenType == const.UserTokenType.Anonymous then
       if policy.issuedTokenType then
         error("Anonymous policy cannot have issuedTokenType")
       elseif policy.issuerEndpointUrl then
@@ -239,23 +242,23 @@ local function identityTokens(config)
       elseif policy.securityPolicyUri then
         error("Anonymous policy cannot have securityPolicyUri")
       end
-    elseif policy.tokenType == ua.UserTokenType.Certificate then
+    elseif policy.tokenType == const.UserTokenType.Certificate then
       if policy.issuedTokenType then
         error("Certificate policy cannot have issuedTokenType")
       elseif policy.issuerEndpointUrl then
         error("Certificate policy cannot have issuerEndpointUrl")
       end
-    elseif policy.tokenType == ua.UserTokenType.UserName then
+    elseif policy.tokenType == const.UserTokenType.UserName then
       if policy.issuedTokenType then
         error("UserName policy cannot have issuedTokenType")
       elseif policy.issuerEndpointUrl then
         error("UserName policy cannot have issuerEndpointUrl")
       end
-    elseif policy.tokenType == ua.UserTokenType.IssuedToken then
-      if policy.issuedTokenType ~= ua.IssuedTokenType.Azure  and
-         policy.issuedTokenType ~= ua.IssuedTokenType.JWT    and
-         policy.issuedTokenType ~= ua.IssuedTokenType.OAuth2 and
-         policy.issuedTokenType ~= ua.IssuedTokenType.OPCUA
+    elseif policy.tokenType == const.UserTokenType.IssuedToken then
+      if policy.issuedTokenType ~= const.IssuedTokenType.Azure  and
+         policy.issuedTokenType ~= const.IssuedTokenType.JWT    and
+         policy.issuedTokenType ~= const.IssuedTokenType.OAuth2 and
+         policy.issuedTokenType ~= const.IssuedTokenType.OPCUA
       then
         error(string.format("Token policy '%s' has invalid issuedTokenType", policy.policyId))
       end
@@ -263,7 +266,7 @@ local function identityTokens(config)
       error(string.format("Policy '%s' has unknown token type", policy.policyId))
     end
 
-    if policy.securityPolicyUri and policy.securityPolicyUri ~= ua.SecurityPolicy.None then
+    if policy.securityPolicyUri and policy.securityPolicyUri ~= const.SecurityPolicy.None then
       local found = false
       for _,security in ipairs(config.securePolicies) do
         if security.securityPolicyUri == policy.securityPolicyUri then
@@ -306,7 +309,7 @@ local function serverConfig(config)
       error("invalid endpoint")
     end
 
-    local url,err = ua.parseUrl(endpoint.endpointUrl)
+    local url,err = tools.parseUrl(endpoint.endpointUrl)
     if err then
       error("Invalid endpointURL. "..err)
     end
@@ -339,19 +342,19 @@ local function serverConfig(config)
   end
 
   if config.certificate then
-    ua.crypto.loadCert(config.certificate, config.io)
+    crypto.crypto.loadCert(config.certificate, config.io)
     if not config.key then
       error("No private key")
     end
-    ua.crypto.loadKey(config.key, config.io)
+    crypto.crypto.loadKey(config.key, config.io)
   end
 
   if config.key then
     if not config.certificate then
       error("No certificate")
     end
-    ua.crypto.loadCert(config.certificate, config.io)
-    ua.crypto.loadKey(config.key, config.io)
+    crypto.crypto.loadCert(config.certificate, config.io)
+    crypto.crypto.loadKey(config.key, config.io)
   end
 
   commonConfig(config)

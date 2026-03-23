@@ -1,5 +1,6 @@
-local ua = require("opcua.api")
-local SecurityPolicy = require("opcua.types").SecurityPolicy
+local const = require("opcua.const")
+local SecurityPolicy = const.SecurityPolicy
+local crypto = require("opcua.crypto")
 local nonePolicy = require("opcua.binary.crypto.policy_none")
 local rsaPolicy = require("opcua.binary.crypto.policy_rsa")
 local fmt = string.format
@@ -11,7 +12,7 @@ local function init(config)
   assert(type(securePolicies) == 'table' and type(securePolicies[1]) == 'table', "invalid security configuration")
   local security = {}
 
-  local engine = ua.crypto_engine
+  local engine = crypto.crypto_engine
   for _,p in ipairs(securePolicies) do
     local policyParams
     local policy

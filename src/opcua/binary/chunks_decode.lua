@@ -1,12 +1,14 @@
 local compat = require("opcua.compat")
 local Q = require("opcua.binary.queue")
 local BinaryDecoder = require("opcua.binary.decoder")
-local ua = require("opcua.api")
+local tools = require("opcua.tools")
+local trace = require("opcua.trace")
+local const = require("opcua.const")
 
-local traceE = ua.trace.err
-local traceI = ua.trace.inf
-local traceD = ua.trace.dbg
-local tools = ua.Tools
+local SecurityPolicy = const.SecurityPolicy
+local traceE = trace.err
+local traceI = trace.inf
+local traceD = trace.dbg
 local fmt = string.format
 
 local HeaderSize = 8
@@ -66,7 +68,7 @@ function ch:message()
     if errOn then traceE(fmt("binary | Unknown extension object '%s'", i)) end
     error(BadDecodingError)
   end
-  msg.TypeId = extObject.dataTypeId
+  msg.TypeId = extObject.DataTypeId
   msg.Body = self.Decoder:Decode(msg.TypeId)
 
   if infOn then traceI("binary | Message decoded") end
@@ -251,7 +253,7 @@ local function new(config, security, sock, hasChunks, model)
         local secureHeader = self.binaryDecoder:asymmetricSecurityHeader()
 
         local securePolicy = self.security(secureHeader.SecurityPolicyUri)
-        if securePolicy.uri ~= ua.SecurityPolicy.None and secureHeader.ReceiverCertificateThumbprint ~= securePolicy:getLocalThumbprint() then
+        if securePolicy.uri ~= SecurityPolicy.None and secureHeader.ReceiverCertificateThumbprint ~= securePolicy:getLocalThumbprint() then
           if errOn then traceE("binary | Unknown local certificate thumbprint") end
           self:disconnect()
           error(BadSecurityChecksFailed)

@@ -1,12 +1,12 @@
-local ua = require("opcua.api")
 local compat = require("opcua.compat")
-local s = ua.StatusCode
+local s = require("opcua.status_codes")
+local trace = require("opcua.trace")
 
 local fmt = string.format
 
-local traceD = ua.trace.dbg
-local traceI = ua.trace.inf
-local traceE = ua.trace.err
+local traceD = trace.dbg
+local traceI = trace.inf
+local traceE = trace.err
 
 
 local clientSock = {}

@@ -387,7 +387,7 @@ function dec:extensionObject(decoder)
     extObject, encF = decoder:getExtObject(typeId)
   end
 
-  local dataTypeId = extObject and extObject.dataTypeId or typeId
+  local dataTypeId = extObject and extObject.DataTypeId or typeId
   local v = {
     TypeId = dataTypeId
   }

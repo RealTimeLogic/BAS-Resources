@@ -1,5 +1,9 @@
-local ua = require("opcua.api")
 local compat = require("opcua.compat")
+local tools = require("opcua.tools")
+local trace = require("opcua.trace")
+local const = require("opcua.const")
+local StatusCode = require("opcua.status_codes")
+local nodeId = require("opcua.node_id")
 local MessageEncoder = require("opcua.binary.chunks_encode")
 local MessageDecoder = require("opcua.binary.chunks_decode")
 local newClientSock = require("opcua.socket_rtl").newClientSock
@@ -7,13 +11,13 @@ local securePolicy = require("opcua.binary.crypto.policy")
 
 local fmt = string.format
 
-local traceD = ua.trace.dbg
-local traceI = ua.trace.inf
-local traceE = ua.trace.err
+local traceD = trace.dbg
+local traceI = trace.inf
+local traceE = trace.err
 
-local BadCommunicationError = ua.StatusCode.BadCommunicationError
-local BadNotConnected = ua.StatusCode.BadNotConnected
-local BadSecureChannelIdInvalid = ua.StatusCode.BadSecureChannelIdInvalid
+local BadCommunicationError = StatusCode.BadCommunicationError
+local BadNotConnected = StatusCode.BadNotConnected
+local BadSecureChannelIdInvalid = StatusCode.BadSecureChannelIdInvalid
 
 
 local C={} -- OpcUa Client
@@ -65,7 +69,7 @@ local function processConnect(err, callback)
 end
 
 function C:connectServer(endpointUrl, transportProfile, connectCallback)
-  assert(transportProfile == ua.TranportProfileUri.TcpBinary)
+  assert(transportProfile == const.TranportProfileUri.TcpBinary)
 
   local config = self.config
   local sock
@@ -80,7 +84,7 @@ function C:connectServer(endpointUrl, transportProfile, connectCallback)
 
 
   if infOn then traceI("binary | Connecting to endpoint: "..endpointUrl) end
-  local url,err = ua.parseUrl(endpointUrl)
+  local url,err = tools.parseUrl(endpointUrl)
   if err then
     return processConnect(err, connectCallback)
   end
@@ -142,7 +146,7 @@ end
 function C:coRun(endpointUrl, transportProfile, connectCallback, messageCallback)
   local infOn = self.config.logging.binary.infOn
 
-  if transportProfile ~= ua.TranportProfileUri.TcpBinary then
+  if transportProfile ~= const.TranportProfileUri.TcpBinary then
     error("Binary client with transport profile '"..tostring(transportProfile).."' not supported")
   end
 
@@ -255,7 +259,7 @@ local function new(config, sock, model)
     security = security;
     requestHandle = 0,
     requestId = 0,
-    sessionAuthToken = ua.NodeId.Null,
+    sessionAuthToken = nodeId.Null,
     sock = sock,
     model = model,
   }

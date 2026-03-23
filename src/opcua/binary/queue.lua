@@ -214,7 +214,7 @@ return {
   new = function (tailSize, hdrSize)
 
     local buf
-    if type(tailSize) == "userdata" then
+    if type(tailSize) == "userdata" or type(tailSize) == "table" then
       buf = tailSize
       hdrSize = 0
     else
