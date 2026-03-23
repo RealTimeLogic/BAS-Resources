@@ -1,9 +1,8 @@
 --[[
-$Id: core.lua 4061 2017-04-28 21:51:54Z wini $ 
 socket.core.lua: Included by socket.lua
 Provides a compatibility layer between ba.socket and Lua sockets.
 See lsocket.c for more info.
-Copyright (C) Real-Time Logic 2024
+Copyright (C) Real-Time Logic 2026
 --]]
 
 local G = _G
@@ -30,7 +29,7 @@ end
 
 local sharkssl
 function socket.secure(shark)
-   sharkssl=shark
+   sharkssl=shark or G.ba.sharkclient()
 end
 
 local tinsert, tremove, tconcat, sgmatch, sfind, fmt,type,ipairs = table.insert, table.remove, table.concat, string.gmatch, string.find, string.format,type,ipairs

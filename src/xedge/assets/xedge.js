@@ -1345,12 +1345,8 @@ function ideCfg(e) {
 		    return false;
 		};
 		function sendAuto() {
-		    let d={revcon:elems.SetCertRevcon.prop("checked")};
-		    if(!rsp.email) {
-			d.email=email;
-			d.name=name;
-		    }
-		    sendAcmeCmd("auto",(rsp)=>closeEditor(editorId),d);
+		  let d={email:email,name:name,revcon:elems.SetCertRevcon.prop("checked")};
+		  sendAcmeCmd("auto",(rsp)=>closeEditor(editorId),d);
 		};
 		if(rsp.isreg) {
 		    elems.SetCertName.attr("readonly",true);

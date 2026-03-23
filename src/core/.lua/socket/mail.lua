@@ -1,11 +1,6 @@
 --[[
-
-$Id: mail.lua 4061 2017-04-28 21:51:54Z wini $ 
-
 mail.lua : Simplified mail wrapper for socket.smtp
-
-Copyright (C) Real-Time Logic 2010
-
+Copyright (C) Real-Time Logic 2026
 --]]
 local socket = require"socket"
 local ltn12 = require"ltn12"

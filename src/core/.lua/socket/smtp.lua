@@ -1,7 +1,6 @@
 -----------------------------------------------------------------------------
 -- SMTP client support for the Lua language.
 -- LuaSocket toolkit.
--- Author: Diego Nehab
 -- Modified by RTL
 -----------------------------------------------------------------------------
 
@@ -45,7 +44,7 @@ function metat.__index:greet(domain)
 
 
 function metat.__index:upgrade(shark)
-   self.tp:upgrade(shark)
+   self.tp:upgrade(shark or base.ba.sharkclient())
 end
 
 function metat.__index:starttls(domain,shark)
@@ -269,7 +268,7 @@ send = socket.protect(function(mailt)
        s.ext = sext
     end
     mkext(ext)
-    if mailt.shark and mailt.starttls and s.ext["STARTTLS"] then
+    if mailt.starttls and s.ext["STARTTLS"] then
        ext=s:starttls(mailt.domain,mailt.shark)
        mkext(ext)
     end

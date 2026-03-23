@@ -1,8 +1,6 @@
 -----------------------------------------------------------------------------
 -- Unified SMTP/FTP subsystem
 -- LuaSocket toolkit.
--- Author: Diego Nehab
--- RCS ID: $Id: tp.lua,v 1.22 2006/03/14 09:04:15 diego Exp $
 -----------------------------------------------------------------------------
 
 -----------------------------------------------------------------------------
@@ -46,7 +44,7 @@ end
 local metat = { __index = {} }
 
 function metat.__index:upgrade(shark)
-   return self.c:upgrade(shark)
+   return self.c:upgrade(shark or base.ba.sharkclient())
 end
 
 

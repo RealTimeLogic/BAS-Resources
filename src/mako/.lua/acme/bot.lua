@@ -224,7 +224,7 @@ local function autoupdate(activate,force)
       -- Check activated, but signal that auto update already active */
       if timer then return false end
       timer=ba.timer(check)
-      timer:set(24*60*60*1000) -- once a day
+      timer:set(12*60*60*1000) -- twice a day
    else
       if not timer then return false end
       timer:cancel()
