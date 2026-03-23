@@ -232,13 +232,13 @@ local function createHttp(ext)
 		       httpOptions.proxy and "Proxy" or "HTTP",err,commandURL))
       end
       hT = http:header()
-      local status = http:status()
+      local status,err = http:status()
       if status ~= 201 then
 	 if status == 403 then rt.getnew() end
 	 if not nolog and status and hT then
 	    abp.error(fmt("HTTP status=%d: %s\nURL: %s",status,hT["X-Reason"],commandURL))
 	 end
-	 return nil,status,(hT and hT["X-Reason"] or err or fmt("HTTP status=%d",status))
+	 return nil,status,(hT and hT["X-Reason"] or err or fmt("HTTP status=%s",status or err))
       end
       return hT
    end
