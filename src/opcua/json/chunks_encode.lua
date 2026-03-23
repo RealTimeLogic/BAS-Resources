@@ -1,9 +1,9 @@
-local ua = require("opcua.api")
+local trace = require("opcua.trace")
 local Q = require("opcua.binary.queue")
 
 local fmt = string.format
-local traceD = ua.trace.dbg
-local traceI = ua.trace.inf
+local traceD = trace.dbg
+local traceI = trace.inf
 
 local ch ={}
 ch.__index = ch
@@ -63,7 +63,7 @@ function ch:message(body)
   }
 
   self.data:clear()
-  self.Encoder:extensionObject(msg)
+  self.Encoder:extensionObject(msg, self.Encoder)
 
   if dbgOn then traceD(fmt("json | encoded data: %s", self.data.Buf)) end
 

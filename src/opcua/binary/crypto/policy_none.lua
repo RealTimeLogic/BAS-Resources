@@ -1,6 +1,5 @@
-local ua = require("opcua.api") -- REMOVE, Not used in encryption
-local createCert = ua.crypto.createCert
-local createKey = ua.crypto.createKey
+local const = require("opcua.const") -- REMOVE, Not used in encryption
+local crypto = require("opcua.crypto")
 
 local BadSecurityChecksFailed = 0x80130000
 local BadSecurityPolicyRejected = 0x80550000
@@ -14,7 +13,7 @@ end
 
 local function createPolicy(_--[[modes]], _--[[params]], fsIo)
   return {
-    uri = ua.SecurityPolicy.None,
+    uri = const.SecurityPolicy.None,
 
     setLocalCertificate = function(self, certificate, key)
       if not certificate or not key then
@@ -23,16 +22,16 @@ local function createPolicy(_--[[modes]], _--[[params]], fsIo)
 
       assert(certificate)
       assert(key)
-      key = createKey(key, fsIo)
+      key = crypto.crypto.createKey(key, fsIo)
       assert(key)
 
-      local sz,t = ua.crypto.keysize(key)
+      local sz,t = crypto.crypto.keysize(key)
       -- TODO: check error is thrown
       -- if err then error(err) end
       if t ~= "RSA" or sz < 128 or sz > 256 then
         error(BadSecurityChecksFailed)
       end
-      self.certificate = createCert(certificate, fsIo)
+      self.certificate = crypto.crypto.createCert(certificate, fsIo)
       assert(self.certificate)
       self.key = key
     end,
@@ -43,7 +42,7 @@ local function createPolicy(_--[[modes]], _--[[params]], fsIo)
       end
 
       assert(remoteCert, "Remote certificate empty")
-      self.remote = createCert(remoteCert, fsIo)
+      self.remote = crypto.crypto.createCert(remoteCert, fsIo)
     end,
 
     geLocalCertLen = function(self)
@@ -54,7 +53,7 @@ local function createPolicy(_--[[modes]], _--[[params]], fsIo)
       return self.remote and #self.remote.thumbprint or 0
     end,
     genNonce = function(_, len)
-      return ua.crypto.rndbs(len or 16)
+      return crypto.crypto.rndbs(len or 16)
     end,
     getLocalThumbprint = function(self)
       return self.certificate and self.certificate.thumbprint

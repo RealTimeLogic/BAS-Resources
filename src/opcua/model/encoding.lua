@@ -1,3 +1,5 @@
+local StatusCode = require("opcua.status_codes")
+
 local tins = table.insert
 local fmt = string.format
 
@@ -91,7 +93,7 @@ local Decoder <const> = {
 -- Search function for decoding base type node
 function Encoder:encodeEnum(val, dataTypeId)
   if type(val) == "string" then
-    local definition = self.model.Nodes[dataTypeId].definition
+    local definition = self.model.Nodes[dataTypeId].Attrs.DataTypeDefinition
     for _, field in ipairs(definition) do
       if field.Name == val then
         val = field.Value
@@ -103,7 +105,7 @@ function Encoder:encodeEnum(val, dataTypeId)
 end
 
 function Encoder:encodeStructure(struct, dataTypeId)
-  local definition = self.model.Nodes[dataTypeId].definition
+  local definition = self.model.Nodes[dataTypeId].Attrs.DataTypeDefinition
   local enc = self
   if not definition then
     return enc:extensionObject(struct, self.model)
@@ -112,7 +114,7 @@ function Encoder:encodeStructure(struct, dataTypeId)
   enc:beginObject()
   for _, field in ipairs(definition) do
     local dataType = field.DataType
-    local baseId = self.model.ExtObjects[dataType].baseId
+    local baseId = self.model.Nodes[dataType].BaseId
     local encF = self[baseId]
     if not encF then
       error("No encoder for type: " .. dataType)
@@ -145,19 +147,14 @@ function Decoder:decodeStructure(dataTypeId)
   local struct = {}
   local dec = self
   dec:beginObject()
-  local definition = self.model.Nodes[dataTypeId].definition
+  local definition = self.model.Nodes[dataTypeId].Attrs.DataTypeDefinition
   if not definition or #definition == 0 then
     struct = dec:extensionObject(self.model)
   else
     for _, field in ipairs(definition) do
       if dbg then print(fmt("decoding field: %s (%s)", field.Name, field.DataType)) end
-
-      -- if field.Name == "AdditionalHeader" then
-      --   require("ldbgmon").connect({client=false})
-      -- end
-
       local dataType = field.DataType
-      local baseId = self.model.ExtObjects[dataType].baseId
+      local baseId = self.model.Nodes[dataType].BaseId
       local decF = self[baseId]
       if not decF then
         error("No decoder for type: " .. dataType)
@@ -189,9 +186,22 @@ function Decoder:decodeStructure(dataTypeId)
   return struct
 end
 
+function Decoder:decodeEnum(dataTypeId)
+  local val = self:uint32()
+  local definition = self.model.Nodes[dataTypeId].Attrs.DataTypeDefinition
+  if definition then
+    for _, field in ipairs(definition) do
+      if field.Value == val then
+        return field.Name
+      end
+    end
+  end
+  error(StatusCode.BadDecodingError)
+end
+
 
 function Encoder:Encode(nodeId, value)
-  local baseId = self.model.ExtObjects[nodeId].baseId
+  local baseId = self.model.Nodes[nodeId].BaseId
   local enc = self[baseId]
   if not enc then
     error("No encoder for node: " .. nodeId)
@@ -200,7 +210,7 @@ function Encoder:Encode(nodeId, value)
 end
 
 function Encoder:BinaryEncode(nodeId, value)
-  local baseId = self.model.ExtObjects[nodeId].baseId
+  local baseId = self.model.Nodes[nodeId].BaseId
   local enc = Encoder[baseId]
   if not enc then
     error("No Binary encoder for node: " .. nodeId)
@@ -209,11 +219,11 @@ function Encoder:BinaryEncode(nodeId, value)
 end
 
 function Encoder.JsonEncode(self, nodeId, value)
-  local extObj = self.model.ExtObjects[nodeId]
+  local extObj = self.model.Nodes[nodeId]
   if not extObj then
     error("No node: " .. nodeId)
   end
-  local baseId = extObj.baseId
+  local baseId = extObj.BaseId
   local enc = Encoder[baseId]
   if not enc then
     error("No JSON encoder for node: " .. nodeId)
@@ -222,11 +232,11 @@ function Encoder.JsonEncode(self, nodeId, value)
 end
 
 function Decoder:Decode(nodeId)
-  local extObj = self.model.ExtObjects[nodeId]
+  local extObj = self.model.Nodes[nodeId]
   if not extObj then
     error("No node: " .. nodeId)
   end
-  local dec = self[extObj.baseId]
+  local dec = self[extObj.BaseId]
   if not dec then
     error("No decoder for node: " .. nodeId)
   end
@@ -234,7 +244,7 @@ function Decoder:Decode(nodeId)
 end
 
 function Decoder:BinaryDecode(nodeId)
-  local baseId = self.ExtObjects[nodeId].baseId
+  local baseId = self.Nodes[nodeId].BaseId
   local dec = self.Decoder[baseId]
   if not dec then
     error("No Binary decoder for node: " .. nodeId)
@@ -243,7 +253,7 @@ function Decoder:BinaryDecode(nodeId)
 end
 
 function Decoder:JsonDecode(nodeId)
-  local baseId = self.ExtObjects[nodeId].baseId
+  local baseId = self.Nodes[nodeId].BaseId
   local dec = self.Decoder[baseId]
   if not dec then
     error("No JSON decoder for node: " .. nodeId)
@@ -252,14 +262,14 @@ function Decoder:JsonDecode(nodeId)
 end
 
 function Decoder:getExtObject(nodeId)
-  local extObj = self.model.ExtObjects[nodeId]
-  local encF = extObj and self[extObj.baseId]
+  local extObj = self.model.Nodes[nodeId]
+  local encF = extObj and self[extObj.BaseId]
   return extObj, encF
 end
 
 function Encoder:getExtObject(nodeId)
-  local extObj = self.model.ExtObjects[nodeId]
-  local encF = extObj and self[extObj.baseId]
+  local extObj = self.model.Nodes[nodeId]
+  local encF = extObj and self[extObj.BaseId]
   return extObj, encF
 end
 
@@ -287,7 +297,7 @@ Encoder["i=20"] = Encoder.qualifiedName
 Encoder["i=21"] = Encoder.localizedText
 Encoder["i=22"] = Encoder.encodeStructure
 Encoder["i=23"] = Encoder.dataValue
-Encoder["i=24"] = "error" -- BaseDataType
+Encoder["i=24"] = Encoder.variant
 Encoder["i=25"] = Encoder.diagnosticInfo
 Encoder["i=26"] = "error" -- Number
 Encoder["i=27"] = "error" -- Integer
@@ -318,7 +328,7 @@ Decoder["i=20"] =  Decoder.qualifiedName
 Decoder["i=21"] =  Decoder.localizedText
 Decoder["i=23"] =  Decoder.dataValue
 Decoder["i=22"] =  Decoder.decodeStructure
-Decoder["i=24"] = "error" -- BaseDataType
+Decoder["i=24"] = Decoder.variant
 Decoder["i=25"] = Decoder.diagnosticInfo
 Decoder["i=26"] = "error" -- Number
 Decoder["i=27"] = "error" -- Integer

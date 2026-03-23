@@ -1,17 +1,21 @@
-local ua = require("opcua.api")
+local tools = require("opcua.tools")
+local const = require("opcua.const")
+local trace = require("opcua.trace")
+local StatusCode = require("opcua.status_codes")
 local uadp = require("opcua.pubsub.uadp")
 local json = require("opcua.pubsub.json")
 
 local q = require("opcua.binary.queue")
 
-local traceI = ua.trace.inf
-local traceE = ua.trace.err
-local traceD = ua.trace.dbg
- local fmt = string.format
+local traceI = trace.inf
+local traceE = trace.err
+local traceD = trace.dbg
+local fmt = string.format
+local TranportProfileUri = const.TranportProfileUri
 
-local MqttJson = ua.TranportProfileUri.MqttJson
-local MqttBinary = ua.TranportProfileUri.MqttBinary
-local BadDataEncodingUnsupported = 0x80390000
+local MqttJson = TranportProfileUri.MqttJson
+local MqttBinary = TranportProfileUri.MqttBinary
+local BadDataEncodingUnsupported = StatusCode.BadDataEncodingUnsupported
 
 local C = {}
 C.__index = C
@@ -66,7 +70,7 @@ function C:onstatus(callback, type, code,status)
   end
 
   if callback then
-    callback(ua.StatusCode.BadDisconnect)
+    callback(StatusCode.BadDisconnect)
   end
 
   return false -- Deny reconnect
@@ -89,7 +93,7 @@ function C:onData(messageCallback, topic, payload, properties)
   local dbgOn = self.config.logging.binary.dbgOn
   if (dbgOn) then
     traceD(fmt("mqtt | Received: topic='%s' properties='%s' payload:", topic, ba.json.encode(properties)))
-    ua.Tools.hexPrint(payload, traceD)
+    tools.hexPrint(payload, traceD)
   end
 
   local tranportProfileUri = self.tranportProfileUri
@@ -132,7 +136,7 @@ function C:connect(endpointUrl, tranportProfileUri, connectCallback, mqttc)
   if not mqttc then
     mqttc = require("mqttc")
   end
-  local url = ua.parseUrl(endpointUrl)
+  local url = tools.parseUrl(endpointUrl)
   self.server = mqttc.create(url.host, onstatus, {port=url.port})
 end
 
@@ -150,9 +154,15 @@ function C:createPublisher()
 end
 
 function C:createDataset(fields, classId)
+  local infOn = self.config.logging.services.infOn
+  local dbgOn = self.config.logging.services.dbgOn
+  if infOn then
+    traceI(fmt("mqtt | Creating dataset with classId='%s'", classId))
+  end
+
   self:createPublisher()
 
-  classId = classId or ua.createGuid()
+  classId = classId or tools.createGuid()
   local dataSet = {
     classId = classId,
     nodeIds = {},
@@ -161,7 +171,9 @@ function C:createDataset(fields, classId)
   }
 
   local writeHook = function(nodeId, --[[attributeId]]_, value)
-    traceI(fmt("mqtt | new node value '%s': %s", nodeId, ba.json.encode(value)))
+    if dbgOn then
+      traceD(fmt("mqtt | new node value '%s': %s", nodeId, ba.json.encode(value)))
+    end
     self:setValue(classId, nodeId, value)
   end
 
@@ -174,7 +186,7 @@ function C:createDataset(fields, classId)
       index = i,
       nodeId = f.nodeId,
       name = f.name,
-      fieldId = ua.createGuid(),
+      fieldId = tools.createGuid(),
     }
 
     if f.name then
@@ -216,10 +228,16 @@ function C:publish(topic, publisherId)
   assert(type(topic) == 'string', "invalid topic")
   assert(publisherId ~= nil or type(publisherId) == 'string' or type(publisherId) == 'number', "invalid publisherId")
 
-  traceI("mqtt | sending message")
+  local infOn = self.config.logging.services.infOn
+  local dbgOn = self.config.logging.services.dbgOn
+
+  if infOn then
+    traceI("mqtt | sending message")
+  end
+
   local msg = {
     PublisherId = publisherId or self.config.applicationName,
-    MessageId = ua.createGuid()
+    MessageId = tools.createGuid()
   }
 
   local messages = {}
@@ -241,14 +259,14 @@ function C:publish(topic, publisherId)
       end
     end
 
-    if self.tranportProfileUri == MqttBinary then
-      message.Fields = payload
-    else
-      message.Payload = payload
-    end
+      if self.tranportProfileUri == MqttBinary then
+        message.Fields = payload
+      else
+        message.Payload = payload
+      end
 
-    table.insert(messages, message)
-  end
+      table.insert(messages, message)
+    end
 
   msg.Messages = messages
 
@@ -261,7 +279,9 @@ function C:publish(topic, publisherId)
     json.encode(encoder, msg)
   end
 
-  traceD(fmt("mqtt | JSON payload: %s", tostring(payload)))
+  if dbgOn then
+    traceD(fmt("mqtt | JSON payload: %s", tostring(payload)))
+  end
 
   self.server:publish(topic, tostring(payload))
 end
@@ -271,8 +291,24 @@ function C:startPublishing(topic, publisherId, timeout)
   assert(publisherId ~= nil, "invalid publisherId")
   assert(publisherId ~= nil or type(publisherId) == 'string' or type(publisherId) == 'number', "invalid publisherId")
 
+  local infOn = self.config.logging.services.infOn
+  local errOn = self.config.logging.services.errOn
+  local dbgOn = self.config.logging.services.dbgOn
+
+  if infOn then
+    traceI(fmt("mqtt | Starting publishing to topic='%s' with publisherId='%s' with timeout='%s'", topic, publisherId, timeout))
+  end
+
   self.publisher.timer = ba.timer(function()
-    self:publish(topic, publisherId)
+    if dbgOn then
+      traceD(fmt("mqtt | Publishing to topic='%s' with publisherId='%s'", topic, publisherId))
+    end
+
+    local ok, err = pcall(self.publish, self, topic, publisherId)
+    if not ok and errOn then
+        traceE(fmt("mqtt | Failed to publish: %s", err))
+    end
+
     return true
   end)
 
@@ -283,10 +319,10 @@ function C:stopPublishing()
   self.publisher.timer:cancel()
 end
 
-local function NewClient(clientConfig, uaServer)
-  if clientConfig == nil then
-    clientConfig = {
-      bufSize = 128
+local function NewClient(config, uaServer)
+  if config == nil then
+    config = {
+      bufSize = 1024
     }
   end
 
@@ -299,17 +335,23 @@ local function NewClient(clientConfig, uaServer)
   end
 
   local uaConfig = require("opcua.config")
-  local err = uaConfig.client(clientConfig)
+  local err
+  if uaServer then
+    err = uaConfig.server(config)
+  else
+    err = uaConfig.client(config)
+  end
+
   if err ~= nil then
     error("Configuration error: "..err)
   end
 
   if model == nil then
-    model = require("opcua.model.import").getBaseModel(clientConfig)
+    model = require("opcua.model.import").getBaseModel(config)
   end
 
   local c = {
-    config = clientConfig,
+    config = config,
     uaServer = uaServer,
     model = model
   }

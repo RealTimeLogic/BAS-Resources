@@ -1,20 +1,24 @@
-local ua = require("opcua.api")
 local compat = require("opcua.compat")
+local tools = require("opcua.tools")
+local trace = require("opcua.trace")
+local const = require("opcua.const")
 local BinaryMessageEncoder = require("opcua.binary.chunks_encode")
 local BinaryMessageDecoder = require("opcua.binary.chunks_decode")
 local JsonMessageEncoder = require("opcua.json.chunks_encode")
 local JsonMessageDecoder = require("opcua.json.chunks_decode")
 local newClientSock = require("opcua.socket_rtl").newClientSock
 local securePolicy = require("opcua.binary.crypto.policy")
+local StatusCode = require("opcua.status_codes")
+local NodeId = require("opcua.node_id")
 
 local fmt = string.format
 
-local traceD = ua.trace.dbg
-local traceI = ua.trace.inf
-local traceE = ua.trace.err
+local traceD = trace.dbg
+local traceI = trace.inf
+local traceE = trace.err
 
-local BadCommunicationError = ua.StatusCode.BadCommunicationError
-local BadNotConnected = ua.StatusCode.BadNotConnected
+local BadCommunicationError = StatusCode.BadCommunicationError
+local BadNotConnected = StatusCode.BadNotConnected
 
 
 local C={} -- OpcUa Client
@@ -33,10 +37,10 @@ local function createSocket(url, transportProfile, config)
   local dbgOn = config.logging.socket.dbgOn
 
   local mimetype
-  if transportProfile == ua.TranportProfileUri.HttpsBinary then
+  if transportProfile == const.TranportProfileUri.HttpsBinary then
     mimetype = "application/opcua+uabinary"
     -- mimetype = "application/octet-stream"
-  elseif transportProfile == ua.TranportProfileUri.HttpsJson then
+  elseif transportProfile == const.TranportProfileUri.HttpsJson then
     mimetype = "application/opcua+uajson"
     -- mimetype = "application/json"
   else
@@ -55,7 +59,7 @@ local function createSocket(url, transportProfile, config)
       header = {
         ["User-Agent"] = "mako",
         ["Content-Type"] = mimetype,
-        ["OPCUA-SecurityPolicy"] = ua.SecurityPolicy.None
+        ["OPCUA-SecurityPolicy"] = const.SecurityPolicy.None
       },
       trusted = false
     },
@@ -63,7 +67,7 @@ local function createSocket(url, transportProfile, config)
     write = function(self, data)
       if infOn then traceI(fmt("http.client | sending %d bytes", #data)) end
 
-      if dbgOn then ua.Tools.printTable("http.client | header", self.op.header, traceD) end
+      if dbgOn then tools.printTable("http.client | header", self.op.header, traceD) end
 
       self.op.size = #data
       http:request(self.op)
@@ -98,7 +102,7 @@ local function createSocket(url, transportProfile, config)
           if errOn then traceE(fmt("http.client | header error: %s", err)) end
           error(BadCommunicationError)
         end
-        ua.Tools.printTable("http.client | headers", headers, traceD)
+        tools.printTable("http.client | headers", headers, traceD)
       end
       local data
       data,err= self.http:read('a')
@@ -136,7 +140,7 @@ function C:connectServer(endpointUrl, transportProfile, connectCallback)
   local sock
 
   if infOn then traceI("binary | Connecting to endpoint: "..endpointUrl) end
-  local url,err = ua.parseUrl(endpointUrl)
+  local url,err = tools.parseUrl(endpointUrl)
   if err then
     return processConnect(err, connectCallback)
   end
@@ -175,10 +179,10 @@ function C:connectServer(endpointUrl, transportProfile, connectCallback)
 
   if self.dec == nil then
     local hasChunks = false
-    if transportProfile == ua.TranportProfileUri.HttpsBinary then
+    if transportProfile == const.TranportProfileUri.HttpsBinary then
       self.enc = BinaryMessageEncoder.new(config, self.security, self.sock, hasChunks, self.model)
       self.dec = BinaryMessageDecoder.new(config, self.security, self.sock, hasChunks, self.model)
-    elseif transportProfile == ua.TranportProfileUri.HttpsJson then
+    elseif transportProfile == const.TranportProfileUri.HttpsJson then
       self.enc = JsonMessageEncoder.new(config, self.security, self.sock, hasChunks, self.model)
       self.dec = JsonMessageDecoder.new(config, self.security, self.sock, hasChunks, self.model)
     else
@@ -187,13 +191,13 @@ function C:connectServer(endpointUrl, transportProfile, connectCallback)
 
     self.enc:setChannelId(0)
     self.enc:setTokenId(0)
-    self:setupPolicy(ua.SecurityPolicy.None)
-    self:setSecureMode(ua.MessageSecurityMode.None)
+    self:setupPolicy(const.SecurityPolicy.None)
+    self:setSecureMode(const.MessageSecurityMode.None)
 
-    self.enc:setupPolicy(ua.SecurityPolicy.None)
-    self.dec:setupPolicy(ua.SecurityPolicy.None)
-    self.enc:setSecureMode(ua.MessageSecurityMode.None)
-    self.dec:setSecureMode(ua.MessageSecurityMode.None)
+    self.enc:setupPolicy(const.SecurityPolicy.None)
+    self.dec:setupPolicy(const.SecurityPolicy.None)
+    self.enc:setSecureMode(const.MessageSecurityMode.None)
+    self.dec:setSecureMode(const.MessageSecurityMode.None)
   end
 
   return processConnect(nil, connectCallback)
@@ -307,7 +311,7 @@ local function new(config, sock, model)
     security = security;
     requestHandle = 0,
     requestId = 0,
-    sessionAuthToken = ua.NodeId.Null,
+    sessionAuthToken = NodeId.Null,
     sock = sock,
     model = model
   }

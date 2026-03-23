@@ -4,14 +4,21 @@ local JsonMessageEncoder = require("opcua.json.chunks_encode")
 local JsonMessageDecoder = require("opcua.json.chunks_decode")
 local securePolicy = require("opcua.binary.crypto.policy")
 local Msg = require("opcua.binary.message_id")
-local ua = require("opcua.api")
 local compat = require("opcua.compat")
+local tools = require("opcua.tools")
+local trace = require("opcua.trace")
+local const = require("opcua.const")
+local StatusCode = require("opcua.status_codes")
 
-local s = ua.StatusCode
 local fmt = string.format
-local traceD = ua.trace.dbg
-local traceE = ua.trace.err
-local traceI = ua.trace.inf
+local traceD = trace.dbg
+local traceE = trace.err
+local traceI = trace.inf
+
+local Good = StatusCode.Good
+local BadNotImplemented = StatusCode.BadNotImplemented
+local BadCommunicationError = StatusCode.BadCommunicationError
+local BadDecodingError = StatusCode.BadDecodingError
 
 
 local S = {}
@@ -34,8 +41,8 @@ function S:processData(securityPolicyUri)
     local channel = {
       getLocalPolicy = function()
         local policy = self.security(securityPolicyUri)
-        if securityPolicyUri ~= ua.SecurityPolicy.None then
-          policy:setSecureMode(ua.MessageSecurityMode.Sign)
+        if securityPolicyUri ~= const.SecurityPolicy.None then
+          policy:setSecureMode(const.MessageSecurityMode.Sign)
         end
         return policy
       end
@@ -60,7 +67,7 @@ function S:processData(securityPolicyUri)
   else
     -- TODO NEED REMOVE EXTRA DATA OF NOT IMPLEMENTED REQUEST BODY
     if errOn then traceE(fmt("%s Invalid message ID: %d", self.logId, i)) end
-    self:responseServiceFault(msg, s.BadNotImplemented)
+    self:responseServiceFault(msg, BadNotImplemented)
   end
 end
 
@@ -78,7 +85,7 @@ function S:processRequest(channel, msg, type, service, reqName)
   if suc then
     if dbgOn then traceD(fmt("%s Encoding %s response", self.logId, reqName)) end
     local response = self.encoder:createResponse(type, self:fillResponseParams(msg, 0), result)
-    if dbgOn then ua.Tools.printTable(fmt("%s | response", self.logId), response, traceD) end
+    if dbgOn then tools.printTable(fmt("%s | response", self.logId), response, traceD) end
 
     self.encoder:message(response)
     return result
@@ -94,7 +101,7 @@ function S.fillResponseParams(_, msg, statusCode)
     RequestId = msg.RequestId,
     RequestHandle = msg.Body.RequestHeader.RequestHandle,
     RequestCreatedAt = compat.gettime(),
-    ServiceResult = statusCode or s.Good
+    ServiceResult = statusCode or Good
   }
 end
 
@@ -116,7 +123,7 @@ local function createSocket(config)
       local data, err = self.readData()
       if err then
         if errOn then traceE(fmt("http.server | Read error %s ", err)) end
-        error(s.BadCommunicationError)
+        error(BadCommunicationError)
       end
       if dbgOn then
         traceD(fmt("http.server | Received %d bytes", #data))
@@ -152,7 +159,7 @@ function S:processHttp(request, response)
   local method = request:method()
   if dbgOn then
     traceD(fmt("%s HTTP request Uri='%s' Method='%s' Content-Type='%s' OPCUA-SecurityPolicy='%s'", self.logId, request:url(), method, encoding, securityPolicyUri))
-    ua.Tools.printTable(fmt("%s | headers", self.logId), request:header(), traceD)
+    tools.printTable(fmt("%s | headers", self.logId), request:header(), traceD)
   end
 
   response:setheader("Access-Control-Allow-Origin", "*")
@@ -183,12 +190,12 @@ function S:processHttp(request, response)
     -- CreateSession/Activate session calls: there are signatures
     -- of nonces calculated to prove certificate owing.
     local enc = BinaryMessageEncoder.new(self.config, self.security, sock, hasChunks, self.model)
-    enc:setupPolicy(ua.SecurityPolicy.None)
-    enc:setSecureMode(ua.MessageSecurityMode.None)
+    enc:setupPolicy(const.SecurityPolicy.None)
+    enc:setSecureMode(const.MessageSecurityMode.None)
 
     local dec = BinaryMessageDecoder.new(self.config, self.security, sock, hasChunks, self.model)
-    dec:setupPolicy(ua.SecurityPolicy.None)
-    dec:setSecureMode(ua.MessageSecurityMode.None)
+    dec:setupPolicy(const.SecurityPolicy.None)
+    dec:setSecureMode(const.MessageSecurityMode.None)
     self.encoder = enc
     self.decoder = dec
   elseif encoding == "application/opcua+uajson" then
@@ -204,7 +211,7 @@ function S:processHttp(request, response)
           break
         end
       end
-      error(s.BadDecodingError)
+      error(BadDecodingError)
     end
     self.encoder = JsonMessageEncoder.new(self.config, self.security, sock, hasChunks, self.model)
     self.decoder = JsonMessageDecoder.new(self.config, self.security, sock, hasChunks, self.model)
@@ -242,7 +249,7 @@ local function newConnection(config, services, model)
   local securePolicies = {}
   local nonePolicyEnabled = false
   for _,p in ipairs(config.securePolicies) do
-    if p.securityPolicyUri == ua.SecurityPolicy.None then
+    if p.securityPolicyUri == const.SecurityPolicy.None then
       nonePolicyEnabled = true
     end
     table.insert(securePolicies, p)
@@ -251,8 +258,8 @@ local function newConnection(config, services, model)
   if nonePolicyEnabled == false then
     table.insert(securePolicies,
       {
-        securityPolicyUri = ua.SecurityPolicy.None,
-        securityMode = {ua.MessageSecurityMode.None}
+        securityPolicyUri = const.SecurityPolicy.None,
+        securityMode = {const.MessageSecurityMode.None}
       }
     )
   end

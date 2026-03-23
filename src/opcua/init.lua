@@ -1,5 +1,5 @@
-local types = require("opcua.types")
-local tools = require("opcua.binary.tools")
+local tools = require("opcua.tools")
+local const = require("opcua.const")
 
 local function writeFile(io, filePath, content)
    local file,e,res
@@ -42,13 +42,12 @@ local function genCertificate(certType, hostname, applicationUri)
 
   local hashid = "sha256"
   local basic128rsa15Csr = ba.create.csr(basic128rsa15Key, basic128rsa15Dn, alternativeNames, certtype, keyusage, hashid)
-  local validFrom=ba.datetime("NOW")
-  validFrom = validFrom - {days=1}
-  validFrom = validFrom:date(true)
 
-  local validTo=ba.datetime("NOW")
-  validTo = validTo + {days=3650}
-  validTo = validTo:date(true)
+  local validFrom=os.date"*t"
+  validFrom.day = validFrom.day - 1
+
+  local validTo=os.date"*t"
+  validTo.year = validTo.year + 10
   local serial = 123456
 
   local basic128rsa15Cert = ba.create.certificate(basic128rsa15Csr, basic128rsa15Key, validFrom, validTo, serial)
@@ -82,11 +81,11 @@ local function initialize(config, certType, hostname, applicationName, applicati
    config.applicationUri = applicationUri
    config.securePolicies ={
      { -- 1
-       securityPolicyUri = types.SecurityPolicy.None,
+       securityPolicyUri = const.SecurityPolicy.None,
      },
      { -- #2
-        securityPolicyUri = types.SecurityPolicy.Basic128Rsa15,
-        securityMode = types.MessageSecurityMode.SignAndEncrypt,
+        securityPolicyUri = const.SecurityPolicy.Basic128Rsa15,
+        securityMode = const.MessageSecurityMode.SignAndEncrypt,
         certificate = basic128rsa15CrtPath,
         key = basic128rsa15KeyPath,
      }

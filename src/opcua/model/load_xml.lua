@@ -1,12 +1,15 @@
-local types = require("opcua.types")
-local tools = require("opcua.binary.tools")
+local const = require("opcua.const")
+local tools = require("opcua.tools")
 local nodeId = require("opcua.node_id")
+local compat = require("opcua.compat")
 
-local AttributeId = types.AttributeId
-local NodeClass = types.NodeClass
+local AttributeId = const.AttributeId
+local NodeClass = const.NodeClass
+local VariantType = const.VariantType
 
 local tins = table.insert
 local strmatch = string.match
+local fmt = string.format
 
 local DefaultAliases <const> = {
   ["HasComponent"] = "i=47",
@@ -87,46 +90,17 @@ function NilParser.createParser (--[[self, tagname]])
   return nil, NilParser
 end
 
-local StringElementParser = {
-  text = function (self, text)
-    self.text = trim_spaces(text)
-  end,
-  done = function (self)
-    tins(self.array, self.text)
-  end,
-}
-local function newStringElementParser(array)
-  local parser = { array = array}
-  setmetatable(parser, {__index = StringElementParser})
-  return parser
-end
---[[
-local StringAttributeParser = {
-  text = function (self, text)
-    local value = trim_spaces(text)
-    local node = self.Model.Nodes[self.NodeId]
-    if node.attrs[self.AttrId] and node.attrs[self.AttrId] ~= value then
-      return "Error: Attribute " .. self.AttrId .. " already exists"
-    end
-    node.attrs[self.AttrId] = value
-  end,
-}
-
-local function newStringAttributeParser(nodeId, model, attrId)
-  local parser = { NodeId = nodeId, Model=model, AttrId = attrId}
-  setmetatable(parser, {__index = StringAttributeParser})
-  return parser
-end
-]]
-
 local LocalizedTextAttributeParser = {
   text = function (self, text)
-    local value = trim_spaces(text)
+    self.Text = self.Text and self.Text .. text or text
+  end,
+  done = function (self)
+    local value = trim_spaces(self.Text or "")
     local node = self.Model.Nodes[self.NodeId]
-    if node.attrs[self.AttrId] and node.attrs[self.AttrId] ~= value then
+    if node.Attrs[self.AttrId] and node.Attrs[self.AttrId].Text ~= value then
       return "Error: Attribute " .. self.AttrId .. " already exists"
     end
-    node.attrs[self.AttrId] = {Text=value}
+    node.Attrs[self.AttrId] = {Text=value}
   end,
 }
 
@@ -141,10 +115,10 @@ local QualifiedNameAttributeParser = {
   text = function (self, text)
     local value = trim_spaces(text)
     local node = self.Model.Nodes[self.NodeId]
-    if node.attrs[self.AttrId] and node.attrs[self.AttrId] ~= value then
+    if node.Attrs[self.AttrId] and node.Attrs[self.AttrId] ~= value then
       return "Error: Attribute " .. self.AttrId .. " already exists"
     end
-    node.attrs[self.AttrId] = {Name=value}
+    node.Attrs[self.AttrId] = {Name=value}
   end,
 }
 
@@ -166,15 +140,16 @@ local AliasParser = {
     self.Alias = attribs.Alias
   end,
   text = function(self, text)
-    self.Value = trim_spaces(text)
+    self.Value = self.Value and self.Value .. text or text
   end,
   done = function(self)
+    local value = trim_spaces(self.Value or "")
     local aliases = self.model.Aliases
-    if aliases[self.Alias] and aliases[self.Alias] ~= self.Value then
+    if aliases[self.Alias] and aliases[self.Alias] ~= value then
       return "Alias " .. self.Alias .. " already exists with the value " .. aliases[self.Alias]
     end
 
-    aliases[self.Alias] = self.Value
+    aliases[self.Alias] = value
     self.Alias = nil
     self.Value = nil
   end,
@@ -248,7 +223,7 @@ local ModelParser = {
     self.Model.XmlSchemaUri = attribs.XmlSchemaUri
   end,
   done = function(self)
-    tins(self.Models, self.Model)
+    self.Models[self.Model.ModelUri] =  self.Model
   end
 }
 
@@ -285,20 +260,49 @@ end
 -- NamespaceUris
 -------------------------------------------------------------
 
-local NamespaceUriesParser = {
+local NamespaceUriParser = {
+  text = function (self, text)
+    self.Uri = trim_spaces(text)
+  end,
+  done = function (self)
+    if self.Uri == nil or self.Uri == "" then
+      error("Invalid namespace URI")
+    end
+    local index = self.UaNodeset.NsIndex + 1
+    self.UaNodeset.NsIndex = index
+
+    local namespace = {
+      Index = index,
+      NewIndex = index,
+      NamespaceUri = self.Uri,
+    }
+    self.UaNodeset.Namespaces[index] = namespace
+    self.UaNodeset.Namespaces[self.Uri] = namespace
+  end,
+}
+local function newNamespaceUriParser(uaNodeset)
+  local parser = {
+    UaNodeset = uaNodeset
+  }
+  setmetatable(parser, {__index = NamespaceUriParser})
+  return parser
+end
+
+
+local NamespacesParser = {
   createParser = function (self, tagname)
     if tagname == "Uri" then
-      return nil, newStringElementParser(self.NamespaceUris)
+      return nil, newNamespaceUriParser(self.UaNodeset)
     end
   end,
 }
 
-local function newNamespaceUriesParser(namespaceUris)
+local function newNamespacesParser(uaNodeset)
   local parser = {
-    NamespaceUris = namespaceUris
+    UaNodeset = uaNodeset
   }
 
-  setmetatable(parser, {__index = NamespaceUriesParser})
+  setmetatable(parser, {__index = NamespacesParser})
   return parser
 end
 
@@ -320,26 +324,26 @@ local FieldParser = {
 
     local field = {
       Name = attribs.Name,
-      DataType = GetDatatype(attribs.DataType,self.Model.Aliases),
+      DataType = GetDatatype(attribs.DataType or "Variant",self.Model.Aliases),
       Value = tonumber(attribs.Value),
       ValueRank = tonumber(attribs.ValueRank)
     }
 
     -- Fields of current DataType. Full definition includes
-    -- fields also from parent types. Because of this full
+    -- fields also from parent ua. Because of this full
     -- definition will be composed later
     local node = self.Model.Nodes[self.NodeId]
-    if node.fields == nil then
-      node.fields = {}
+    if node.Attrs[AttributeId.DataTypeDefinition] == nil then
+      node.Attrs[AttributeId.DataTypeDefinition] = {}
     end
 
-    for _,f in ipairs(node.fields) do
+    for _,f in ipairs(node.Attrs[AttributeId.DataTypeDefinition]) do
       if f.Name == field.Name then
         return
       end
     end
 
-    tins(node.fields, field)
+    tins(node.Attrs[AttributeId.DataTypeDefinition], field)
   end,
 }
 
@@ -391,21 +395,15 @@ local ReferenceParser = {
     self.IsForward = attribs.IsForward == "true" or attribs.IsForward == nil
   end,
   text = function(self, text)
-    self.TargetId = trim_spaces(text)
+    self.TargetId = self.TargetId and self.TargetId .. text or text
   end,
   done = function(self)
+    local targetId = trim_spaces(self.TargetId or "")
     local node = self.Model.Nodes[self.NodeId]
     if not node then
       return "Node " .. self.NodeId .. " not found"
     end
-    addReference(node.refs, {target=self.TargetId, type=self.RefType, isForward=self.IsForward})
-
-    local targetNode = self.Model.Nodes[self.TargetId]
-    if targetNode == nil then
-      targetNode = {attrs={}, refs={}}
-      self.Model.Nodes[self.TargetId] = targetNode
-    end
-    addReference(targetNode.refs, {target=self.NodeId, type=self.RefType, isForward=(self.IsForward == false)})
+    addReference(node.Refs, {target=targetId, type=self.RefType, isForward=self.IsForward})
 
     self.RefType = nil
     self.TargetId = nil
@@ -461,11 +459,6 @@ local function toboolean(val)
   return val == "true"
 end
 
-local function todatetime(str)
-  local dt,ns = ba.datetime(str):ticks()
-  return dt+ns/1000000000
-end
-
 local function PutValue(variant, vartype, val, isArray)
   variant.Type = vartype
   if isArray then
@@ -481,8 +474,15 @@ end
 
 local StringValueParser = {
   text = function (self, text)
-    PutValue(self.Value, types.VariantType.String, trim_spaces(text), self.IsArray)
+    self.Text = self.Text and self.Text .. text or text
   end,
+  done = function (self)
+    if not self.Text and self.Value.Type == nil then
+      PutValue(self.Value, VariantType.String, nil, self.IsArray)
+    elseif self.Text then
+      PutValue(self.Value, VariantType.String, trim_spaces(self.Text), self.IsArray)
+    end
+  end
 }
 
 local function newStringValueParser(value, isarray)
@@ -500,8 +500,8 @@ local ByteStringValueParser = {
     self.Text = self.Text..str
   end,
   done = function (self)
-    local b64 = ba.b64decode(self.Text)
-    PutValue(self.Value, types.VariantType.ByteString, b64, self.IsArray)
+    local b64 = compat.b64decode(self.Text)
+    PutValue(self.Value, VariantType.ByteString, b64, self.IsArray)
   end,
 }
 
@@ -517,9 +517,14 @@ end
 
 local NumberValueParser = {
   text = function (self, text)
-    local str = trim_spaces(text)
-    local val = self.Conv(str)
-    PutValue(self.Value, self.Type, val, self.IsArray)
+    self.Text = self.Text and self.Text .. text or text
+  end,
+  done = function(self)
+    if self.Text then
+      local str = trim_spaces(self.Text)
+      local val = self.Conv(str)
+      PutValue(self.Value, self.Type, val, self.IsArray)
+    end
   end,
 }
 
@@ -545,7 +550,7 @@ local LocalizedTextValueParser = {
     end
   end,
   done = function (self)
-    PutValue(self.Value, types.VariantType.LocalizedText, {Text=self.TextValue.Value, Locale=self.LocaleValue.Value}, self.IsArray)
+    PutValue(self.Value, VariantType.LocalizedText, {Text=self.TextValue.Value, Locale=self.LocaleValue.Value}, self.IsArray)
   end,
 }
 
@@ -563,7 +568,7 @@ end
 local QualifiedNameValueParser = {
   createParser = function (self, tagname)
     if tagname == "NamespaceIndex" then
-      return nil, newNumberValueParser(self.NamespaceIndex, types.VariantType.UInt16, false, tonumber)
+      return nil, newNumberValueParser(self.NamespaceIndex, VariantType.UInt16, false, tonumber)
     elseif tagname == "Name" then
       return nil, newStringValueParser(self.Name, false)
     else
@@ -571,7 +576,7 @@ local QualifiedNameValueParser = {
     end
   end,
   done = function (self)
-    PutValue(self.Value, types.VariantType.QualifiedName, {Name=self.Name.Value, ns=self.NamespaceIndex.Value}, self.IsArray)
+    PutValue(self.Value, VariantType.QualifiedName, {Name=self.Name.Value, ns=self.NamespaceIndex.Value}, self.IsArray)
   end,
 }
 
@@ -595,7 +600,7 @@ local NodeIdValueParser = {
     end
   end,
   done = function (self)
-    PutValue(self.Value, types.VariantType.NodeId, self.NodeId.Value, self.IsArray)
+    PutValue(self.Value, VariantType.NodeId, self.NodeId.Value, self.IsArray)
   end,
 }
 
@@ -616,31 +621,31 @@ local function newScalarParser(value, tagname, isarray)
   elseif tagname == "ByteString" then
     return newByteStringValueParser(value, isarray)
   elseif tagname == "DateTime" then
-    return newNumberValueParser(value, types.VariantType.DateTime, isarray, todatetime)
+    return newNumberValueParser(value, VariantType.DateTime, isarray, compat.to_timestamp)
   elseif tagname == "Boolean" then
-    return newNumberValueParser(value, types.VariantType.Boolean, isarray, toboolean)
+    return newNumberValueParser(value, VariantType.Boolean, isarray, toboolean)
   elseif tagname == "Guid" then
-    return newNumberValueParser(value, types.VariantType.Guid, isarray, toguid)
+    return newNumberValueParser(value, VariantType.Guid, isarray, toguid)
   elseif tagname == "Byte" then
-    return newNumberValueParser(value, types.VariantType.Byte, isarray, tonumber)
+    return newNumberValueParser(value, VariantType.Byte, isarray, tonumber)
   elseif tagname == "SByte" then
-    return newNumberValueParser(value, types.VariantType.SByte, isarray, tonumber)
+    return newNumberValueParser(value, VariantType.SByte, isarray, tonumber)
   elseif tagname == "Int16" then
-    return newNumberValueParser(value, types.VariantType.Int16, isarray, tonumber)
+    return newNumberValueParser(value, VariantType.Int16, isarray, tonumber)
   elseif tagname == "UInt16" then
-    return newNumberValueParser(value, types.VariantType.UInt16, isarray, tonumber)
+    return newNumberValueParser(value, VariantType.UInt16, isarray, tonumber)
   elseif tagname == "UInt32" then
-    return newNumberValueParser(value, types.VariantType.UInt32, isarray, tonumber)
+    return newNumberValueParser(value, VariantType.UInt32, isarray, tonumber)
   elseif tagname == "Int32" then
-    return newNumberValueParser(value, types.VariantType.Int32, isarray, tonumber)
+    return newNumberValueParser(value, VariantType.Int32, isarray, tonumber)
   elseif tagname == "Int64" then
-    return newNumberValueParser(value, types.VariantType.Int64, isarray, tonumber)
+    return newNumberValueParser(value, VariantType.Int64, isarray, tonumber)
   elseif tagname == "UInt64" then
-    return newNumberValueParser(value, types.VariantType.UInt64, isarray, tonumber)
+    return newNumberValueParser(value, VariantType.UInt64, isarray, tonumber)
   elseif tagname == "Float" then
-    return newNumberValueParser(value, types.VariantType.Float, isarray, tonumber)
+    return newNumberValueParser(value, VariantType.Float, isarray, tonumber)
   elseif tagname == "Double" then
-    return newNumberValueParser(value, types.VariantType.Double, isarray, tonumber)
+    return newNumberValueParser(value, VariantType.Double, isarray, tonumber)
   elseif tagname == "LocalizedText" then
     return newLocalizedTextValueParser(value, isarray)
   elseif tagname == "QualifiedName" then
@@ -648,9 +653,13 @@ local function newScalarParser(value, tagname, isarray)
   elseif tagname == "NodeId" then
     return newNodeIdValueParser(value, isarray)
   elseif tagname == "ExtensionObject" then
+    value.Type=VariantType.ExtensionObject
+    value.Value = {TypeId="i=0"}
     return NilParser
     -- return newNumberValueParser(value, "Double", isarray, tonumber)
   elseif tagname == "ListOfExtensionObject" then
+    value.Type=VariantType.ExtensionObject
+    value.Value = {TypeId="i=0"}
     return NilParser
   else
     error("Unknown scalar type: " .. tagname)
@@ -675,14 +684,14 @@ end
 local ValueAttributeParser = {
   createParser = function (self, tagname)
     if string.find(tagname, "ListOf") == 1 then
-      return nil, newListValueParser(self.Value, tagname)
+      return nil, newListValueParser(self.Value)
     else
       return nil, newScalarParser(self.Value, tagname)
     end
 end,
   done = function (self)
     local node = self.Model.Nodes[self.NodeId]
-    node.attrs[AttributeId.Value] = self.Value
+    node.Attrs[AttributeId.Value] = self.Value
   end,
 }
 
@@ -700,6 +709,21 @@ end
 -- NodeClass
 -------------------------------------------------------------
 
+local function parseBrowseName(name)
+  local ns
+  if name:find(":", 1, true) then
+    ns, name = name:match("^([0-9]+):(.*)$")
+    if not ns or not name then
+      error("Invalid browse name: " .. name)
+    end
+    ns = tonumber(ns)
+    if ns == 0 then
+      ns = nil
+    end
+  end
+  return {Name = name, ns = ns}
+end
+
 local NodeParser = {
   createParser = function(self, tagname)
     if tagname == "DisplayName" then
@@ -716,64 +740,65 @@ local NodeParser = {
       return nil, newDefinitionParser(self.NodeId, self.Model);
     end
   end,
+
   attribs = function(self, attribs)
     self.NodeId = attribs.NodeId
     local node = self.Model.Nodes[attribs.NodeId]
     if not node then
-      node = {refs = {}, attrs = {}}
+      node = {Refs = {}, Attrs = {}}
       self.Model.Nodes[attribs.NodeId] = node
     end
 
-    node.attrs[AttributeId.NodeId] = attribs.NodeId
-    node.attrs[AttributeId.NodeClass] = self.NodeClass
-    node.attrs[AttributeId.BrowseName] = {Name=attribs.BrowseName}
+    node.Attrs[AttributeId.NodeId] = attribs.NodeId
+    node.Attrs[AttributeId.NodeClass] = self.NodeClass
+    node.Attrs[AttributeId.BrowseName] = parseBrowseName(attribs.BrowseName)
 
     local isAbstract = false
     if attribs.IsAbstract then
       isAbstract = attribs.IsAbstract == "true" or false
     end
     if self.NodeClass == NodeClass.ObjectType then
-      node.attrs[AttributeId.IsAbstract] = isAbstract
+      node.Attrs[AttributeId.IsAbstract] = isAbstract
     elseif self.NodeClass == NodeClass.DataType then
-      node.attrs[AttributeId.IsAbstract] = isAbstract
+      node.Attrs[AttributeId.IsAbstract] = isAbstract
     elseif self.NodeClass == NodeClass.VariableType then
-      node.attrs[AttributeId.IsAbstract] = isAbstract
-      node.attrs[AttributeId.Rank] = tonumber(attribs.ValueRank)
-      node.attrs[AttributeId.DataType] = GetDatatype(attribs.DataType, self.Model.Aliases)
+      node.Attrs[AttributeId.IsAbstract] = isAbstract
+      node.Attrs[AttributeId.Rank] = tonumber(attribs.ValueRank)
+      node.Attrs[AttributeId.DataType] = GetDatatype(attribs.DataType, self.Model.Aliases)
       if attribs.ArrayDimensions then
         local dimensions = {}
         string.gsub(attribs.ArrayDimensions, '[^,]+', function(x) tins(dimensions, tonumber(x)) end)
-        node.attrs[AttributeId.ArrayDimensions] = dimensions
+        node.Attrs[AttributeId.ArrayDimensions] = dimensions
       end
-      node.attrs[AttributeId.AccessLevel] = 0
-      node.attrs[AttributeId.UserAccessLevel] = 0
-      node.attrs[AttributeId.Historizing] = false
+      node.Attrs[AttributeId.AccessLevel] = 0
+      node.Attrs[AttributeId.UserAccessLevel] = 0
+      node.Attrs[AttributeId.Historizing] = false
       if attribs.MinimumSamplingInterval then
-        node.attrs[AttributeId.MinimumSamplingInterval] = tonumber(attribs.MinimumSamplingInterval)
+        node.Attrs[AttributeId.MinimumSamplingInterval] = tonumber(attribs.MinimumSamplingInterval)
       end
 
     elseif self.NodeClass == NodeClass.Variable then
-      node.attrs[AttributeId.Rank] = tonumber(attribs.ValueRank)
-      node.attrs[AttributeId.DataType] = GetDatatype(attribs.DataType, self.Model.Aliases)
+      node.Attrs[AttributeId.Rank] = tonumber(attribs.ValueRank)
+      node.Attrs[AttributeId.DataType] = GetDatatype(attribs.DataType, self.Model.Aliases)
       if attribs.ArrayDimensions then
         local dimensions = {}
         string.gsub(attribs.ArrayDimensions, '[^,]+', function(x) tins(dimensions, tonumber(x)) end)
-        node.attrs[AttributeId.ArrayDimensions] = dimensions
+        node.Attrs[AttributeId.ArrayDimensions] = dimensions
       end
-      node.attrs[AttributeId.AccessLevel] = 0
-      node.attrs[AttributeId.UserAccessLevel] = 0
-      node.attrs[AttributeId.Historizing] = false
+      node.Attrs[AttributeId.AccessLevel] = 0
+      node.Attrs[AttributeId.UserAccessLevel] = 0
+      node.Attrs[AttributeId.Historizing] = false
       if attribs.MinimumSamplingInterval then
-        node.attrs[AttributeId.MinimumSamplingInterval] = tonumber(attribs.MinimumSamplingInterval)
+        node.Attrs[AttributeId.MinimumSamplingInterval] = tonumber(attribs.MinimumSamplingInterval)
       end
     elseif self.NodeClass == NodeClass.Object then
-      node.attrs[AttributeId.EventNotifier] = 0
+      node.Attrs[AttributeId.EventNotifier] = 0
     elseif self.NodeClass == NodeClass.ReferenceType then
-      node.attrs[AttributeId.IsAbstract] = isAbstract
-      node.attrs[AttributeId.Symmetric] = attribs.Symmetric == "true"
+      node.Attrs[AttributeId.IsAbstract] = isAbstract
+      node.Attrs[AttributeId.Symmetric] = attribs.Symmetric == "true"
     elseif self.NodeClass == NodeClass.Method then
-      node.attrs[AttributeId.Executable] = true
-      node.attrs[AttributeId.UserExecutable] = true
+      node.Attrs[AttributeId.Executable] = true
+      node.Attrs[AttributeId.UserExecutable] = true
     end
   end,
   done = function()
@@ -800,7 +825,7 @@ local UANodeSetParser = {
     if tagname == "Models" then
       return nil, newModelsParser(self.UANodeset.Models);
     elseif tagname == "NamespaceUris" then
-      return nil, newNamespaceUriesParser(self.UANodeset.NamespaceUris);
+      return nil, newNamespacesParser(self.UANodeset);
     elseif tagname == "Aliases" then
       return nil, newAliasesParser(self.UANodeset)
     elseif tagname == "UAObject" then
@@ -987,15 +1012,61 @@ local function parseXml(loader, parser)
   end
 end
 
-local function changeNs(nid, changeMap)
+local function changeNs(nid, namespaces)
   local id = nodeId.fromString(nid)
-  local ns = changeMap[id.ns]
-  if ns and id.ns ~= ns then
-    id.ns = ns
+  if id.ns == 0 then
+    return nid
+  end
+
+  local ns = namespaces[id.ns]
+  assert(ns, fmt("not found namespace for '%s'",nid));
+  if id.ns == ns.Index and id.ns ~= ns.NewIndex then
+    id.ns = ns.NewIndex
     nid = nodeId.toString(id)
   end
 
   return nid
+end
+
+local function parseNodeSet(xml, dbgTrace)
+  local uaNodeSet = {
+    Models = {},
+    Namespaces = {},
+    NsIndex = 0,
+    Nodes = {},
+    Aliases = {},
+  }
+
+  local context = {
+    UANodeSet = uaNodeSet,
+    len = 0,
+    stack = {},
+    parsers = {},
+  }
+
+  local handler = createXmlHandler(context, dbgTrace)
+  local parser = compat.xparser.create(handler)
+  local loader = createLoader(xml)
+  parseXml(loader, parser)
+  return uaNodeSet
+end
+
+local function checkModelDependencies(self, uaNodeSet)
+  -- Check if required models are loaded
+  for _, model in pairs(uaNodeSet.Models) do
+    for _, requiredModel in pairs(model.RequiredModels) do
+      -- Find model in currently loaded XML file
+      local mod = uaNodeSet.Models[requiredModel.ModelUri]
+      -- If not found, check if model is already loaded from other XML files
+      if not mod then
+        mod = self.Models[requiredModel.ModelUri]
+      end
+
+      if not mod then
+        error("Model " .. requiredModel.ModelUri .. " not found")
+      end
+    end
+  end
 end
 
 local function loadModel(self, xml, dbgTrace)
@@ -1003,79 +1074,41 @@ local function loadModel(self, xml, dbgTrace)
     dbgTrace = nilTrace
   end
 
-  local context = {
-    len = 0,
-    stack = {},
-    parsers = {},
-    UANodeSet = {
-      Models = {},
-      NamespaceUris = {},
-      Nodes = {},
-      Aliases = {},
-    }
-  }
+  local uaNodeSet = parseNodeSet(xml, dbgTrace)
 
-  local handler = createXmlHandler(context, dbgTrace)
-  local parser=xparser.create(handler)
-  local loader = createLoader(xml)
-  parseXml(loader, parser)
+  for _, model in pairs(uaNodeSet.Models) do
+    if model.ModelUri == "http://opcfoundation.org/UA/" then
+      local ns = {
+        Index = 0,
+        NewIndex = 0,
+        NamespaceUri = model.ModelUri,
+        Version = model.Version,
+        PublicationDate = model.PublicationDate,
+      }
+      uaNodeSet.Namespaces[0] = ns
+      uaNodeSet.Namespaces[ns.NamespaceUri] = ns
+    end
+  end
 
-  for _, model in ipairs(context.UANodeSet.Models) do
-    for _, requiredModel in ipairs(model.RequiredModels) do
-      local mod
-      for _,m in ipairs(context.UANodeSet.Models) do
-        if m.ModelUri == requiredModel.ModelUri then
-          mod = m
-          break
-        end
-      end
+  checkModelDependencies(self, uaNodeSet)
 
-      for _,m in ipairs(self.Models) do
-        if m.ModelUri == requiredModel.ModelUri then
-          mod = m
-          break
-        end
-      end
-
-      if not mod then
-        error("Required ModelUri " .. requiredModel.ModelUri .. " not found")
+  -- We need to check indexes of namespaces in the XML file
+  -- and change them to match the indexes in the model.
+  -- Already loaded namespaces can have different indexes than the ones in the XML file.
+  for idx = 0,(uaNodeSet.NsIndex) do
+    local newNs = uaNodeSet.Namespaces[idx]
+    if newNs then
+      local oldNs = self.Namespaces[newNs.NamespaceUri]
+      if not oldNs then
+        newNs.NewIndex = self:createNamespace(newNs.NamespaceUri)
+      elseif oldNs.Index ~= newNs.Index then
+        newNs.NewIndex = oldNs.Index
       end
     end
   end
 
-  local existingUriMap  = {}
-  local maxIndex = 0
-  for idx, namespaceUri in ipairs(self.NamespaceUris) do
-    existingUriMap[namespaceUri] = idx
-    existingUriMap[idx] = namespaceUri
-    if idx > maxIndex then
-      maxIndex = idx
-    end
-  end
-
-  local changeIndexMap = {}
-  -- ipairs because
-  for i,uri in ipairs(context.UANodeSet.NamespaceUris) do
-    if existingUriMap[uri] then
-      -- if namespace has same index then no need to change
-      if existingUriMap[uri] == i then
-        goto continue
-      end
-
-      error("NamespaceUri " .. uri .. " already exists")
-    end
-
-    maxIndex = maxIndex + 1
-    tins(self.NamespaceUris, uri)
-    dbgTrace("NamespaceUri " .. uri .. "index from ".. i .. " changed to " .. maxIndex)
-    existingUriMap[uri] = maxIndex
-    existingUriMap[maxIndex] = uri
-    changeIndexMap[i] = maxIndex
-    ::continue::
-  end
-
-  for alias, nid in pairs(context.UANodeSet.Aliases) do
-    local newNid = changeNs(nid, changeIndexMap)
+  for alias, nid in pairs(uaNodeSet.Aliases) do
+    local newNid = changeNs(nid, uaNodeSet.Namespaces)
     local oldId = self.Aliases[alias]
     if oldId and oldId ~= newNid then
       error("Alias ".. alias .. " for node ".. nid .. " already exists.")
@@ -1084,31 +1117,31 @@ local function loadModel(self, xml, dbgTrace)
 
   local newNodes = {}; -- required because keys should not change in original table
   -- Change namespace index in all nodes
-  for oldId,node in pairs(context.UANodeSet.Nodes) do
-    local newId = changeNs(oldId, changeIndexMap)
+  for oldId,node in pairs(uaNodeSet.Nodes) do
+    local newId = changeNs(oldId, uaNodeSet.Namespaces)
     if newId ~= oldId then
       dbgTrace("NodeId " .. oldId .. " changed to " .. newId)
     else
       dbgTrace("NodeId " .. oldId .. " left as is ")
     end
 
+    local newAttrs = {}
     -- change nodeIDs in attributes
-    for attrId,attrValue in pairs(node.attrs) do
-      if type(attrValue) ~= "string" or not nodeId.isValid(attrValue) then
-        goto continue
+    for attrId,attrValue in pairs(node.Attrs) do
+      if type(attrValue) == "string" and nodeId.isValid(attrValue) then
+        local attrNodeId = changeNs(attrValue, uaNodeSet.Namespaces)
+        if attrNodeId ~= attrValue then
+          attrValue = attrNodeId
+          dbgTrace("attribute ".. attrId .. " changed " .. attrValue .. " to " .. attrNodeId)
+        end
       end
 
-      local attrNodeId = changeNs(attrValue, changeIndexMap)
-      if attrNodeId ~= attrValue then
-        node.attrs[attrId] = attrNodeId
-        dbgTrace("attribute ".. attrId .. " changed " .. attrValue .. " to " .. attrNodeId)
-      end
-
-      ::continue::
+      newAttrs[attrId] = attrValue
     end
+    node.Attrs = newAttrs
 
-    for idx,ref in pairs(node.refs) do
-      local targetNodeId = changeNs(ref.target, changeIndexMap)
+    for idx,ref in pairs(node.Refs) do
+      local targetNodeId = changeNs(ref.target, uaNodeSet.Namespaces)
       if targetNodeId ~= ref.target then
         dbgTrace("ref #" .. idx .. " target changed " .. ref.target .. " to " .. targetNodeId)
         ref.target = targetNodeId
@@ -1116,29 +1149,67 @@ local function loadModel(self, xml, dbgTrace)
     end
     newNodes[newId] = node
   end
-  context.UANodeSet.Nodes = newNodes
+  uaNodeSet.Nodes = newNodes
 
-  for alias, nid in pairs(context.UANodeSet.Aliases) do
-    local newNid = changeNs(nid, changeIndexMap)
+  for alias, nid in pairs(uaNodeSet.Aliases) do
+    local newNid = changeNs(nid, uaNodeSet.Namespaces)
     -- local oldId = self.Aliases[alias]
     dbgTrace("New alias ''" .. alias .. "'' for node " .. nid .. " changed to " .. newNid)
     self.Aliases[alias] = newNid
   end
 
-  for nid, node in pairs(context.UANodeSet.Nodes) do
-    if self.Nodes[nid] then
-      local n = self.Nodes[nid]
-      dbgTrace("Node " .. nid .. " already exists. Adding refs")
-      for _,ref in ipairs(node.refs) do
-        addReference(n.refs, ref)
+  -- Connect nodes from XML file to nodes in the address space
+  for nid, node in pairs(uaNodeSet.Nodes) do
+    for _,ref in ipairs(node.Refs) do
+      local targetNode = uaNodeSet.Nodes[ref.target]
+      if targetNode then
+        addReference(targetNode.Refs, {target=nid, type=ref.type, isForward=(ref.isForward == false)})
+      else
+        dbgTrace(fmt("Broken reference from node '%s' to '%s'", nid, ref.target))
       end
-    else
-      self.Nodes[nid] = node
     end
   end
 
-  for _,model in ipairs(context.UANodeSet.Models) do
-    tins(self.Models, model)
+  -- Connect nodes from XML file to nodes in the address space
+  for nid, node in pairs(uaNodeSet.Nodes) do
+    local newNode = self.Nodes[nid]
+    if not newNode then
+      dbgTrace("Node " .. nid .. " already exists. Adding Refs")
+      newNode = self.Nodes:newNode(nid, node.Attrs, node.Refs)
+      self.Nodes:saveNode(newNode)
+    end
+  end
+
+  -- Add namespaces to the address space
+  for _,ns in pairs(uaNodeSet.Namespaces) do
+    local existingNamespace = self.Namespaces[ns.NamespaceUri]
+    if existingNamespace then
+      if existingNamespace.Index ~= ns.NewIndex then
+        error(fmt("Namespace '%s' from XML file has invalid index", ns.NamespaceUri))
+      end
+      goto continue
+    end
+
+    local namespace = {
+      Index = ns.NewIndex,
+      NamespaceUri = ns.NamespaceUri
+    }
+
+    local model = uaNodeSet.Models[ns.NamespaceUri]
+    if model then
+      namespace.ModelUri = model.ModelUri
+      namespace.Version = model.Version
+      namespace.PublicationDate = model.PublicationDate
+    end
+
+    self.Namespaces[namespace.Index] = namespace
+    self.Namespaces[namespace.NamespaceUri] = namespace
+
+    ::continue::
+  end
+
+  for _,model in pairs(uaNodeSet.Models) do
+    self.Models[model.ModelUri] = model
   end
 end
 

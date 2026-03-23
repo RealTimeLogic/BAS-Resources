@@ -188,18 +188,28 @@ local function keysize(key)
 end
 
 local function decrypt(e, key, params)
-  return ba.crypto.decrypt(e, key, {padding=params.padding, hashid=params.hash})
+  return ba.crypto.decrypt(e, key, params and {padding=params.padding, hashid=params.hashid} or nil)
 end
 
 local function encrypt(data, cert, params)
-  return ba.crypto.encrypt(tostring(data), cert.pem, {padding=params.padding, hashid=params.hash})
+  return ba.crypto.encrypt(tostring(data), cert.pem, params and {padding=params.padding, hashid=params.hashid} or nil)
 end
 
 local function symmetric(alg, key, iv, op)
   return ba.crypto.symmetric(alg, key, iv, op)
 end
 
+local function verify(cipher, cert, sum, params)
+  return ba.crypto.verify(cipher, cert.pem, sum, params)
+end
+
+local function sign(data, key, params)
+  return ba.crypto.sign(data, key, params)
+end
+
 local crypto = {
+  sign = sign,
+  verify = verify,
   sha1Sum = sha1Sum,
   hmacSha1 = hmacSha1,
   hmacSha256 = hmacSha256,
@@ -211,6 +221,7 @@ local crypto = {
   -- rsaPssSha2_256Verify = rsaPssSha2_256Verify,
   createCert = createCert,
   createKey = createKey,
+  rnds = ba.rnds,
   rndbs = ba.rndbs,
   symmetric = symmetric,
   encrypt = encrypt,

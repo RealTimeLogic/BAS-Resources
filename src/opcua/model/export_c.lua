@@ -1,4 +1,5 @@
-local types = require("opcua.types")
+local const = require("opcua.const")
+local VariantType = const.VariantType
 
 local function newVariableName(context)
   local count = context.varCount
@@ -6,7 +7,6 @@ local function newVariableName(context)
   context.varCount = count
   return "variable_"..count
 end
-
 
 local function saveStringVariable(context, str, output)
   local varName = context.stringVars[str]
@@ -38,7 +38,9 @@ local function saveNodeIds(self, context, output)
 end
 
 local function getStringUaValue(context, value, output)
-  if type(value) == "string" then
+  if value == nil then
+    return string.format("{.str=NULL}")
+  elseif type(value) == "string" then
     local varValueName = saveStringVariable(context, value, output)
     return string.format("{.str=%s}", varValueName)
   elseif type(value[1]) == 'string' then
@@ -185,45 +187,47 @@ local function getVariantUaValue(context, value, output)
   if v == nil then
     return nil
   end
-  if v.Type == types.VariantType.Boolean then
+  if v.Type == VariantType.Boolean then
     valueType = "UA_Type_Boolean"
     valueData, valueSize = getBooleanUaValue(context, v.Value, output)
-  elseif v.Type == types.VariantType.SByte then
+  elseif v.Type == VariantType.SByte then
     valueType = "UA_Type_SByte"
     valueData, valueSize = getUInt32UaValue(context, v.Value, output)
-  elseif v.Type == types.VariantType.Byte then
+  elseif v.Type == VariantType.Byte then
     valueType = "UA_Type_Byte"
     valueData, valueSize = getUInt32UaValue(context, v.Value, output)
-  elseif v.Type == types.VariantType.Int16 then
+  elseif v.Type == VariantType.Int16 then
     valueType = "UA_Type_Int16"
     valueData, valueSize = getInt32UaValue(context, v.Value, output)
-  elseif v.Type == types.VariantType.UInt16 then
+  elseif v.Type == VariantType.UInt16 then
     valueType = "UA_Type_UInt16"
     valueData, valueSize = getUInt32UaValue(context, v.Value, output)
-  elseif v.Type == types.VariantType.Int32 then
+  elseif v.Type == VariantType.Int32 then
     valueType = "UA_Type_Int32"
     valueData, valueSize = getInt32UaValue(context, v.Value, output)
-  elseif v.Type == types.VariantType.UInt32 then
+  elseif v.Type == VariantType.UInt32 then
     valueType = "UA_Type_UInt32"
     valueData, valueSize = getUInt32UaValue(context, v.Value, output)
-  elseif v.Type == types.VariantType.Float then
+  elseif v.Type == VariantType.Float then
     valueType = "UA_Type_Float"
     valueData, valueSize = getFloatUaValue(context, v.Value, output)
-  elseif v.Type == types.VariantType.Double then
+  elseif v.Type == VariantType.Double then
     valueType = "UA_Type_Double"
     valueData, valueSize = getDoubleUaValue(context, v.Value, output)
-  elseif v.Type == types.VariantType.String then
+  elseif v.Type == VariantType.String then
     valueType = "UA_Type_String"
     valueData, valueSize = getStringUaValue(context, v.Value, output)
-  elseif v.Type == types.VariantType.ByteString then
+  elseif v.Type == VariantType.ByteString then
     valueType = "UA_Type_ByteString"
     valueData, valueSize = getByteStringUaValue(context, v.Value, output)
-  elseif v.Type == types.VariantType.DateTime then
+  elseif v.Type == VariantType.DateTime then
     valueType = "UA_Type_DateTime"
     valueData, valueSize = getDoubleUaValue(context, v.Value, output)
-  elseif v.Type == types.VariantType.LocalizedText then
+  elseif v.Type == VariantType.LocalizedText then
     valueType = "UA_Type_LocalizedText"
     valueData, valueSize = getLocalizedTextUaValue(context, v.Value, output)
+  elseif v.Type == VariantType.ExtensionObject then
+    return nil
   else
     for k, _ in pairs(v) do
       error("invalid variant value: " .. k)
@@ -235,6 +239,32 @@ local function getVariantUaValue(context, value, output)
   local variantVarName = newVariableName(context).."_variant"
   output(string.format("static const struct UA_Variant %s = {.dataType=%s, .size=%d, .data=%s};", variantVarName, valueType, valueSize or 0, valueData))
   return string.format("{.vPtr=&%s}", variantVarName)
+end
+
+local function getDefinitionValue(context, definition, output)
+  local definitionVarName = "NULL"
+  local fieldsCode = {}
+  if definition then
+    for _, field in ipairs(definition) do
+      local fieldName = saveStringVariable(context, field.Name, output)
+      local dataType = field.DataType and saveStringVariable(context, field.DataType, output) or "NULL"
+      local rank = field.ValueRank or -1 -- -1 = scalar
+      local enumValue = field.Value or -1 -- enum value, for structure fields this is -1
+      table.insert(fieldsCode, string.format("{.name=%s, .typeId=%s, .valueRank=%d, .enumValue=%d},", fieldName, dataType, rank, enumValue))
+    end
+
+    definitionVarName = newVariableName(context) .. "_definition"
+    local fieldsVarName = definitionVarName .. "_fields"
+    output(string.format("static const struct UA_Field %s[] = {", fieldsVarName))
+    for _, fieldCode in ipairs(fieldsCode) do
+      output(fieldCode)
+    end
+    output("};")
+
+    output(string.format("static const struct UA_StructDefinition %s = {.size=%s, .fields=%s};", definitionVarName, #definition, fieldsVarName))
+  end
+
+  return string.format("{.definitionPtr=&%s}", definitionVarName)
 end
 
 local function getAttrValue(context, attrs, attrName, value, func, output)
@@ -256,38 +286,33 @@ local function saveNodes(self, context, output)
   local nodes = {}
 
   for nodeId, node in pairs(self.Nodes) do
-    if node.attrs[1] == nil then
-      -- print("nodeId " .. nodeId .. " has no attributes")
-      goto continue
-    end
-
     local varNameBase = saveStringVariable(context, nodeId, output)
 
     local attrVars = {}
 
-    getAttrValue(context, attrVars, "UA_AttributeId_NodeId",             node.attrs[1], getStringUaValue,   output)
-    getAttrValue(context, attrVars, "UA_AttributeId_NodeClass",          node.attrs[2], getUInt32UaValue,   output)
-    getAttrValue(context, attrVars, "UA_AttributeId_BrowseName",         node.attrs[3], getQualifiedNameUaValue, output)
-    getAttrValue(context, attrVars, "UA_AttributeId_DisplayName",        node.attrs[4], getLocalizedTextUaValue, output)
-    getAttrValue(context, attrVars, "UA_AttributeId_Description",        node.attrs[5], getLocalizedTextUaValue, output)
-    getAttrValue(context, attrVars, "UA_AttributeId_WriteMask",          node.attrs[6], getUInt32UaValue,   output)
-    getAttrValue(context, attrVars, "UA_AttributeId_UserWriteMask",      node.attrs[7], getUInt32UaValue,   output)
-    getAttrValue(context, attrVars, "UA_AttributeId_IsAbstract",         node.attrs[8], getBooleanUaValue,  output)
-    getAttrValue(context, attrVars, "UA_AttributeId_Symmetric",          node.attrs[9], getBooleanUaValue,  output)
-    getAttrValue(context, attrVars, "UA_AttributeId_InverseName",        node.attrs[10], getLocalizedTextUaValue,output)
-    getAttrValue(context, attrVars, "UA_AttributeId_ContainsNoLoops",    node.attrs[11], getBooleanUaValue, output)
-    getAttrValue(context, attrVars, "UA_AttributeId_EventNotifier",      node.attrs[12], getUInt32UaValue,  output)
-    getAttrValue(context, attrVars, "UA_AttributeId_Value",              node.attrs[13], getVariantUaValue, output)
-    getAttrValue(context, attrVars, "UA_AttributeId_DataType",           node.attrs[14], getStringUaValue,  output)
-    getAttrValue(context, attrVars, "UA_AttributeId_ValueRank",          node.attrs[15], getUInt32UaValue,  output)
+    getAttrValue(context, attrVars, "UA_AttributeId_NodeId",             node.Attrs[1], getStringUaValue,   output)
+    getAttrValue(context, attrVars, "UA_AttributeId_NodeClass",          node.Attrs[2], getUInt32UaValue,   output)
+    getAttrValue(context, attrVars, "UA_AttributeId_BrowseName",         node.Attrs[3], getQualifiedNameUaValue, output)
+    getAttrValue(context, attrVars, "UA_AttributeId_DisplayName",        node.Attrs[4], getLocalizedTextUaValue, output)
+    getAttrValue(context, attrVars, "UA_AttributeId_Description",        node.Attrs[5], getLocalizedTextUaValue, output)
+    getAttrValue(context, attrVars, "UA_AttributeId_WriteMask",          node.Attrs[6], getUInt32UaValue,   output)
+    getAttrValue(context, attrVars, "UA_AttributeId_UserWriteMask",      node.Attrs[7], getUInt32UaValue,   output)
+    getAttrValue(context, attrVars, "UA_AttributeId_IsAbstract",         node.Attrs[8], getBooleanUaValue,  output)
+    getAttrValue(context, attrVars, "UA_AttributeId_Symmetric",          node.Attrs[9], getBooleanUaValue,  output)
+    getAttrValue(context, attrVars, "UA_AttributeId_InverseName",        node.Attrs[10], getLocalizedTextUaValue,output)
+    getAttrValue(context, attrVars, "UA_AttributeId_ContainsNoLoops",    node.Attrs[11], getBooleanUaValue, output)
+    getAttrValue(context, attrVars, "UA_AttributeId_EventNotifier",      node.Attrs[12], getUInt32UaValue,  output)
+    getAttrValue(context, attrVars, "UA_AttributeId_Value",              node.Attrs[13], getVariantUaValue, output)
+    getAttrValue(context, attrVars, "UA_AttributeId_DataType",           node.Attrs[14], getStringUaValue,  output)
+    getAttrValue(context, attrVars, "UA_AttributeId_ValueRank",          node.Attrs[15], getUInt32UaValue,  output)
     -- UA_AttributeId_ArrayDimensions = 16,         /* UA_Type_Uint32(array), value.bPtr */
-    getAttrValue(context, attrVars, "UA_AttributeId_AccessLevel",             node.attrs[17], getUInt32UaValue,  output)
-    getAttrValue(context, attrVars, "UA_AttributeId_UserAccessLevel",         node.attrs[18], getUInt32UaValue,  output)
-    getAttrValue(context, attrVars, "UA_AttributeId_MinimumSamplingInterval", node.attrs[19], getDoubleUaValue,  output)
-    getAttrValue(context, attrVars, "UA_AttributeId_Historizing",             node.attrs[20], getBooleanUaValue, output)
-    getAttrValue(context, attrVars, "UA_AttributeId_Executable",              node.attrs[21], getBooleanUaValue, output)
-    getAttrValue(context, attrVars, "UA_AttributeId_UserExecutable",          node.attrs[22], getBooleanUaValue, output)
-    getAttrValue(context, attrVars, "UA_AttributeId_DataTypeDefinition",      node.attrs[23], getStringUaValue,  output)
+    getAttrValue(context, attrVars, "UA_AttributeId_AccessLevel",             node.Attrs[17], getUInt32UaValue,  output)
+    getAttrValue(context, attrVars, "UA_AttributeId_UserAccessLevel",         node.Attrs[18], getUInt32UaValue,  output)
+    getAttrValue(context, attrVars, "UA_AttributeId_MinimumSamplingInterval", node.Attrs[19], getDoubleUaValue,  output)
+    getAttrValue(context, attrVars, "UA_AttributeId_Historizing",             node.Attrs[20], getBooleanUaValue, output)
+    getAttrValue(context, attrVars, "UA_AttributeId_Executable",              node.Attrs[21], getBooleanUaValue, output)
+    getAttrValue(context, attrVars, "UA_AttributeId_UserExecutable",          node.Attrs[22], getBooleanUaValue, output)
+    getAttrValue(context, attrVars, "UA_AttributeId_DataTypeDefinition",      node.Attrs[23], getDefinitionValue,  output)
 
     -- UA_AttributeId_RolePermissions = 24,
     -- UA_AttributeId_UserRolePermissions = 25,
@@ -302,10 +327,10 @@ local function saveNodes(self, context, output)
     output("};")
 
     local refsVarName = "NULL"
-    if node.refs[1] then
+    if node.Refs[1] then
       refsVarName = varNameBase .. "_refs"
       local refsCode = {}
-      for _, ref in ipairs(node.refs) do
+      for _, ref in ipairs(node.Refs) do
         local targetNodeId = saveStringVariable(context, ref.target, output)
         local refId = saveStringVariable(context, ref.type, output)
         local isForward = ref.isForward and 1 or 0
@@ -319,53 +344,44 @@ local function saveNodes(self, context, output)
       output("};")
     end
 
-    local definitionVarName = "NULL"
-    local definitionSize = 0
-    local fieldsCode = {}
-    if node.definition then
-      definitionSize = #node.definition
-      for _, field in ipairs(node.definition) do
-        local fieldName = saveStringVariable(context, field.Name, output)
-        local dataType = field.DataType and saveStringVariable(context, field.DataType, output) or "NULL"
-        local rank = field.ValueRank or -1 -- -1 = scalar
-        local enumValue = field.Value or -1 -- enum value, for structure fields this is -1
-        table.insert(fieldsCode, string.format("{.name=%s, .typeId=%s, .valueRank=%d, .enumValue=%d},", fieldName, dataType, rank, enumValue))
-      end
-
-      definitionVarName = varNameBase .. "_definition"
-      output(string.format("static const struct UA_Field %s[] = {", definitionVarName))
-      for _, fieldCode in ipairs(fieldsCode) do
-        output(fieldCode)
-      end
-      output("};")
-    end
-
     table.insert(nodes, {
       nodeId = nodeId,
       attrsSize = #attrVars,
       attrs = attributesVarName,
 
-      refsSize = #node.refs,
+      refsSize = #node.Refs,
       refs = refsVarName,
 
-      definitionSize = definitionSize,
-      definition = definitionVarName,
-      binaryId = node.binaryId,
-      jsonId = node.jsonId,
+      binaryId = node.BinaryId,
+      jsonId = node.JsonId,
+      baseId = node.BaseId,
+      dataTypeId = node.DataTypeId,
     })
-
-    ::continue::
   end
 
   table.sort(nodes, function(a, b) return a.nodeId < b.nodeId end)
 
   output("static const struct UA_Node nodes[] = {")
   for _, node in ipairs(nodes) do
-    local binaryId = node.binaryId and saveStringVariable(context, node.binaryId, output) or "NULL"
-    local jsonId = node.jsonId and saveStringVariable(context, node.jsonId, output) or "NULL"
+    local binaryId = "NULL"
+    local jsonId = "NULL"
+    local baseId = "NULL"
+    local dataTypeId = "NULL"
+    if node.binaryId then
+      binaryId = saveStringVariable(context, node.binaryId, output)
+    end
+    if node.jsonId then
+      jsonId = saveStringVariable(context, node.jsonId, output)
+    end
+    if node.baseId then
+      baseId = saveStringVariable(context, node.baseId, output)
+    end
+    if node.dataTypeId then
+      dataTypeId = saveStringVariable(context, node.dataTypeId, output)
+    end
 
-    output(string.format("{.attrsSize=%d, .refsSize=%d, .definitionSize=%d, .attrs=%s, .refs=%s, .definition=%s, .binaryId=%s, .jsonId=%s},",
-      node.attrsSize, node.refsSize, node.definitionSize, node.attrs, node.refs, node.definition, binaryId, jsonId))
+    output(string.format("{.attrsSize=%d, .refsSize=%d, .attrs=%s, .refs=%s, .binaryId=%s, .jsonId=%s, .baseId=%s, .dataTypeId=%s},",
+      node.attrsSize, node.refsSize, node.attrs, node.refs, binaryId, jsonId, baseId, dataTypeId))
     i = i + 1
   end
   output("};")

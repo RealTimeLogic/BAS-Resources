@@ -1,9 +1,12 @@
-local types = require("opcua.types")
+local const = require("opcua.const")
+local trace = require("opcua.trace")
+
 local tins = table.insert
-local AttributeId = types.AttributeId
-local NodeClass = types.NodeClass
+local NodeClass = const.NodeClass
 local HasEncoding <const> = "i=38"
 local HasSubtype <const> = "i=45"
+
+local traceI = trace.inf
 
 local Model <const> = {}
 
@@ -44,10 +47,10 @@ function Model.getBaseDatatype(self, dataTypeId)
       error("No node for id: " .. curDataTypeId)
     end
     if curDataTypeId ~= "i=22" then
-      if node.attrs[AttributeId.NodeClass] ~= NodeClass.DataType then
+      if node.Attrs.NodeClass ~= NodeClass.DataType then
         error("Node is not a data type: " .. curDataTypeId)
       end
-      if node.attrs[AttributeId.IsAbstract] == nil then
+      if node.Attrs.IsAbstract == nil then
         error("No IsAbstract attribute for node: " .. curDataTypeId)
       end
     end
@@ -57,7 +60,7 @@ function Model.getBaseDatatype(self, dataTypeId)
     end
 
     local parentTypeId = nil
-    for _, ref in pairs(node.refs) do
+    for _, ref in pairs(node.Refs) do
       -- Find reference to base data type
       if ref.type == HasSubtype and not ref.isForward then
         parentTypeId = ref.target
@@ -75,19 +78,18 @@ function Model.getBaseDatatype(self, dataTypeId)
 end
 
 function Model:fillExtensionObjects()
+  local infOn = self.config.logging.services.infOn
+  if infOn then traceI("Filling extension objects") end
+
   for dataTypeId, node in pairs(self.Nodes) do
-    if node.attrs[AttributeId.NodeClass] ~= NodeClass.DataType then
+    if node.Attrs.NodeClass ~= NodeClass.DataType then
       goto continue
     end
 
     -- Search function for encoding base type node
     local baseId = self:getBaseDatatype(dataTypeId)
-    local extObj = {
-      baseId = baseId,
-      dataTypeId = dataTypeId
-    }
 
-    self.ExtObjects[dataTypeId] = extObj
+    node.BaseId = baseId
 
     -- Search IDs for encoding extention objects: binary, xml etc.
     -- Each extension object contains body in a some format. Each
@@ -97,21 +99,27 @@ function Model:fillExtensionObjects()
     --  * ID i=864 for binary encoding
     --  * ID i=15367 for JSON encoding
 
-    for _, ref in pairs(node.refs) do
+    for _, ref in pairs(node.Refs) do
       if ref.type == HasEncoding and ref.isForward then
         local targetId = ref.target
         local encodingNode = self.Nodes[targetId];
         if encodingNode == nil then
           error("No node for id: " .. targetId)
         end
-        local encoding = encodingNode.attrs[AttributeId.BrowseName]
+        local encoding = encodingNode.Attrs.BrowseName
         if encoding.Name == "Default Binary" then
-          extObj.binaryId = targetId
-          self.ExtObjects[targetId] = extObj
+          node.BinaryId = targetId
+          node.DataTypeId = dataTypeId
+          self.Nodes[targetId].BinaryId = targetId
+          self.Nodes[targetId].BaseId = baseId
+          self.Nodes[targetId].DataTypeId = dataTypeId
         end
         if encoding.Name == "Default JSON" then
-          extObj.jsonId = targetId
-          self.ExtObjects[targetId] = extObj
+          node.JsonId = targetId
+          node.DataTypeId = dataTypeId
+          self.Nodes[targetId].JsonId = targetId
+          self.Nodes[targetId].BaseId = baseId
+          self.Nodes[targetId].DataTypeId = dataTypeId
         end
       end
     end
@@ -120,20 +128,23 @@ function Model:fillExtensionObjects()
 end
 
 function Model:fillInheritedDefinitions()
+  local infOn = self.config.logging.services.infOn
+  if infOn then traceI("Expanding inherited data type definitions") end
+
   for _,node in pairs(self.Nodes) do
     local definitions = {}
     local type = node
     -- Collect all superTypes
     while type and
-          type.attrs[AttributeId.NodeClass] == NodeClass.DataType and
-          type.attrs[AttributeId.NodeId] ~= "i=24"
+          type.Attrs.NodeClass == NodeClass.DataType and
+          type.Attrs.NodeId ~= "i=24"
     do
       -- Every DataType contain part of definition
       -- To construct full definition we need also collect
       -- fields from parent types and compose full definition.
-      tins(definitions, type.fields)
+      tins(definitions, type.Attrs.DataTypeDefinition)
       local superType
-      for _,ref in ipairs(type.refs) do
+      for _,ref in ipairs(type.Refs) do
         -- Search HasSubtype reference
         if ref.type == HasSubtype and ref.isForward == false then
           superType = self.Nodes[ref.target]
@@ -152,16 +163,37 @@ function Model:fillInheritedDefinitions()
         end
       end
 
-      node.definition = fullDefinition
+      node.Attrs.DataTypeDefinition = fullDefinition
     end
   end
 end
 
+Model.loadXml = function(...)
+  return require("opcua.model.load_xml")(...)
+end
 
-Model.loadXml = require("opcua.model.load_xml")
-Model.exportC = require("opcua.model.export_c")
-Model.exportJS = require("opcua.model.export_js")
-Model.validate = require("opcua.model.validate")
+Model.exportXml = function(...)
+  return require("opcua.model.export_xml")(...)
+end
+
+Model.validate = function(...)
+  return require("opcua.model.validate")(...)
+end
+
+function Model:browse(parentNodeId)
+  local browser = require("opcua.model.browse")
+  return browser.newBrowser(self, self.Nodes, parentNodeId)
+end
+
+function Model:edit()
+  local browser = require("opcua.model.browse")
+  return browser.newEditor(self)
+end
+
+function Model:newNodeId()
+  self.NextNodeIdentifier = self.NextNodeIdentifier + 1
+  return "ns=1;i=" .. self.NextNodeIdentifier
+end
 
 function Model:createBinaryEncoder(bta)
   local encoder = require("opcua.binary.encoder")
@@ -201,8 +233,19 @@ function Model:loadXmlModels(modelFiles)
   for _,path in ipairs(modelFiles) do
     local f, err,tmp
     if path:sub(1, 7) == "http://" or path:sub(1, 8) == "https://" then
-      f = require"httpc".create()
-      tmp,err=f:request{url=path, method="GET"}
+      local ok, httpc = pcall(require, "httpc")
+      if ok then
+        f = httpc.create()
+        tmp,err=f:request{url=path, method="GET"}
+      else
+        local socket = require("socket.http")
+        local http = require("socket.http")
+        local code
+        f, code = http.request(path)
+        if code ~= 200 then
+          error("Failed to load model: " .. path .. " (code: " .. code .. ")")
+        end
+      end
     elseif path:sub(1, 1) == "<?xml" then
       f = path -- this is the content of the file
     else
@@ -218,24 +261,49 @@ function Model:loadXmlModels(modelFiles)
 end
 
 function Model:createNamespace(namespaceUri)
-  for _, uri in ipairs(self.NamespaceUris) do
-    if uri == namespaceUri then
+  for _, namespace in ipairs(self.Namespaces) do
+    if namespaceUri == namespace.NamespaceUri then
       error("Namespace with URI " .. namespaceUri .. " already exists")
     end
   end
 
-  local index = #self.NamespaceUris + 1
-  self.NamespaceUris[index] = namespaceUri
+  local index = namespaceUri == "http://opcfoundation.org/UA/" and 0 or #self.Namespaces + 1
+  self.Namespaces[index] = {
+    Index = index,
+    NamespaceUri = namespaceUri,
+    Version = "1.0.0",
+  }
   return index
 end
 
-local function createModel()
+local function createModel(config)
+  assert(config, "config is required")
+  assert(config.applicationUri, "config.ApplicationUri is required")
+
+  local infOn = config.logging.services.infOn
+  if infOn then traceI("loading address space") end
   local model = {
-    Nodes = {},
-    ExtObjects = {},
-    Models = {},
-    NamespaceUris = {},
+    Nodes = require("opcua.model.address_space")({}),
+    Models = {}, -- ModelUri -> model
+    Namespaces = {}, -- array of namespaces, index starts from 0, and map namespaceUri to Namespace
     Aliases = {},
+    NextNodeIdentifier = math.floor(os.time()),
+    config = config,
+  }
+
+  local ns1 = {
+    Index = 1,
+    NamespaceUri = config.applicationUri,
+    ModelUri = config.applicationUri,
+    Version = "1.0.0"
+  }
+
+  model.Namespaces[1] = ns1
+  model.Namespaces[ns1.NamespaceUri] = ns1
+
+  model.Models[config.applicationUri] = {
+    ModelUri = config.applicationUri,
+    Version = "1.0.0"
   }
 
   setmetatable(model, {
@@ -252,20 +320,33 @@ local function getBaseModel(config)
   assert(config, "config is required")
   assert(config.applicationUri, "config.ApplicationUri is required")
 
-  local model = createModel()
-  model.Nodes = require("opcua.model.address_space")()
-  model.Models = {
-    {
-      ModelUri="http://opcfoundation.org/UA/",
-      Version="1.05.01"
-    }
-  }
-  model.NamespaceUris = {
-    [0] = "http://opcfoundation.org/UA/",
-    [1] = config.applicationUri
+  local infOn = config.logging.services.infOn
+  if infOn then traceI("Loading base model") end
+
+  local model = createModel(config)
+
+  local ns = {
+    Index = 0,
+    NamespaceUri = "http://opcfoundation.org/UA/",
+    ModelUri = "http://opcfoundation.org/UA/",
+    Version = "1.05.01"
   }
 
-  model:commit()
+  model.Namespaces[0] = ns
+  model.Namespaces[ns.NamespaceUri] = ns
+
+  model.Models["http://opcfoundation.org/UA/"] = {
+    ModelUri="http://opcfoundation.org/UA/",
+    Version="1.05.01"
+  }
+
+  if infOn then traceI("Loading NS0 namespace") end
+  local ns0 = require("opcua_ns0")
+  if infOn then traceI("Loading address space") end
+  local as = require("opcua.model.address_space")
+  if infOn then traceI("Creating address space") end
+  model.Nodes = as(ns0)
+  if infOn then traceI("Base model loaded") end
 
   return model
 end

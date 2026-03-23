@@ -1,7 +1,8 @@
-local s = require "opcua.status_codes"
-local types = require "opcua.types"
+local StatusCode = require "opcua.status_codes"
 local nodeId = require("opcua.node_id")
-local tools = require("opcua.binary.tools")
+local tools = require("opcua.tools")
+local const = require("opcua.const")
+local VariantType = const.VariantType
 
 local abs = math.abs
 local modf = math.modf
@@ -21,7 +22,7 @@ local frexp = math.frexp or function(x)
 	return x / 2 ^ e, e
 end
 
-local BadEncodingError = s.BadEncodingError
+local BadEncodingError = StatusCode.BadEncodingError
 
 local function packFloat(n) -- IEEE754
   local sign = 0
@@ -377,13 +378,13 @@ function enc:nodeId(v)
   end
 
   if ns < 0 or ns > 0xFF then
-    error(s.BadEncodingError)
+    error(BadEncodingError)
   end
 
   if idType == nil or idType == nodeId.Numeric then
     if type(id) == 'number' then
       if id < 0 then
-        error(s.BadEncodingError)
+        error(BadEncodingError)
       end
       if id <= 0xFF and ns == 0 and nsUri == nil then
         idType = nodeId.TwoByte
@@ -393,7 +394,7 @@ function enc:nodeId(v)
         elseif id <= 0xFFFFFFFF then
           idType = nodeId.Numeric
         else
-          error(s.BadEncodingError)
+          error(BadEncodingError)
         end
       end
     elseif tools.guidValid(id) then
@@ -403,7 +404,7 @@ function enc:nodeId(v)
     elseif type(id) == 'table' then
       idType = nodeId.ByteString
     else
-      error(s.BadEncodingError)
+      error(BadEncodingError)
     end
   end
 
@@ -423,12 +424,12 @@ function enc:nodeId(v)
   elseif idType == nodeId.ByteString then
     idEnc = self.byteString
   else
-    error(s.BadEncodingError)
+    error(BadEncodingError)
   end
 
   if si ~= nil then
     if type(si) ~= 'number' or si < 0 then
-      error(s.BadEncodingError)
+      error(BadEncodingError)
     end
     idType = idType | nodeId.ServerIndexFlag
   end
@@ -466,87 +467,87 @@ function enc:variant(v, model)
   local encFunc
   local vt = v.Type
 
-  if vt == types.VariantType.Null then
+  if vt == VariantType.Null then
     self:byte(0)
     return
-  elseif vt == types.VariantType.Boolean then
+  elseif vt == VariantType.Boolean then
     data = v.Value
     encFunc = self.boolean
-  elseif vt == types.VariantType.SByte then
+  elseif vt == VariantType.SByte then
     data = v.Value
     encFunc = self.sbyte
-  elseif vt == types.VariantType.Byte then
+  elseif vt == VariantType.Byte then
     data = v.Value
     encFunc = self.byte
-  elseif vt == types.VariantType.Int16 then
+  elseif vt == VariantType.Int16 then
     data = v.Value
     encFunc = self.int16
-  elseif vt == types.VariantType.UInt16 then
+  elseif vt == VariantType.UInt16 then
     data = v.Value
     encFunc = self.uint16
-  elseif vt == types.VariantType.Int32 then
+  elseif vt == VariantType.Int32 then
     data = v.Value
     encFunc = self.int32
-  elseif vt == types.VariantType.UInt32 then
+  elseif vt == VariantType.UInt32 then
     data = v.Value
     encFunc = self.uint32
-  elseif vt == types.VariantType.Int64 then
+  elseif vt == VariantType.Int64 then
     data = v.Value
     encFunc = self.int64
-  elseif vt == types.VariantType.UInt64 then
+  elseif vt == VariantType.UInt64 then
     data = v.Value
     encFunc = self.uint64
-  elseif vt == types.VariantType.Float then
+  elseif vt == VariantType.Float then
     data = v.Value
     encFunc = self.float
-  elseif vt == types.VariantType.Double then
+  elseif vt == VariantType.Double then
     data = v.Value
     encFunc = self.double
-  elseif vt == types.VariantType.String then
+  elseif vt == VariantType.String then
     data = v.Value
     encFunc = self.string
-  elseif vt == types.VariantType.DateTime then
+  elseif vt == VariantType.DateTime then
     data = v.Value
     encFunc = self.dateTime
-  elseif vt == types.VariantType.Guid then
+  elseif vt == VariantType.Guid then
     data = v.Value
     encFunc = self.guid
-  elseif vt == types.VariantType.ByteString then
+  elseif vt == VariantType.ByteString then
     data = v.Value
     encFunc = self.byteString
-  elseif vt == types.VariantType.XmlElement then
+  elseif vt == VariantType.XmlElement then
     data = v.Value
     encFunc = self.xmlElement
-  elseif vt == types.VariantType.NodeId then
+  elseif vt == VariantType.NodeId then
     data = v.Value
     encFunc = self.nodeId
-  elseif vt == types.VariantType.ExpandedNodeId then
+  elseif vt == VariantType.ExpandedNodeId then
     data = v.Value
     encFunc = self.expandedNodeId
-  elseif vt == types.VariantType.StatusCode then
+  elseif vt == VariantType.StatusCode then
     data = v.Value
     encFunc = self.statusCode
-  elseif vt == types.VariantType.QualifiedName then
+  elseif vt == VariantType.QualifiedName then
     data = v.Value
     encFunc = self.qualifiedName
-  elseif vt == types.VariantType.LocalizedText then
+  elseif vt == VariantType.LocalizedText then
     data = v.Value
     encFunc = self.localizedText
-  elseif vt == types.VariantType.ExtensionObject then
+  elseif vt == VariantType.ExtensionObject then
     data = v.Value
     encFunc = self.extensionObject
-  elseif vt == types.VariantType.DataValue then
+  elseif vt == VariantType.DataValue then
     data = v.Value
     encFunc = self.dataValue
-  elseif vt == types.VariantType.Variant then
+  elseif vt == VariantType.Variant then
     data = v.Value
     encFunc = self.variant
-  elseif vt == types.VariantType.DiagnosticInfo then
+  elseif vt == VariantType.DiagnosticInfo then
     data = v.Value
     encFunc = self.diagnosticInfo
   else
     for _,_ in pairs(v) do
-      error(s.BadEncodingError)
+      error(BadEncodingError)
     end
     self:byte(0)
     return
@@ -610,7 +611,7 @@ function enc:extensionObject(v, encoder)
     extObject, encF = encoder:getExtObject(typeId)
   end
 
-  self:expandedNodeId(extObject and extObject.binaryId or typeId)
+  self:expandedNodeId(extObject and extObject.BinaryId or typeId)
   self:bit(body ~= nil and 1 or 0, 1)
   self:bit(0, 7)
   if body ~= nil then
@@ -784,7 +785,7 @@ function enc:guid(v)
   string.match(v, "^(%x%x%x%x%x%x%x%x)-(%x%x%x%x)-(%x%x%x%x)-(%x%x)(%x%x)-(%x%x)(%x%x)(%x%x)(%x%x)(%x%x)(%x%x)$")
 
   if not (d1 and d2 and d3 and d4 and d5 and d6 and d7 and d8 and d9 and d10 and d11) then
-    error(s.BadDecodingError)
+    error(StatusCode.BadDecodingError)
   end
 
   self:uint32(tonumber(d1, 16))
@@ -803,7 +804,7 @@ end
 enc.xmlElement = enc.string
 
 function enc:qualifiedName(v)
-  self:uint16(v.ns)
+  self:uint16(v.ns or 0)
   self:string(v.Name)
 end
 

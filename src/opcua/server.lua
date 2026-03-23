@@ -1,8 +1,9 @@
-local ua = require("opcua.api")
-local types = require("opcua.types")
+local trace = require("opcua.trace")
+local const = require("opcua.const")
+local AttributeId = const.AttributeId
 
-local traceI = ua.trace.inf
-local traceE = ua.trace.err
+local traceI = trace.inf
+local traceE = trace.err
 local fmt = string.format
 
 local S = {}
@@ -42,11 +43,12 @@ function S:run()
 
 end
 
-function S:createHttpDirectory()
-  local binaryServer = require("opcua.binary.server_connection_http").new(self.config, self.services, self.model)
-  return binaryServer
+if ba then
+  function S:createHttpDirectory()
+    local binaryServer = require("opcua.binary.server_connection_http").new(self.config, self.services, self.model)
+    return binaryServer
+  end
 end
-
 
 function S:shutdown()
   self.services:shutdown()
@@ -62,10 +64,10 @@ end
 local function browseParams(nodeId)
   return {
     NodeId = nodeId, -- nodeId we want to browse
-    BrowseDirection = types.BrowseDirection.Forward,
+    BrowseDirection = const.BrowseDirection.Forward,
     ReferenceTypeId = "i=33", -- HierarchicalReferences
-    NodeClassMask = types.NodeClass.Unspecified,
-    ResultMask = types.BrowseResultMask.All,
+    NodeClassMask = const.NodeClass.Unspecified,
+    ResultMask = const.BrowseResultMask.All,
     IncludeSubtypes = true,
   }
 end
@@ -93,8 +95,8 @@ function S:browse(params)
 end
 
 local function allAttributes(nodeId, attrs)
-  for i = 0, types.AttributeId.Max do
-    table.insert(attrs, {NodeId=nodeId, AttributeId=i})
+  for _ = 0, const.AttributeId.Max do
+    table.insert(attrs, {NodeId=nodeId, AttributeId=AttributeId.Value})
   end
 end
 
@@ -127,8 +129,8 @@ function S:addNodes(params)
   return self.services:addNodes(params)
 end
 
-function S:setVariableSource(nodeId, callback)
-  return self.services:setVariableSource(nodeId, callback)
+function S:setValueCallback(nodeId, callback)
+  return self.services:setValueCallback(nodeId, callback)
 end
 
 function S:setWriteHook(nodeId, callback)
@@ -142,6 +144,26 @@ end
 
 function S:createNamespace(namespaceUri)
   return self.model:createNamespace(namespaceUri)
+end
+
+function S:exportXmlModels(output, namespaceUris)
+  -- Handle file path output
+  if type(output) == "string" then
+    local file = io.open(output, "w")
+    if not file then
+      error("Could not open file for writing: " .. output)
+    end
+
+    local function fileCallback(str)
+      file:write(str)
+    end
+
+    self.model:exportXml(fileCallback, namespaceUris)
+    file:close()
+  else
+    -- Handle callback function output
+    self.model:exportXml(output, namespaceUris)
+  end
 end
 
 function S.new(config, model)
@@ -175,9 +197,17 @@ function S.new(config, model)
   if err ~= nil then
     error("Configuration error: "..err)
   end
+  local infOn = config.logging.services.infOn
 
+  if infOn then traceI("Creating model") end
   if model == nil then
-    model = require("opcua.model.import").getBaseModel(config)
+    if infOn then traceI("Loading OPCUA Model module") end
+    local modelImport = require("opcua.model.import")
+    if infOn then traceI("Loading base model") end
+    model = modelImport.getBaseModel(config)
+    if infOn then traceI("Base model loaded") end
+  else
+    if infOn then traceI("Using provided model") end
   end
 
   local srv = {

@@ -1,8 +1,9 @@
 local Q = require("opcua.binary.queue")
-local ua = require("opcua.api")
+local trace = require("opcua.trace")
+local tools = require("opcua.tools")
 
-local traceI = ua.trace.inf
-local traceD = ua.trace.dbg
+local traceI = trace.inf
+local traceD = trace.dbg
 local fmt = string.format
 
 local ch = {}
@@ -21,7 +22,7 @@ function ch:message()
   if self.sock.json then
     if infOn then traceI(fmt("json | receiving json")) end
     local json = self.sock:json()
-    if dbgOn then ua.Tools.printTable("json | received JSON table", json, traceD) end
+    if dbgOn then tools.printTable("json | received JSON table", json, traceD) end
     self.JsonDecoder.Deserializer.stack = {json}
   else
     if infOn then traceI(fmt("json | receiving string")) end
@@ -33,7 +34,7 @@ function ch:message()
   if infOn then traceI("json | decoding message") end
   local msg = self.JsonDecoder:extensionObject()
   if infOn then traceI("json | message decoded") end
-  if dbgOn then ua.Tools.printTable("json | message data:", msg, traceD) end
+  if dbgOn then tools.printTable("json | message data:", msg, traceD) end
   return msg
 end
 

@@ -1,15 +1,15 @@
-local ua = require("opcua.api")
+local tools = require("opcua.tools")
 local Q = require("opcua.binary.queue")
 local BinaryEncoder = require("opcua.binary.encoder")
-
+local trace = require("opcua.trace")
+local const = require("opcua.const")
 local s = require("opcua.status_codes")
 local MessageId = require("opcua.binary.message_id")
 
-local tools = ua.Tools
 local fmt = string.format
-local traceD = ua.trace.dbg
-local traceI = ua.trace.inf
-local traceE = ua.trace.err
+local traceD = trace.dbg
+local traceI = trace.inf
+local traceE = trace.err
 
 local ch ={}
 ch.__index = ch
@@ -113,7 +113,7 @@ function ch:message(body)
 
   if dbgOn then traceD(fmt("binary | encoding message")) end
   local extObject = self.Encoder:getExtObject(type)
-  self.Encoder:nodeId(extObject.binaryId)
+  self.Encoder:nodeId(extObject.BinaryId)
   self.Encoder:Encode(type, body)
 
   self:finishMessage()
@@ -229,7 +229,7 @@ function ch:finishChunk(chunkType)
     elseif self.messageType == "OPN" then
       assert(self.requestId ~= 0 and self.requestId ~= nil)
       assert(policy)
-      if policy.uri ~= ua.SecurityPolicy.None then
+      if policy.uri ~= const.SecurityPolicy.None then
         header:asymmetricSecurityHeader(policy.uri, policy:getLocalCert(), policy:getRemoteThumbprint())
       else
         header:asymmetricSecurityHeader(policy.uri)

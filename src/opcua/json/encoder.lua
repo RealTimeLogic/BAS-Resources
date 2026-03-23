@@ -1,11 +1,12 @@
-local s = require("opcua.status_codes")
 local compat = require "opcua.compat"
 local n = require("opcua.node_id")
-local tools = require("opcua.binary.tools")
-local types = require("opcua.types")
+local tools = require("opcua.tools")
+local const = require("opcua.const")
+local StatusCode = require("opcua.status_codes")
 local tins = table.insert
 
-local BadEncodingError = s.BadEncodingError
+local VariantType = const.VariantType
+local BadEncodingError = StatusCode.BadEncodingError
 
 local enc={}
 enc.__index=enc
@@ -144,21 +145,13 @@ function enc:dateTime(v)
     error(BadEncodingError)
   end
 
-  local secs = math.floor(v)
-  local msecs = math.floor((v - secs)*1000 + 0.5)
-  local dt = ba.datetime(secs):date()
-  local str
-  if msecs == 0 then
-    str = string.format("%04d-%02d-%02dT%02d:%02d:%02dZ", dt.year, dt.month, dt.day, dt.hour, dt.min, dt.sec)
-  else
-    str = string.format("%04d-%02d-%02dT%02d:%02d:%02d.%03dZ", dt.year, dt.month, dt.day, dt.hour, dt.min, dt.sec, msecs)
-  end
+  local str = compat.to_datestring(v)
   self:string(str)
 end
 
 function enc:guid(v)
   if not tools.guidValid(v) then
-    error(s.BadDecodingError)
+    error(BadEncodingError)
   end
 
   self:string(v)
@@ -245,7 +238,7 @@ function enc:nodeId(v)
   end
 
   if ns < 0 or ns > 0xFF then
-    error(s.BadEncodingError)
+    error(BadEncodingError)
   end
 
   if idType == nil then
@@ -258,7 +251,7 @@ function enc:nodeId(v)
     elseif type(id) == 'table' then
       idType = n.ByteString
     else
-      error(s.BadEncodingError)
+      error(BadEncodingError)
     end
   end
 
@@ -276,7 +269,7 @@ function enc:nodeId(v)
     idEnc = self.byteString
     idType = 3
   else
-    error(s.BadEncodingError)
+    error(BadEncodingError)
   end
 
   -- IDtype is skipped for UInt32 IDs
@@ -321,59 +314,59 @@ function enc:variant(v, model)
   local encFunc
   local vt = v.Type
 
-  if vt == types.VariantType.Boolean then
+  if vt == VariantType.Boolean then
     encFunc = self.boolean
-  elseif vt == types.VariantType.SByte then
+  elseif vt == VariantType.SByte then
     encFunc = self.sbyte
-  elseif vt == types.VariantType.Byte then
+  elseif vt == VariantType.Byte then
     encFunc = self.byte
-  elseif vt == types.VariantType.Int16 then
+  elseif vt == VariantType.Int16 then
     encFunc = self.int16
-  elseif vt == types.VariantType.UInt16 then
+  elseif vt == VariantType.UInt16 then
     encFunc = self.uint16
-  elseif vt == types.VariantType.Int32 then
+  elseif vt == VariantType.Int32 then
     encFunc = self.int32
-  elseif vt == types.VariantType.UInt32 then
+  elseif vt == VariantType.UInt32 then
     encFunc = self.uint32
-  elseif vt == types.VariantType.Int64 then
+  elseif vt == VariantType.Int64 then
     encFunc = self.int64
-  elseif vt == types.VariantType.UInt64 then
+  elseif vt == VariantType.UInt64 then
     encFunc = self.uint64
-  elseif vt == types.VariantType.Float then
+  elseif vt == VariantType.Float then
     encFunc = self.float
-  elseif vt == types.VariantType.Double then
+  elseif vt == VariantType.Double then
     encFunc = self.double
-  elseif vt == types.VariantType.String then
+  elseif vt == VariantType.String then
     encFunc = self.string
-  elseif vt == types.VariantType.DateTime then
+    elseif vt == VariantType.DateTime then
     encFunc = self.dateTime
-  elseif vt == types.VariantType.Guid then
+  elseif vt == VariantType.Guid then
     encFunc = self.guid
-  elseif vt == types.VariantType.ByteString then
+  elseif vt == VariantType.ByteString then
     encFunc = self.byteString
-  elseif vt == types.VariantType.XmlElement then
+  elseif vt == VariantType.XmlElement then
     encFunc = self.xmlElement
-  elseif vt == types.VariantType.NodeId then
+  elseif vt == VariantType.NodeId then
     encFunc = self.nodeId
-  elseif vt == types.VariantType.ExpandedNodeId then
+  elseif vt == VariantType.ExpandedNodeId then
     encFunc = self.expandedNodeId
-  elseif vt == types.VariantType.StatusCode then
+  elseif vt == VariantType.StatusCode then
     encFunc = self.statusCode
-  elseif vt == types.VariantType.QualifiedName then
+  elseif vt == VariantType.QualifiedName then
     encFunc = self.qualifiedName
-  elseif vt == types.VariantType.LocalizedText then
+  elseif vt == VariantType.LocalizedText then
     encFunc = self.localizedText
-  elseif vt == types.VariantType.ExtensionObject then
+  elseif vt == VariantType.ExtensionObject then
     encFunc = self.extensionObject
-  elseif vt == types.VariantType.DataValue then
+  elseif vt == VariantType.DataValue then
     encFunc = self.dataValue
-  elseif vt == types.VariantType.Variant then
+  elseif vt == VariantType.Variant then
     encFunc = self.variant
-  elseif vt == types.VariantType.DiagnosticInfo then
+  elseif vt == VariantType.DiagnosticInfo then
     encFunc = self.diagnosticInfo
   else
     for _,_ in pairs(v) do
-      error(s.BadEncodingError)
+      error(BadEncodingError)
     end
     self:byte(0)
     return
@@ -499,7 +492,7 @@ function enc:extensionObject(v, encoder)
   end
 
   self:beginField("TypeId")
-  self:nodeId(extObject and extObject.jsonId or v.TypeId)
+  self:nodeId(extObject and extObject.JsonId or v.TypeId)
   self:endField("TypeId")
 
   self:beginField("Encoding")

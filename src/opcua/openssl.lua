@@ -261,7 +261,7 @@ end
 local function keysize(pem)
   local key = loadKey(pem)
   local parsed = key:parse()
-  return parsed.size
+  return parsed.size, parsed.type
 end
 
 local function decrypt(cipher, pem, params)
@@ -272,8 +272,8 @@ local function decrypt(cipher, pem, params)
   if params then
     if params.padding then
       ctx:ctrl("rsa_padding_mode", params.padding)
-      if params.hash then
-        ctx:ctrl("rsa_oaep_md", params.hash)
+      if params.hashid then
+        ctx:ctrl("rsa_oaep_md", params.hashid)
       end
     end
   end
@@ -294,8 +294,11 @@ local function encrypt(msg, cert, params)
   if params then
     if params.padding then
       ctx:ctrl("rsa_padding_mode", params.padding)
-      if params.hash then
-        ctx:ctrl("rsa_oaep_md", params.hash)
+      if params.hashid then
+        local ok = ctx:ctrl("rsa_oaep_md", params.hashid)
+        if not ok then
+          error("Unknown hash algorithm")
+        end
       end
     end
   end
@@ -335,7 +338,76 @@ local function symmetric(alg, key, iv, op)
   return encryptor
 end
 
+local function sign(data, key, rsaParams)
+  local ctx = key:ctx()
+  ctx:sign_init()
+  local a = true
+  if rsaParams == nil or rsaParams.padding == "pkcs1" then
+    a = a and ctx:ctrl("rsa_padding_mode", "pkcs1")
+    if rsaParams == nil or rsaParams.hashid == nil or rsaParams.hashid == "sha1" then
+      a = a and ctx:ctrl("digest", "sha1")
+    elseif rsaParams.hashid == "sha256" then
+      a = a and ctx:ctrl("digest", "sha256")
+    else
+      return "invalid_hash"
+    end
+  elseif rsaParams.padding == "pss" then
+    a = a and ctx:ctrl("rsa_padding_mode", "pss")
+    a = a and ctx:ctrl("rsa_pss_saltlen", "digest")
+    if rsaParams.hashid == "sha256" then
+      a = a and ctx:ctrl("digest", "sha256")
+    else
+      return nil, "invalid_hash"
+    end
+  else
+    return nil, "failed"
+  end
+
+  a = a and ctx:sign(data)
+  if not a then
+    local err = openssl.error()
+    return nil,err
+  end
+  return a
+end
+
+local function verify(data, cert, sum, rsaParams)
+  local key = cert.native:pubkey()
+  local ctx = key:ctx()
+  ctx:verify_init()
+  if rsaParams == nil or rsaParams.padding == "pkcs1" then
+    if rsaParams == nil or rsaParams.hashid == nil or rsaParams.hashid == "sha1" then
+      ctx:ctrl("rsa_padding_mode", "pkcs1")
+      ctx:ctrl("digest", "sha1")
+    elseif rsaParams.hashid == "sha256" then
+      ctx:ctrl("rsa_padding_mode", "pkcs1")
+      ctx:ctrl("digest", "sha256")
+    else
+      return false, "invalid_hash"
+    end
+  elseif rsaParams.padding == "pss" then
+    ctx:ctrl("rsa_padding_mode", "pss")
+    ctx:ctrl("rsa_pss_saltlen", "digest")
+    if rsaParams.hashid == "sha256" then
+      ctx:ctrl("digest", "sha256")
+    else
+      return false, "invalid_hash"
+    end
+  else
+    return false, "failed"
+  end
+
+  local a = ctx:verify(data, sum)
+  if not a then
+    local err = openssl.error()
+    return nil,err
+  end
+  return a
+end
+
 local crypto = {
+  sign = sign,
+  verify = verify,
   sha1Sum = sha1Sum,
   hmacSha1 = hmacSha1,
   hmacSha256 = hmacSha256,
@@ -347,6 +419,20 @@ local crypto = {
   rsaPssSha2_256Verify = rsaPssSha2_256Verify,
   createCert = loadCert,
   createKey = loadKey,
+  -- Returns a number with a given size of random bytes
+  -- byte, word, dword, qword
+  rnds = function(size)
+    if size < 1 or size > 8 or (size & size - 1) ~= 0 then
+      error("invalid_size")
+    end
+
+    local b = openssl.random(size)
+    local result = 0
+    for i = 1, #b do
+      result = result * 256 + string.byte(b, i)
+    end
+    return result
+  end,
   rndbs = openssl.random,
   symmetric = symmetric,
   encrypt = encrypt,
