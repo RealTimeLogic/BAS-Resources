@@ -1,10 +1,17 @@
 local fmt=string.format
-local sendlog = mako and mako.daemon and
-   function(isErr,msg)
-      local op = isErr and {flush=true} or {ts=true}
-      mako.log(msg,op)
+local sendlog=(function()
+   if mako then
+      if mako.daemon then
+	 return function(isErr,msg)
+	    local op = isErr and {flush=true} or {ts=true}
+	    mako.log(msg,op)
+	 end
+      end
+   elseif xedge then
+      return function(isErr,msg) xedge.elog({ts=true,flush=true},msg) end
    end
-   or function() end
+   return function() end
+end)()
 
 
 local function log(err,prio,fmts,...)

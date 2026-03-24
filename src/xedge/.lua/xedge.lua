@@ -671,9 +671,9 @@ startAcmeDns=function()
    startAcmeDns=function() end
    if not xedge.portal then return end
    local ad=adns()
-   local k=ad.loadcert()
-   k=k and k[1]
-   if k and k:find(xedge.portal,1,true) then
+   local _,dT=require"acme/bot".account()
+   local dn=dT and next(dT)
+   if dn and dn:find(xedge.portal,1,true) then
       ad.auto{production=production,revcon=xcfg.revcon}
    end
 end
