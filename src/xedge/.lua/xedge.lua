@@ -333,6 +333,7 @@ local function loadAndRunLua(io,fn,env)
    sendErr("%s %s failed:\n\t%s",f and "Running" or "Compiling",io:realpath(fn),err or "?")
    gc()
    gc()
+   return nil,err
 end
 xedge.loadAndRunLua=loadAndRunLua
 
@@ -374,7 +375,9 @@ local function manageXLuaFile(pn,app) -- start/restart an xx.xlua file
    local env=app.envs[pn]
    if env then runOnUnload(pn,env,app.env) end
    env=setmetatable({},{__index=app.env})
-   app.envs[pn]=loadAndRunLua(app.io,pn,env) and env or nil
+   local ok,err=loadAndRunLua(app.io,pn,env)
+   app.envs[pn]= ok and env or nil
+   return ok,err
 end
 
 local stopApp
@@ -417,12 +420,13 @@ end
 
  -- start/stop/restart app by giving it a name and by using appc and io
 local function controlApp(name,appc,io,isStartup)
+   local ok,err=true,nil
    if apps[name] then stopApp(name) end
    local env=setmetatable({io=io},{__index=G})
    env.app=env
    local app={io=io,env=env,envs={}}
    apps[name]=app
-   if appc.running and (false ~= appc.autostart or not isStartup) and not err then
+   if appc.running and (false ~= appc.autostart or not isStartup) then
       if appc.dirname then
 	 local dn,dom,dir=trim(appc.dirname),trim(appc.domainname or "")
 	 if #dom > 0 then
@@ -443,19 +447,30 @@ local function controlApp(name,appc,io,isStartup)
       end
       local cnt=0
       app.running=true
-      if io:stat".preload" then loadAndRunLua(io,".preload", app.env) end
-      for path,fn in recDirIter(io,"") do
-	 if fn:find"%.xlua$" then
-	    manageXLuaFile(#path == 0 and fn or path.."/"..fn,app)
-	 else
-	    cnt = cnt+1
-	    if cnt > 100 then sendErr("Too many files in application '%s' (%s)",name,appc.url) break end
+      if io:stat".preload" then ok,err=loadAndRunLua(io,".preload", app.env) end
+      if not err then
+	 for path,fn in recDirIter(io,"") do
+	    if fn:find"%.xlua$" then
+	       ok,err=manageXLuaFile(#path == 0 and fn or path.."/"..fn,app)
+	       if not ok then break end
+	    else
+	       cnt = cnt+1
+	       if cnt > 100 then
+		  err=sfmt("Too many files in application '%s' (%s)",name,appc.url)
+		  break
+	       end
+	    end
 	 end
       end
-   elseif err and (not appc or not appc.url:find"^https?://") then
-      terminateApp(name)
-   else
-      appc.running=false
+   end
+   if err then
+      sendErr("%s",err)
+      if not appc.url:find"^https?://" then
+	 terminateApp(name)
+      else
+	 appc.running=false
+      end
+      return nil,err
    end
    return app
 end
@@ -477,7 +492,7 @@ local function manageApp(name,isStartup)
 	 io=noopIO(appc)
       end
    end
-   controlApp(name,appc,io,isStartup)
+   return controlApp(name,appc,io,isStartup)
 end
 
 local function newAppCfg(cfg)
@@ -1239,15 +1254,25 @@ end
 
 function xedge.auxapp(name,auxio,appc)
    appc=appc or {} -- simulated config
+   if not appc.url then appc.url="auxapp" end
    name='$'..name
    assert("function"==type(auxio.rmdir))
    for n,io in pairs(ios) do if auxio==io then error"Cannot use default IOs" end end
    if nil == appc.running then appc.running=true end
    if appc.remove then appc.running=nil end
-   local app=controlApp(name,appc,auxio)
+   local orgSendErr=sendErr
+   local errs={}
+   sendErr=function(...) table.insert(errs, sfmt(...)) orgSendErr(...) end
+   local app,err=controlApp(name,appc,auxio)
+   sendErr=orgSendErr
+   if not app then return false,err end
    -- Add config (appc) to app: ref (Ref-AUX1)
    if appc.running then for k,v in pairs(appc) do app[k]=v end
    elseif appc.remove then apps[name]=nil end
+   if #errs > 0 then
+      return false,table.concat(errs,"\n")
+   end
+   return true
 end
 
 function xedge.ui(enable)

@@ -54,7 +54,7 @@ local function cfgIo(key)
    end
 end
 
-local function deferred()
+local function runXedge()
    local rw=require"rwfile"
    local log=xedge.log
    -- Fetch Xedge Config (xc) from mako.conf
@@ -80,4 +80,4 @@ end
 dir:unlink()
 dir=nil
 mako.createloader(io)
-ba.thread.run(deferred)
+runXedge()

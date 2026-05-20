@@ -20,19 +20,9 @@ local function log(err,prio,fmts,...)
    sendlog(err, msg)
 end
 
-local nextErrTm=0
-local function err(...)
-   local t=os.time()
-   if t > nextErrTm then
-      nextErrTm=t+86400
-      log(true,0, ...)
-   end
-end
-
-
 return {
    info=function(...) log(false,5, ...) end,
-   error=err,
+   error=function(...) log(true,0, ...) end,
    log=function(prio,...) log(false,prio, ...) end,
    setlog=function(logfunc) sendlog=logfunc end
 }
