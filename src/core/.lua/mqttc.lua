@@ -181,7 +181,9 @@ local function checkWill(w,level)
    w.qos=w.qos or 0
    typeChk("opt.will", "table",w,level)
    typeChk("opt.will.topic", "string",w.topic,level)
-   if w.prop then typeChk("opt.will.prop", "table",w.prop,level) end
+   if w.properties then
+      typeChk("opt.will.properties", "table",w.properties,level)
+   end
    typeChk("opt.will.payload", "string",w.payload,level)
 end
 
@@ -202,7 +204,7 @@ local function encConnect(self,cleanStart)
    if opt.will then
       w=opt.will
       checkWill(w,5)
-      wPropLen=encPropTab(nil,0,w.prop)
+      wPropLen=encPropTab(nil,0,w.properties)
       ix=encVBInt(nil,ix+wPropLen,wPropLen)
       ix=encString(nil,ix,w.topic)
       ix=encString(nil,ix,w.payload or "")
@@ -238,7 +240,7 @@ local function encConnect(self,cleanStart)
    ix=encString(bta,ix,opt.clientidentifier)
    if w then -- Will
       ix=encVBInt(bta,ix,wPropLen)
-      ix=encPropTab(bta,ix,w.prop)
+      ix=encPropTab(bta,ix,w.properties)
       ix=encString(bta,ix,w.topic)
       ix=encBinData(bta,ix,w.payload)
    end
