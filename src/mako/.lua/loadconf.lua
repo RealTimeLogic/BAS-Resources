@@ -1,20 +1,25 @@
-local function loadcfg()
-   local conf={}
-   if _G.mako.cfgfname then
-      local fp=ba.openio"disk":open(_G.mako.cfgfname)
-      if fp then
-	 local x,e=load(fp:read"*a","","bt",conf)
-	 fp:close()
-	 if x then
-	    setmetatable(conf, {__index=_G})
-	    x,e=pcall(x)
-	    setmetatable(conf, nil)
-	 end
-	 if e then print(_G.mako.cfgfname,e) end
+local function lf(c,fp,cn)
+   if fp then
+      local x,e=load(fp:read"*a","","bt",c)
+      fp:close()
+      if x then
+	 setmetatable(c,{__index=_G})
+	 x,e=pcall(x)
+	 setmetatable(c,nil)
       end
+      if e then print(cn,e) end
    end
-   return conf
+   return c
 end
-local conf=loadcfg()
-conf.load=loadcfg
-return conf
+local function lcfg()
+   local c,m,cn={},_G.mako,"apps/mako.conf"
+   lf(c,ba.openio"vm":open(cn),cn)
+   if not c.stop then
+      cn=m.cfgfname
+      lf(c, cn and ba.openio"disk":open(cn),cn)
+   end
+   return c
+end
+local c=lcfg()
+c.load=lcfg
+return c
