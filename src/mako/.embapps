@@ -38,7 +38,7 @@ local function create(start,path,io)
    if  io:stat".config" then
       local ok,t=pcall(function() return io:dofile".config" end)
       if ok and "table" == type(t) then
-	 name = "string" == type(t.name) and t.name or name
+	 name = "string" == type(t.dirname) and t.dirname or ("string" == type(t.name) and t.name or name)
 	 prio=t.prio or 0
       else
 	 tracep(false,0,".config Err:",name,t)
