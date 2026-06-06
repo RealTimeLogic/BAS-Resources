@@ -2,27 +2,33 @@
    --body:#d4d4d4;
    --bodybg:#252526;
    --leftbg: #1D1E22;
-   --blockbg:#383838;
+   --blockbg:#333333;
    --scrollbar: #252526;
-   --scrollbarthumb: #3c3c3c;
+   --scrollbarthumb: #4b4b4b;
    --gutterbg: #2d2d30;
    --tabbtn: #cccccc;
    --tabbtnbg: #2d2d30;
    --tabbtnhoverbg: #454545;
    --tabbtnactive: white;
-   --tabbtnactivebg: #5a5a5a;
+   --tabbtnactivebg: #4f5358;
    --closebtn:white;
    --editorbg: #1e1e1e;
-   --tree: #d9dbdc;
-   --treeselbg: #4a5154;
-   --inputbg: #555555;
-   --inputbghover: #626262;
+   --tree: #8a8d91;
+   --treeselbg: #4f5a5f;
+   --inputbg: #4b4b4b;
+   --inputbghover: #575757;
    --colorfile: #03d8fb;
    --green: #69C575;
+   --greenhover: #82c98c;
    --darkgreen: #49a354;
-   --red: #f5483c;
+   --greencontrast: #102315;
+   --red: #d83b31;
+   --redhover: #c43228;
    --grey: #454545;
    --white: #FFFFFF;
+   --yellow: #ffd12b;
+   --border: #6a6d70;
+   --focus: #d9dbdc;
    --btn-hover: #101b13;
 }
 
@@ -95,20 +101,29 @@ input[type="text"],input[type="password"],input[type="email"] {
 }
 input[type="text"]:focus {
   background-color: var(--inputbghover);
-  border-color: var(--body);
+  border-color: var(--focus);
+}
+input::placeholder {
+  color: #bdbdbd;
 }
 
 input[type="button"] {
   padding: 4px 10px;
   border-radius: 4px;
   background-color: var(--green);
-  color: #f5f5f5;
+  color: var(--greencontrast);
+  border: 1px solid var(--green);
+  font-weight: bold;
   font-size: 1.2em;
   line-height: 1.5em;
   cursor: pointer;
 }
+input[type="button"]:hover {
+  background-color: var(--greenhover);
+  border-color: var(--greenhover);
+}
 
-a {color:#ffd12b;}
+a {color:var(--yellow);}
 
 
 button, input[type="submit"] {
@@ -116,22 +131,26 @@ button, input[type="submit"] {
   font-size: 1em;
   line-height: 1.4em;
   border-radius: 4px;
-  background-color: #69C575;
-  color: #FFFFFF;
+  background-color: var(--green);
+  color: var(--greencontrast);
   font-weight: bold;
-  border: none;
+  border: 1px solid var(--green);
   cursor: pointer;
   transition: all .3s ease;
 }
 button:hover, input[type="submit"]:hover {
-  background-color: #4ac55b;
+  background-color: var(--greenhover);
+  border-color: var(--greenhover);
 }
 
 button.red, input.red[type="submit"] {
-  background-color: #F66459;
+  background-color: var(--red);
+  color: var(--white);
+  border-color: var(--red);
 }
 button.red:hover,  input.red[type="submit"]:hover {
-  background-color: #f5483c;
+  background-color: var(--redhover);
+  border-color: var(--redhover);
 }
 
 #loader {
@@ -192,8 +211,8 @@ button.red:hover,  input.red[type="submit"]:hover {
 
 .gutter {
     background-color: var(--gutterbg);
-    box-shadow: inset -1px 0 1px rgba(0, 0, 0, 0.15), inset 1px 0 1px rgba(255, 255, 255, 0.1);
-    border: 1px solid rgba(255, 255, 255, 0.05);
+    box-shadow: inset -1px 0 1px rgba(0, 0, 0, 0.25), inset 1px 0 1px rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 #editorpane {
@@ -323,7 +342,7 @@ button.red:hover,  input.red[type="submit"]:hover {
  border-radius: 4px;
  z-index: 100;
  background: var(--bodybg);
- border: 1px solid var(--tree);
+ border: 1px solid var(--border);
  max-width: 400px;
 }
 
@@ -383,15 +402,15 @@ button.red:hover,  input.red[type="submit"]:hover {
   width: 100%;
   background:#454856;
   border-radius: 4px;
-  color: #d6d6d6;
+  color: #f2f2f2;
   font-weight: bold;
   padding: 2px 4px;
 }
 
 .simple-tree details.application > summary.apprunning {
   text-shadow: none;
-  background:linear-gradient(90deg, var(--green) 70%, var(--darkgreen));;
-  color: #FFFFFF;
+  background:linear-gradient(90deg, var(--green) 70%, var(--darkgreen));
+  color: var(--greencontrast);
 } 
 
 /* For forms */
@@ -400,11 +419,11 @@ button.red:hover,  input.red[type="submit"]:hover {
     min-width:300px;
     max-width:500px;
     margin: 1em auto;
-    border: 1px solid var(--tree);
+    border: 1px solid var(--border);
     background: var(--blockbg);
     padding: 1em;
     border-radius: 8px;
-    box-shadow: 2px 2px 0 var(--white);
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.12), 0 8px 24px rgba(0, 0, 0, 0.25);
 }
 
 .fcol, .form {
@@ -445,7 +464,7 @@ button.red:hover,  input.red[type="submit"]:hover {
   text-indent: -9999px;
   width: 40px;
   height: 20px;
-  background-color:  #ccc;
+  background-color:  #6a6d70;
   display: block;
   border-radius: 100px;
   position: absolute;
@@ -466,7 +485,7 @@ button.red:hover,  input.red[type="submit"]:hover {
 }
 
 .switch input:checked + label {
-    background-color: #2196F3;
+    background-color: var(--green);
 }
 
 .switch input:checked + label:after {
@@ -489,8 +508,9 @@ button.red:hover,  input.red[type="submit"]:hover {
     display: inline-block;
     cursor: pointer;
     border-radius: 50%;
-    background: var(--darkgreen);
-    color:white;
+    background: var(--green);
+    color:var(--greencontrast);
+    font-weight: bold;
 }
 
 .tooltip span{
@@ -503,7 +523,7 @@ button.red:hover,  input.red[type="submit"]:hover {
     width:400px;
     text-align: left;
     padding: 5px;
-    border: solid 1px var(--white);
+    border: solid 1px var(--border);
     background: var(--grey); 
     color:var(--white); 
     border-radius: 4px;
@@ -542,4 +562,3 @@ button.red:hover,  input.red[type="submit"]:hover {
 }
 
 /** Styles for auth **/
-

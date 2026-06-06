@@ -6,8 +6,24 @@
 <style>
 
 :root {
+   --body: #d4d4d4;
+   --bodybg: #252526;
+   --panelbg: #333333;
+   --inputbg: #3f3f3f;
+   --inputbghover: #4b4b4b;
    --scrollbar: #252526;
-   --scrollbarthumb: #3c3c3c;
+   --scrollbarthumb: #4b4b4b;
+   --border: #6a6d70;
+   --focus: #d9dbdc;
+   --green: #69C575;
+   --greenhover: #82c98c;
+   --darkgreen: #49a354;
+   --greencontrast: #102315;
+   --red: #d83b31;
+   --redhover: #c43228;
+   --redbright: #ff6b63;
+   --yellow: #ffd12b;
+   --white: #FFFFFF;
 }
 
 
@@ -39,26 +55,26 @@ body {
     position: relative;
     font-family: Verdana, Arial, Helvetica, sans-serif;
     min-height: 100vh;
-    background-color: #24262A;
-    color: #E1E4E9;
+    background-color: var(--bodybg);
+    color: var(--body);
     font-size: .7em;
 
 }
 
-a {color:#5adff5;text-decoration:underline;text-underline-position:under;}
-a:hover {color: #03d8fb;}
+a {color:var(--yellow);text-decoration:underline;text-underline-position:under;}
+a:hover {color: var(--white);}
 
 :focus {outline:none;}
 
 #ctrl {
     padding: 5px;
-    background: #333333;
-    color: white;
+    background: var(--panelbg);
+    color: var(--white);
     position: sticky;
     top: 0;
     right: 0;
     left: 0;
-    border-bottom: 1px solid #666;
+    border-bottom: 1px solid var(--border);
     min-width: 615px;
     overflow: hidden;
     display: grid;
@@ -90,7 +106,7 @@ a:hover {color: #03d8fb;}
 
 span.err {
     font-weight: bold;
-    color: red;
+    color: var(--redbright);
 }
 
 .led-red,
@@ -102,13 +118,13 @@ span.err {
 
 
 .led-red {
-    background-color: #ff5858;
-    box-shadow: #000 0 -1px 7px 1px, inset rgb(255, 193, 193) 0 -1px 9px, rgb(77, 2, 2) 0 2px 12px;
+    background-color: var(--redbright);
+    box-shadow: #000 0 -1px 7px 1px, inset rgba(255, 210, 205, 0.8) 0 -1px 8px, rgba(196, 50, 40, 0.75) 0 2px 10px;
 }
 
 .led-green {
-    background-color: #6cff6c;
-    box-shadow: #00000077 0 -1px 7px 1px, inset rgb(204, 255, 103) 0 -1px 9px, rgb(138, 255, 5) 0 2px 4px;
+    background-color: var(--green);
+    box-shadow: #00000077 0 -1px 7px 1px, inset rgba(209, 255, 184, 0.65) 0 -1px 8px, rgba(73, 163, 84, 0.8) 0 2px 8px;
 }
 
 .vertical-center {
@@ -120,22 +136,26 @@ button {
     padding: 5px 12px;
     line-height: 1em;
     border-radius: 4px;
-    background-color: #69C575;
-    color: #FFFFFF;
+    background-color: var(--green);
+    color: var(--greencontrast);
     font-weight: bold;
-    border: none;
+    border: 1px solid var(--green);
     cursor: pointer;
     transition: all .3s ease;
 }
 button:hover {
-    background-color: #4ac55b;
+    background-color: var(--greenhover);
+    border-color: var(--greenhover);
 }
 
 button.red {
-    background-color: #F66459;
+    background-color: var(--red);
+    color: var(--white);
+    border-color: var(--red);
 }
 button.red:hover {
-    background-color: #f5483c;
+    background-color: var(--redhover);
+    border-color: var(--redhover);
 }
 
 label {
@@ -151,23 +171,28 @@ label {
 input[type="text"]{
     display: inline-block;
     padding: 5px 12px;
-    background-color: #69c57500;
+    background-color: var(--inputbg);
     border-radius: 4px;
-    border: solid 2px #69C575;
+    border: solid 1px var(--border);
     outline: none;
-    color: #FFFFFF;
+    color: var(--white);
     transition: all .3s ease;
 }
 
-button:disabled {background: #3f4e4f;}
+button:disabled {
+    background: #3f4e4f;
+    border-color: #3f4e4f;
+    color: #b7c3c4;
+    cursor: default;
+}
 
 input[type="text"]:focus,
-input[type="text"]:active,{
-    border: solid 2px #7bfd8d;
-    background-color: #69c57544;
+input[type="text"]:active {
+    border-color: var(--focus);
+    background-color: var(--inputbghover);
 }
 input[type="text"]::placeholder {
-    color: #a1a1a1;
+    color: #bdbdbd;
 }
 
 input[type="checkbox"] {
@@ -179,14 +204,14 @@ input[type="checkbox"] {
     width: 18px;
     height: 18px;
     margin-right: 12px;
-    accent-color: #69C575;
-    border: solid 3px #69C575;
+    accent-color: var(--green);
+    border: solid 2px var(--border);
     border-radius: 5px;
 }
 
 input[type="checkbox"]:checked::after {
-    border-color: #69C575;
-    background-color: #69C575;
+    border-color: var(--green);
+    background-color: var(--green);
     background-size: 15px;
     background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 457.57"><path fill="white" d="M0,220.57c100.43-1.33,121-5.2,191.79,81.5,54.29-90,114.62-167.9,179.92-235.86C436-.72,436.5-.89,512,.24,383.54,143,278.71,295.74,194.87,457.57,150,361.45,87.33,280.53,0,220.57Z"/></svg>');
     background-position: center;
@@ -212,16 +237,20 @@ input[type=checkbox]::after {
 
 select {
     padding: 5px 12px;
-    background-color: transparent;
-    color: #FFFFFF;
+    background-color: var(--inputbg);
+    color: var(--white);
     cursor: pointer;
     outline: none;
     border-radius: 4px;
-    border: solid 2px #69C575;
+    border: solid 1px var(--border);
+}
+select:focus {
+    border-color: var(--focus);
+    background-color: var(--inputbghover);
 }
 select option {
-    color: #FFFFFF;
-    background-color: #333333;
+    color: var(--white);
+    background-color: var(--panelbg);
 }
 .advanced {display:none;}
 </style>
