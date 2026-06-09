@@ -284,7 +284,7 @@ local function pingtimer(self)
       for peerT,status in pairs(pingtmoT) do
 	 if status ~= true then
 	    local peerAddr=peername(peerT.sock)
-	    peerT=peersT[peerAddr]
+	    local peerT=peersT[peerAddr]
 	    if peerT then
 	       peerT.nolog=true
 	       MTL_log(self,true,"Ping timeout for %s ",peerAddr)
