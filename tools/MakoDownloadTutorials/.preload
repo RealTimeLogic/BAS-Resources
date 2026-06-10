@@ -214,6 +214,10 @@ local function deferred()
          apps[name]=name:match"([^%.]+)"
       end
    end
+   if xedge and apps["Xedge.zip"] then
+      apps["Xedge.zip"]=nil
+      tracep(false,0,"Not loading Xedge; already loaded!")
+   end
    apps["tutorials.zip"]=nil
    apps["intro.zip"]=""
    apps["IoT.zip"]=""
