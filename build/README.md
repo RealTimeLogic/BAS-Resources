@@ -8,6 +8,12 @@
 - Xedge.sh - Build Xedge (Linux)
 - XedgeMako.cmd/XedgeMako.sh - Build the Xedge Mako Server app
 
+## Download Pre-Built Packages
+
+- [Xedge.zip](https://makoserver.net/download/packages/Xedge.zip) - the Mako Server edition
+- [mako.zip](https://makoserver.net/download/packages/mako.zip) - the [developer edition](https://makoserver.net/documentation/developer-package/)
+
+
 ## Required and Optional Tools
 
 The following is a list of required and optional tools the build
