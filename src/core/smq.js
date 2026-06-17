@@ -291,8 +291,13 @@ SMQ.Client = function(url, opt) {
 	};
 	if(true == opt.cleanstart)
 	{
-	    onResp2Cnt=-1;
-	    onresp2();
+	    pendingCmds=[];
+	    if(connected) {
+		if(self.onreconnect)
+		    self.onreconnect(newTid, rnd, ipaddr);
+	    }
+	    else
+		onclose("reconnecting failed",false);
 	    return;
 	}
 	let onresp1 = function() { // (2) Re-create subscriptions
