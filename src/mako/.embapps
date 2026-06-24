@@ -32,24 +32,43 @@ function createBpIo(bio,bp)
    return ba.create.luaio{open=open,files=files,stat=stat,mkdir=mkdir,rmdir=rmdir,remove=remove}
 end
 
-local function create(start,path,io)
-   local name=path
-   local prio=0
+local function startPrio(app) return app.startprio or 100 end
+local function appPath(app) return app.path or "" end
+
+local function appConfig(path,io)
+   local name,prio=path,0
    if  io:stat".config" then
       local ok,t=pcall(function() return io:dofile".config" end)
       if ok and "table" == type(t) then
 	 name = "string" == type(t.dirname) and t.dirname or ("string" == type(t.name) and t.name or name)
 	 prio=t.prio or 0
+	 startprio=startPrio(t)
       else
 	 tracep(false,0,".config Err:",name,t)
       end
    end
-   local ok,err=start(name,prio,io,path,true)
+   return {path=path,io=io,name=name,prio=prio,startprio=startprio}
+end
+
+local function create(start,cfg)
+   local path=cfg.path
+   local ok,err=start(cfg.name,cfg.prio,cfg.io,path,true)
    if not ok then tracep(false,0,string.format("%s failed: %s",path,err)) end
 end
 
+local function appSort(a,b)
+   local aprio,bprio=startPrio(a),startPrio(b)
+   if aprio == bprio then return appPath(a) < appPath(b) end
+   return aprio < bprio
+end
+
 return function(vmio,start)
+   local apps={}
    for path,isdir in vmio:files("apps", true) do
-      if isdir then create(start,path,createBpIo(vmio,"apps/"..path)) end
+      if isdir then
+	 apps[#apps+1]=appConfig(path,createBpIo(vmio,"apps/"..path))
+      end
    end
+   table.sort(apps,appSort)
+   for _,cfg in ipairs(apps) do create(start,cfg) end
 end
