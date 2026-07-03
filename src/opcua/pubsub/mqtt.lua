@@ -84,7 +84,13 @@ function C:subscribe(topic, messageCallback)
     return self:onData(messageCallback, ...)
   end
 
-  self.server:subscribe(topic, {onpub=onpublish})
+  local function onsubscribe(topic, reason, props)
+    traceI(fmt("mqtt | Subscribed to topic '%s': reason='%s', properties='%s'", topic, reason, ba.json.encode(props)))
+  end
+
+  self.onpub[topic] = onpublish
+
+  self.server:subscribe(topic, onsubscribe)
 end
 
 local brCh <const> = string.byte('{')
@@ -96,20 +102,20 @@ function C:onData(messageCallback, topic, payload, properties)
     tools.hexPrint(payload, traceD)
   end
 
-  local tranportProfileUri = self.tranportProfileUri
-  if tranportProfileUri == nil then
+  local transportProfileUri = self.transportProfileUri
+  if transportProfileUri == nil then
     if payload[1] & 0x0f == 1 then
-      tranportProfileUri = MqttBinary
+      transportProfileUri = MqttBinary
     elseif payload[1] == brCh then
-      tranportProfileUri = MqttJson
+      transportProfileUri = MqttJson
     end
   end
 
   local msg
   local err
-  if tranportProfileUri == MqttJson then
+  if transportProfileUri == MqttJson then
     msg, err = self:decodeJson(payload)
-  elseif tranportProfileUri == MqttBinary then
+  elseif transportProfileUri == MqttBinary then
     msg, err = self:decodeBinary(payload)
   else
     err = BadDataEncodingUnsupported
@@ -118,26 +124,46 @@ function C:onData(messageCallback, topic, payload, properties)
   messageCallback(msg, err)
 end
 
-function C:connect(endpointUrl, tranportProfileUri, connectCallback, mqttc)
+function C:connect(endpointUrl, transportProfileUri, connectCallback, mqttc)
   local dbgOn = self.config.logging.binary.dbgOn
   if (dbgOn) then traceD(fmt("mqtt | Connecting to '%s'", endpointUrl)) end
 
-  if type(tranportProfileUri) ~= "string" then
-    connectCallback = tranportProfileUri
-    tranportProfileUri = nil
+  if type(transportProfileUri) ~= "string" then
+    connectCallback = transportProfileUri
+    transportProfileUri = nil -- Will be detected from received messages
   end
 
-  self.tranportProfileUri =  tranportProfileUri
+  self.transportProfileUri =  transportProfileUri
+  if transportProfileUri and transportProfileUri ~= MqttBinary and transportProfileUri ~= MqttJson then
+    error(fmt("unsupported transport profile uri: %s", transportProfileUri))
+  end
 
   local onstatus = function(...)
     return self:onstatus(connectCallback, ...)
   end
 
-  if not mqttc then
-    mqttc = require("mqttc")
+  local onpublish = function(topic,payload,properties,cpt)
+    local onpub = self.onpub[topic]
+    if not onpub then
+      traceE(fmt("mqtt | No callback for topic '%s'", topic))
+      return
+    end
+
+    return onpub(topic,payload,properties,cpt)
   end
-  local url = tools.parseUrl(endpointUrl)
-  self.server = mqttc.create(url.host, onstatus, {port=url.port})
+
+  if type(endpointUrl) == "string" then
+    if not mqttc then
+      mqttc = require("mqttc")
+    end
+    local url = tools.parseUrl(endpointUrl)
+    self.server = mqttc.create(url.host, onstatus, onpublish, {port=url.port})
+  elseif type(endpointUrl) == "table" then
+    assert(self.transportProfileUri, "transport profile uri is not set")
+    self.server = endpointUrl
+  else
+    error("invalid first argument: must be a enrpointURL or mqtt client")
+  end
 end
 
 function C:createPublisher()
@@ -251,27 +277,27 @@ function C:publish(topic, publisherId)
     for _, field in pairs(dataset.indexes) do
       local value = field.value
       if value ~= nil then
-        if self.tranportProfileUri == MqttBinary then
+        if self.transportProfileUri == MqttBinary then
           table.insert(payload, {Index = field.index, Value=value})
-        elseif self.tranportProfileUri == MqttJson then
+        elseif self.transportProfileUri == MqttJson then
           payload[field.name] = value
         end
       end
     end
 
-      if self.tranportProfileUri == MqttBinary then
-        message.Fields = payload
-      else
-        message.Payload = payload
-      end
-
-      table.insert(messages, message)
+    if self.transportProfileUri == MqttBinary then
+      message.Fields = payload
+    else
+      message.Payload = payload
     end
+
+    table.insert(messages, message)
+  end
 
   msg.Messages = messages
 
   local payload = q.new(self.config.bufSize)
-  if self.tranportProfileUri == MqttBinary then
+  if self.transportProfileUri == MqttBinary then
     local encoder = self.model:createBinaryEncoder(payload)
     uadp.encode(encoder, msg)
   else
@@ -316,8 +342,20 @@ function C:startPublishing(topic, publisherId, timeout)
 end
 
 function C:stopPublishing()
-  self.publisher.timer:cancel()
+  if self.publisher and self.publisher.timer then
+    self.publisher.timer:cancel()
+    self.publisher.timer = nil
+  end
 end
+
+function C:close()
+  self:stopPublishing()
+  if self.server then
+    self.server:close()
+    self.server = nil
+  end
+end
+
 
 local function NewClient(config, uaServer)
   if config == nil then
@@ -353,7 +391,8 @@ local function NewClient(config, uaServer)
   local c = {
     config = config,
     uaServer = uaServer,
-    model = model
+    model = model,
+    onpub = {}
   }
 
   setmetatable(c, C)

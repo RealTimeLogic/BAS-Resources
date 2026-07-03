@@ -509,6 +509,9 @@ end
 
 
 local function comp(a,b)
+  if type(a) == 'number' and type(b) == 'number' then
+    return a < b
+  end
   return tostring(a) < tostring(b)
 end
 
@@ -527,8 +530,23 @@ function T.printTable(name, v, f, idents)
       table.insert(keys, k)
     end
     table.sort(keys, comp)
+    local isArray = true
+    local prevK;
     for _,k in ipairs(keys) do
-      if type(k) == 'string' then
+      if type(k) ~= 'number' then
+        isArray = false
+        break
+      end
+      if prevK and k ~= prevK + 1 then
+        isArray = false
+        break
+      end
+      prevK = k
+    end
+    for _,k in ipairs(keys) do
+      if type(k) == 'number' and not isArray then
+        T.printTable(string.format("[%s]", k), v[k], f, idents.."  ")
+      elseif type(k) == 'string' then
         T.printTable(k, v[k], f, idents.."  ")
       else
         T.printTable("", v[k], f, idents.."  ")

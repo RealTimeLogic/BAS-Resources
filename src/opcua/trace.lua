@@ -2,7 +2,7 @@ local compat = require("opcua.compat")
 
 local function traceLog(level, msg)
   if tracep then
-    tracep(false, 5, compat.gettime(), level, msg)
+    tracep(false, 5, compat.to_datestring(compat.to_timestamp()), level, msg)
   else
     print(level, msg)
   end

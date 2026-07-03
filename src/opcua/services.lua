@@ -719,7 +719,7 @@ function Svc:read(req, channel)
     end
 
     if dbgOn and val.StatusCode ~= Good then
-      traceD(fmt("Services:Read(%s) | StatusCode %d", sessionId, val.StatusCode))
+      traceD(fmt("Services:Read(%s) | StatusCode %s", sessionId, val.StatusCode))
     end
 
     tins(results, val)

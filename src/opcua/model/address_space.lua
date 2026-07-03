@@ -366,10 +366,7 @@ local function toDataValue(attrId, val, node)
       }
       val = body
     end
-  elseif attrId == AttributeId.RolePermissions then
-    return { StatusCode = Good }
-  elseif attrId == AttributeId.UserRolePermissions then
-    return { StatusCode = Good }
+
   elseif attrId == AttributeId.AccessRestrictions then
     expectedType = VariantType.UInt16
   elseif attrId == AttributeId.AccessLevelEx then
@@ -378,8 +375,8 @@ local function toDataValue(attrId, val, node)
     return { StatusCode = BadAttributeIdInvalid }
   end
 
-  if not val then
-    return { StatusCode = Good }
+  if val == nil then
+    return { StatusCode = BadAttributeIdInvalid }
   end
 
   local dataValue = {
@@ -447,7 +444,11 @@ end
 
 function VAttrs:__index(key)
   local k = getAttributeId(key)
-  return toDataValue(k, rawget(self.Attrs, "data")[k], self.Node)
+  if (rawget(self.Attrs, "mask") & (1 << k)) == 0 then
+    return { StatusCode = BadAttributeIdInvalid }
+  end
+  local val = rawget(self.Attrs, "data")[k]
+  return toDataValue(k, val, self.Node)
 end
 
 local function createVAttrs(attrs, node)

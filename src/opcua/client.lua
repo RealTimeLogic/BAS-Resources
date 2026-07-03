@@ -687,8 +687,8 @@ function C:browse(params, callback)
 end
 
 local function allAttributes(nid, attrs)
-  for _,val in pairs(AttributeId) do
-    attrs[val] = {NodeId=nid, AttributeId=val}
+  for i = 1, AttributeId.Max do
+    attrs[i] = {NodeId=nid, AttributeId=i}
   end
 end
 
