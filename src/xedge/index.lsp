@@ -5,12 +5,8 @@
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <link rel="icon" type="image/x-icon" href="assets/favicon.ico"/>
-  <link rel="stylesheet" href="assets/tree.css">
   <link rel="stylesheet" href="assets/xedge.css"/>
-  <script src="jquery.js"></script>
-  <script src="assets/tree.js"></script> 
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/split.js/1.6.0/split.min.js"></script>
-  <script src="assets/xedge.js"></script>
+  <script type="module" src="assets/xedge.js"></script>
 </head>
 <body>
 <?lsp 

@@ -1,162 +1,356 @@
-## Draft
+# Xedge REST and Browser Plugin API
 
-# Xedge File REST API
+Status: Draft
 
-The Xedge IDE uses the built-in Web File Server (WFS) to read and update application files.  This API is also available to external tools that authenticate the same way as the IDE (session cookie or HTTP authentication).  Requests target resources beneath `/rtl/apps/`, where the first path segment selects an IO root or installed app and the remainder is the file path inside that root.【F:src/xedge/assets/xedge.js†L586-L615】
+This document describes the Xedge interface. The implementation is split
+between:
 
-For JSON-formatted success and error payloads on write operations, send the header `X-Requested-With: XMLHttpRequest`.  The IDE always does this through its jQuery helper and the server switches to JSON responses when that header is present.【F:src/core/.lua/wfs.lua†L576-L585】【F:src/core/.lua/wfs.lua†L150-L169】
+- the Web File Server (WFS) mounted at `/rtl/apps/`, used for files and folders;
+- the Xedge command endpoint at `/rtl/private/command.lsp`, used for IDE and
+  application-management operations; and
+- the browser and Lua plugin APIs, used to extend Xedge without modifying its
+  core UI or command dispatcher.
 
-## Operations
+The relevant implementation files are `src/core/.lua/wfs.lua`,
+`src/xedge/.lua/xedge.lua`, `src/xedge/private/command.lsp`, and
+`src/xedge/assets/xedge.js`.
 
-### `HEAD /rtl/apps/{io-root}/{path}`
-Retrieves metadata without downloading the file.  The IDE uses this to verify the MIME type and size before fetching editor content.【F:src/xedge/assets/xedge.js†L791-L827】
+## Common request conventions
 
-**Response**
-- `200 OK` with `Content-Length` (0 for directories) and `Content-Type` derived from the file extension.  Directories include the header `BaIsDir: true`; all responses include `HttpResMgr` and `Etag` headers for cache-aware clients.【F:src/core/.lua/wfs.lua†L589-L605】
-- `404 Not Found` if the file does not exist.【F:src/core/.lua/wfs.lua†L589-L595】
-- `401 Unauthorized` if authentication is required.
+- Clients authenticate the same way as the Xedge UI: a session cookie or HTTP
+  authentication.
+- Requests to `private/command.lsp` must include
+  `X-Requested-With: XMLHttpRequest`. A request without this header receives
+  `404 Not Found`.
+- WFS mutation requests should include the same header to select JSON success
+  and error responses.
+- The Xedge browser client uses `fetch()` and `URLSearchParams`. Normal command
+  requests are GET requests with URL-encoded query parameters. WFS POST commands
+  use URL-encoded form data. File PUT requests carry the raw file contents.
+- A `401 Unauthorized` response causes the Xedge client to open its login UI and
+  retry the original request after successful authentication.
+- `private/command.lsp` rejects requests whose `Sec-Fetch-Site` header is
+  `cross-site`.
 
-### `GET /rtl/apps/{io-root}/{path}`
-Downloads the selected resource.  The IDE issues a plain GET for editable files after the HEAD check.【F:src/xedge/assets/xedge.js†L818-L824】  Directory GET requests accept the query parameter `cmd` for Web File Server commands such as `cmd=lj` (list JSON) that populate the file tree.【F:src/xedge/assets/xedge.js†L618-L643】
+## Xedge file API
 
-**Response**
-- Files stream their raw content with a MIME type inferred from the extension.  Supplying the query parameter `download=1` forces a `Content-Disposition` attachment header.【F:src/core/.lua/wfs.lua†L607-L624】
-- Directories run the requested WFS command and respond with JSON (for AJAX callers) or HTML, depending on the command.
-- Errors return JSON objects `{"err": "code", "emsg": "message"}` for AJAX callers, or HTML error pages otherwise.【F:src/core/.lua/wfs.lua†L150-L208】
+### Resource paths
 
-### `PUT /rtl/apps/{io-root}/{path}`
-Creates or replaces the target file.  The IDE sends the editor contents in the request body with no transformation (`processData: false`) and lets the browser pick the `Content-Type`.【F:src/xedge/assets/xedge.js†L612-L615】
+File requests use this form:
 
-**Request body**
-- Raw file data.  Text files should be UTF-8 encoded; binary files are accepted as-is.
+```text
+/rtl/apps/{io-or-app-name}/{path}
+```
 
-**Response**
-- On success, the server returns `{"ok": true}` to AJAX callers.【F:src/core/.lua/wfs.lua†L576-L585】【F:src/core/.lua/wfs.lua†L150-L169】
-- Failures emit JSON errors `{"err": "code", "emsg": "message"}` detailing the reason (invalid name, permission denied, out of space, etc.).【F:src/core/.lua/wfs.lua†L170-L208】
-- The server enforces existing WebDAV locks before accepting the upload.【F:src/core/.lua/wfs.lua†L576-L585】
+The first path segment selects an Xedge I/O root or installed application. The
+remaining segments identify a resource inside that root. Encode individual path
+segments when constructing a URL; do not encode `/` separators.
 
-## `.xlua` hot-reload behavior
-When a `.xlua` script is saved through this API while its owning app is running, closing the write handle automatically reloads the script by invoking `manageXLuaFile`.  This mirrors the IDE's "Save & Run" behavior for Lua automation files.【F:src/core/.lua/wfs.lua†L556-L568】【F:src/xedge/.lua/xedge.lua†L530-L568】
+### HTTP methods
 
-## Example sequence
-1. `HEAD /rtl/apps/myapp/myfile.xlua` – confirm the file is below 100 KB and text-based.
-2. `GET /rtl/apps/myapp/myfile.xlua` – fetch the current source to present in an editor.
-3. `PUT /rtl/apps/myapp/myfile.xlua` with the updated script in the body and the header `X-Requested-With: XMLHttpRequest` – the server stores the file, responds with `{ "ok": true }`, and restarts the script if `myapp` is running.
+#### `HEAD /rtl/apps/{io}/{path}`
 
-Clients can reuse these operations for any other file types under `/rtl/apps/`, combining them with the directory commands (e.g., `cmd=lj`, `cmd=mkdirt`, `cmd=rmt`) when they need to browse, create, or delete resources.
+Returns metadata without downloading the resource.
 
+- `200 OK` includes `Content-Length`, `HttpResMgr: V2.1`, and `Etag`.
+- A directory has `Content-Length: 0` and `BaIsDir: true`.
+- A file has a content type inferred from its extension.
+- A missing resource returns `404 Not Found`.
 
-# Xedge Editor REST API
+The Xedge editor uses HEAD to reject directories, unsupported types, and files
+that are too large before issuing GET.
 
-- The Xedge IDE front end interacts with the backend by issuing AJAX requests to `private/command.lsp` , always including a `cmd` field that selects a handler from the backend `commands` table; additional data fields are sent alongside as query parameters or form data, and responses are expected in JSON unless otherwise noted.
+#### `GET /rtl/apps/{io}/{file}`
 
-- On the server, `xedge.command` rejects cross-site callers, parses the request body, dispatches to `commands[cmd]` , and falls back to returning `{err: "Unknown command"}` for unsupported operations.
+Streams the file contents. Add `download=1` to request an attachment response.
 
+#### `GET /rtl/apps/{io}/{directory}/`
 
-## Command reference
+With `cmd`, executes one of the JSON directory commands below. Without `cmd`,
+the Xedge WFS mount serves the standalone SPA Web File Manager. The directory
+command API itself never generates the old Web File Manager HTML.
 
-### `acme`
+#### `PUT /rtl/apps/{io}/{file}`
 
-Handles certificate provisioning via nested `acmd` actions; the front end supplies `acmd` in addition to standard parameters.
+Creates or replaces a file using the raw request body. An empty body creates an
+empty file. Existing WebDAV locks and authorization rules are enforced.
 
-- `acmd=isreg` : no extra fields; returns ACME registration status ( `isreg` ), WAN address, socket name, suggested device name, portal URL, and reverse-connection status, all wrapped in `{ok:true,...}` .
+With `X-Requested-With`, success is:
 
-- `acmd=available` : requires `name` ; returns `{ok:true, available:<bool>}` to indicate whether the device name is available.
+```json
+{"ok":true}
+```
 
-- `acmd=auto` : accepts `revcon` ( `"true"` / `"false"` ) and, when registering, `email` and `name` . Updates stored reverse-connection preference, optionally registers/renews with ACME, and responds `{ok:true}` or `{ok:false, err}` on validation failure.
+#### `POST /rtl/apps/{io}/{path}`
 
+A URL-encoded request executes a directory command. A multipart request is
+handled as an upload.
 
-### `getconfig`
+#### `DELETE /rtl/apps/{io}/{path}`
 
-No inputs. Returns `{ok:true, config:<base64url JSON>}` holding serialized app configuration. The UI stores this in localStorage when persistent storage is unavailable.
+Deletes a file or recursively deletes a directory. Authorization and locks are
+checked for each affected resource.
 
-### `getionames`
+### Directory commands
 
-Optionally accepts `xedgeconfig` (browser-stored configuration blob). When running without disk config, the backend uses it to initialize apps, then returns `{ok:true, ios:[...], nodisk:<bool>}` to enumerate known I/O roots and note disk availability.
+Commands are supplied through the `cmd` parameter. Directory URLs should end in
+`/`.
 
-### `getappsstat`
+| Command | Method | Parameters | Response |
+| --- | --- | --- | --- |
+| `lj` | GET | none | JSON array of directory entries |
+| `mkdirt` | POST | `dir` | `{"ok":true}` |
+| `mv` | GET | `from`, `to` | `{"ok":true}` |
+| `rmt` | POST | `file` | `{"ok":true}` |
+| `sesuri` | GET | none | `{"uri":"...","tmo":seconds}` |
+| `getlock` | GET | `name` | Lock owner/time or `{"notlocked":true}` |
+| `getlocks` | GET | repeated `n` | `{"files":[...]}` |
+| `lock` | POST | repeated `n`, Unix expiration `time` | `{"ok":true}` |
+| `unlock` | POST | repeated `n` | `{"ok":true}` |
 
-No parameters. Responds `{ok:true, apps:{<appName>:<runningBool>,...}}` , allowing the UI to mark running apps in the tree.
+`mv` is the legacy NetIo-compatible rename/move command. `from` is relative to
+the requested directory. `to` is a destination path prefixed by the WFS base
+URI, such as `/rtl/apps/disk/new/path.txt`.
 
-### `gethost`
+`rmt` is retained for compatibility. New clients may use DELETE directly.
 
-No parameters. Returns `{ok:true, ip:<host-address>}` so the UI can prefill NET IO app URLs.
+The `lj` response is an array with one object per resource:
 
-### `getintro`
+```json
+[
+  {"n":"main.xlua","s":421,"t":1785657600},
+  {"n":"www","s":-1,"t":1785657600}
+]
+```
 
-No parameters. Loads `.lua/intro.html` and returns `{ok:true, intro:<html>}` for the welcome editor when no apps exist.
+The compatibility fields are:
 
-### `getmac`
+- `n`: resource name;
+- `s`: file size in bytes, or `-1` for a directory; and
+- `t`: modification time.
 
-No parameters. Default implementation responds `{ok:false}` and is intended to be overridden by plugins to return `{ok:true, mac}` used when suggesting certificate names.
+These fields must not change because other clients, including NetIo, consume
+them. Future versions may add fields. If session URLs are available, the `lj`
+response also includes `BaWfsSes: 1`. For a file session URL, request `sesuri`
+from its parent directory and append the encoded file name to the returned URI.
 
-### `gettemplate`
+`getlocks` returns entries shaped as `{"n":"name","l":false}` or
+`{"n":"name","l":"owner"}`. `getlock` returns
+`{"owner":"name","time":unixTime}` when locked.
 
-Requires `ext` (file extension). Returns `{ok:true, data:<template-content>}` , falling back to a newline if no template exists; used when creating new files.
+### WFS errors
 
-### `credentials`
+JSON errors use this shape:
 
-- Without `name` : returns `{ok:true, data:{name:<firstUserOrEmpty>}}` so the UI can populate the authentication dialog.
+```json
+{"err":"noaccess","emsg":"Cannot delete file: No file system access."}
+```
 
-- With `name` and `pwd` : stores a hashed password (or deletes the user when `pwd` is empty), persists config, reinstalls authentication, and responds `{ok:true}` followed by the standard data payload for convenience.
+Common status mappings are:
 
+- `400`: invalid command or name;
+- `403`: authorization or lock failure;
+- `404`: resource not found;
+- `405`: destination already exists;
+- `409`: missing path or non-empty directory;
+- `503`: storage or capacity failure.
 
-### `pn2url`
+### `.xlua` hot reload
 
-Requires `fn` (path). When the referenced app is running and exposes an LSP endpoint ( `dirname` or `domainname` configured), returns `{ok:true, url:<http-path>}` ; otherwise responds `{err:<message>}` explaining the failure (app missing, not running, or LSP disabled).
+When a running application's `.xlua` file is replaced through WFS, closing the
+write handle invokes Xedge's `manageXLuaFile` flow so the program is reloaded.
 
-### `pn2info`
+## Xedge command API
 
-Requires `fn` . For app-owned paths, returns `{ok:true, isapp:true, running:<bool>, lsp:<bool>, url:<optional launch URL>}` ; for non-app resources, it still returns `{ok:true}` so callers can enable/disable UI actions without error handling.
+### Endpoint
 
-### `run`
+```text
+GET /rtl/private/command.lsp?cmd={command}&...
+```
 
-Requires `fn` . When the owning app is running, triggers `manageXLuaFile` to execute `.xlua` scripts, then returns `{ok:true}` . No additional output.
+Unless noted otherwise, parameters are URL-encoded strings and responses are
+JSON. A successful response normally contains `ok: true`. Some discovery
+commands intentionally return an array instead of an object.
 
-### `smtp`
+An unknown command returns:
 
-- Retrieval (no payload): merges stored SMTP credentials with email-log settings and returns them together in the response object (including `ok:true` ).
+```json
+{"err":"Unknown command 'name'"}
+```
 
-- Update: expects trimmed fields `email` , `server` , `port` , `user` , `password` , `connsec` . If the configuration changes, the backend optionally sends a test email (requiring non-empty server/user/password/email and numeric port) and persists the settings. Responses include `{ok:true}` on success or `{ok:false, err}` when the mail test fails.
+The native Xedge request wrapper treats a non-2xx HTTP response, `err`, or
+`emsg` as failure. Its callback receives the response on success and `false` on
+failure. Authentication failures are retried after login.
 
+### Built-in commands
 
-### `openid`
+#### `acme`
 
-- Retrieval (empty payload): returns `{ok:true, data:<storedOpenIDConfig or {}>}` for the UI dialog.
+Certificate management selected by `acmd`:
 
-- Update: accepts `tenant` , `client_id` , `client_secret` (empty `client_secret` removes it). Validates via `ms-sso` , updates the stored OpenID settings, and reinstalls authentication. On validation error it returns `{ok:false, err}` (with `desc` when available).
+- `isreg`: returns registration status, email/name when known, WAN and socket
+  addresses, portal URL, and reverse-connection state.
+- `available`: requires `name`; returns `available`.
+- `auto`: accepts `revcon` and, for registration, `email` and `name`; returns
+  `ok` or an error.
 
+#### `getconfig`
 
-### `elog`
+Returns `config`, a base64url-encoded JSON object containing application
+configuration. This supports browser persistence when disk configuration is
+unavailable.
 
-Requires numeric `maxbuf` and `maxtime` , plus `enablelog` and optional `subject` . Updates email-log limits and subject (defaulting to "Xedge Log") and replies `{ok:true}` when the numeric conversion succeeds.
+#### `getionames`
 
-### `execLua`
+Accepts optional `xedgeconfig`. Returns:
 
-Requires `code` (Lua source). Compiles and executes the code asynchronously; on success responds `{ok:true}` , otherwise logs the error and returns `{ok:false, err:<message>}` .
+```json
+{"ok":true,"ios":["disk","home","net"],"nodisk":false}
+```
 
-### `lsPlugins`
+During startup this command also establishes the authentication boundary before
+the client creates its tree and loads plugins.
 
-No inputs. Returns a JSON array of plugin filenames so the front end can dynamically load additional scripts.
+#### `getappsstat`
 
-### `getPlugin`
+Returns `apps`, an object mapping application names to running booleans.
 
-Requires `name` (must end in `.js` ). Streams the plugin file if found; otherwise emits HTTP 404. This endpoint writes raw content and aborts the normal JSON response pipeline, so callers should expect JavaScript, not JSON.
+#### `gethost`
 
-### `startApp`
+Returns the request host address as `ip` for NET IO application setup.
 
-Expects `name` pointing to an uploaded ZIP under the active storage ( `disk` or `home` ) and optional `deploy` ( `"false"` to unpack into a directory). The backend opens the ZIP, optionally expands it to a directory, executes the app's `.config` (capturing optional `name` , `autostart` , `dirname` , `domainname` , `startprio` , and lifecycle hooks), and either installs a new app or upgrades an existing one. Responses include:
+#### `getintro`
 
-- `ok` : success indicator ( `false` when the ZIP can't be opened or unpacked),
+Returns the welcome-page HTML in `intro`.
 
-- `upgrade` : `true` when an existing app was replaced,
+#### `getmac`
 
-- `err` : error message when `ok=false` ,
+The default implementation returns `{"ok":false}`. A platform plugin may
+override it and return `{"ok":true,"mac":"..."}`.
 
-- `info` : hook-returned details (empty string by default).
+#### `gettemplate`
 
+Requires `ext`. Returns the matching new-file template as `data`, or a newline
+when no template exists.
 
-### Default error handling
+#### `credentials`
 
-If no handler is found, the backend logs and returns `{err:"Unknown command '<name>'"}` ; the front end surfaces errors via `jsonReq` , triggering login on 401 responses or displaying the message. This applies to all commands above.
+- With no `name`, returns `data.name`, the first configured user or an empty
+  string.
+- With `name` and `pwd`, creates or updates the user's digest credential. An
+  empty password removes the user. The update response is `{"ok":true}`.
 
+#### `pn2url`
+
+Requires `fn`. Returns the launch URL for a running LSP-enabled application, or
+`err` when the application is missing, stopped, or not LSP-enabled.
+
+#### `pn2info`
+
+Requires `fn`. For application resources, returns `isapp`, `running`, `lsp`,
+and an optional `url`. For non-application resources it returns `{"ok":true}`.
+
+#### `run`
+
+Requires `fn`. Runs a selected `.xlua` resource when its owning application is
+running and returns `{"ok":true}`.
+
+#### `smtp`
+
+- With no fields other than `cmd`, returns SMTP and email-log configuration.
+- With `email`, `server`, `port`, `user`, `password`, and `connsec`, validates
+  and stores SMTP settings. Complete settings trigger a test email; incomplete
+  settings disable SMTP.
+
+#### `openid`
+
+- With no fields other than `cmd`, returns stored OpenID configuration in
+  `data`.
+- With `tenant`, `client_id`, and `client_secret`, validates and stores the
+  configuration. An empty `client_secret` removes the secret.
+
+#### `elog`
+
+Requires integer `maxbuf` and `maxtime`, `enablelog`, and optional `subject`.
+Stores email-log settings and returns `{"ok":true}`.
+
+#### `execLua`
+
+Requires `code`. Compiles the Lua source and schedules it asynchronously. A
+compile failure returns `{"ok":false,"err":"..."}`.
+
+#### `lsPlugins`
+
+Returns an alphabetically sorted JSON array containing client plugin paths.
+
+#### `getPlugin`
+
+Requires a `.js` `name` returned by `lsPlugins`. Streams JavaScript rather than
+JSON and returns 404 when the plugin is unavailable. The native client requests
+plugins with `cache: "no-store"` and executes them sequentially in the returned
+order.
+
+#### `startApp`
+
+Requires `name`, the uploaded ZIP name under `home` on Mako or `disk` on
+standalone Xedge. `deploy=false` unpacks the ZIP into developer mode; other
+values retain deployed ZIP mode.
+
+The response contains:
+
+- `ok`: installation success;
+- `upgrade`: whether an existing deployed application was replaced;
+- `info`: optional text returned by an install or upgrade hook; and
+- `err`: failure details when `ok` is false.
+
+### Plugin-defined commands
+
+Lua plugins under `.lua/XedgePlugins` receive the command table and may add or
+override handlers. Such commands are platform-specific and are not part of the
+built-in list. For example, the application-update plugin adds the raw PUT
+command `uploadfw`; Xedge32 plugins may add firmware and device commands.
+
+A plugin handler is responsible for validating its method, headers, body, and
+parameters, and for sending or aborting the response.
+
+## Browser plugin API
+
+Client plugins are classic scripts loaded after authentication, I/O discovery,
+and tree initialization. The Xedge shell itself is an ES module, but it exposes
+only this deliberate API on `window`:
+
+| Name | Purpose |
+| --- | --- |
+| `el(tag, properties, ...children)` | Create a DOM element using native APIs |
+| `ideCfgCB` | Array of callbacks used to add configuration-menu items |
+| `log(...)` | Append normal output to TraceLogger |
+| `logR(...)` | Append highlighted/error-style output without playing the error sound |
+| `mkForm(description, elements?, parent?)` | Build a form and collect named elements |
+| `createEditor(name, value, saveCallback, content?, closeCallback?)` | Open an editor or plugin panel |
+| `closeEditor(id)` | Close an editor or plugin panel |
+| `alertErr(...)` | Report an error through the Xedge error path |
+| `sendCmd(command, callback, data?)` | Call `private/command.lsp` through the native request layer |
+| `createTree()` | Rebuild the application/file tree after structural changes |
+
+`el` recognizes the convenience properties `text` and `html`; other properties
+are assigned to the DOM element when possible and otherwise become attributes.
+Plugin code may also use normal modern-browser DOM APIs. It must not depend on
+private variables inside the Xedge ES module.
+
+Configuration plugins normally append a callback:
+
+```js
+ideCfgCB.push((menu, nodisk) => {
+  const item = el("li", {text: "My Plugin"});
+  item.onclick = () => createEditor("My Plugin", null, null, el("div", {text: "Ready"}));
+  menu.append(item);
+});
+```
+
+The callback receives the configuration-menu `<ul>` and the `nodisk` flag.
+Plugins that mutate applications or files should call `createTree()` after the
+server operation succeeds.
+
+Browser and Lua plugins execute with Xedge management privileges. Treat plugin
+files as trusted code, validate all external input on the server, and do not
+expose secrets to browser plugins.

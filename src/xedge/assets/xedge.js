@@ -1,9 +1,11 @@
+import {el,q,qa} from "./dom.js";
+
 let trLog;
 let trLogErr;
 let nodisk;
 
 function play(id) {
-    try{$(id)[0].play();}catch(e){}
+    try{q(id)?.play();}catch(e){}
 };
 
 function log() {
@@ -41,19 +43,49 @@ let loader;
 let afterLogin; // Function set when creating loader obj.
 function login() {afterLogin();}; //called by /rtl/login/index.lsp
 function authenticate() {loader.login();} //Called by TraceLogger
+Object.assign(window,{login,authenticate});
 
-//Simple $.ajax JSON wrapper
+// Small Fetch wrapper used by Xedge requests.
+function request(url,o={}) {
+    let data=o.data;
+    const method=(o.type || "GET").toUpperCase();
+    if(data && false !== o.processData) {
+	data=new URLSearchParams(data);
+	if("GET" == method || "HEAD" == method) {
+	    url+=(url.includes("?") ? "&" : "?")+data;
+	    data=undefined;
+	}
+    }
+    else if(data && "string" == typeof data)
+	data=new Blob([data]); // Do not add a content type when saving a file.
+    return fetch(url,{method:method,body:data,cache:o.cache,headers:{"X-Requested-With":"XMLHttpRequest"}});
+};
+
+function loadScript(url) {
+    return request(url,{cache:"no-store"}).then(r=>{
+	if(!r.ok) throw r;
+	return r.text();
+    }).then(js=>{
+	let s=document.createElement("script");
+	s.text=js;
+	document.head.append(s);
+    }).catch(e=>alertErr("Cannot load plugin: "+(e.statusText || e.message || e)));
+};
+
+// JSON callback wrapper with centralized error and login-retry handling.
 function jsonReq(settings,cb,emsg) {
     if(!emsg) emsg='Request failed: ';
-    settings.dataType="json";
-    settings.success = (rsp)=>{
+	request(settings.url,settings).then(r=>{
+	    if(!r.ok) throw r;
+	    return r.json();
+	}).then((rsp)=>{
 	if(!rsp.err && !rsp.emsg) {cb(rsp);return;}
-	alertErr(emsg+(rsp.emsg ? rsp.emsg : rsp.err));
-      cb(false,rsp);
-    };
-    settings.error=(x,s,err)=>{
-	let r=x.responseText;
-	if("Unauthorized"==err) {
+	alert(emsg+"\n\n"+(rsp.emsg || rsp.err));
+	cb(false,rsp);
+    }).catch(async x=>{
+	let r=x instanceof Response ? await x.text() : "";
+	let err=x.statusText || x.message || "Error";
+	if(401 == x.status) {
 	    loader.login(()=>jsonReq(settings,cb,emsg));
 	}
 	else if(loader.isActive()) {
@@ -61,14 +93,12 @@ function jsonReq(settings,cb,emsg) {
 	    location.reload();
 	}
 	else {
-	    emsg=emsg+(r ? r : err);
-	    alertErr(emsg);
-	    logErr(emsg);
+	    if(r) try {let e=JSON.parse(r);r=e.emsg || e.err} catch(e){}
+	    alert(emsg+(r ? "\n\n"+r : " "+err));
 	    cb(false);
 	    loader.remove();
 	}
-    }
-    $.ajax(settings);
+    });
 };
 
 //Send command to private/command.lsp
@@ -88,15 +118,17 @@ function sendAcmeCmd(acmd, cb, data) {
 /* Shows the 'TreeDia' div at the x,y location of event 'e'
 */
 function diaShow(e) {
-    const t=$("#TreeDia");
-    const css = {left: 'auto', right: 'auto', top: e.pageY > 15 ? e.pageY-8 : 15, display: 'flex'};
-    $(window).width()-e.pageX > 200 ? css.left = e.pageX+10 + 'px' : css.right = '10px';
-    setTimeout(()=>t.css(css),1);
+    const t=q("#TreeDia"),s=t.style;
+    let r=e.target?.getBoundingClientRect(),x=e.pageX??r?.right??0,y=e.pageY??r?.bottom??15;
+    s.left=s.right='auto';
+    s.top=Math.max(y-8,15)+'px';
+    innerWidth-x>200 ? s.left=x+10+'px' : s.right='10px';
+    setTimeout(()=>s.display='flex',1);
     return t;
 };
 
 function diaHide() {
-    $("#TreeDia").hide();
+    q("#TreeDia").style.display='none';
 };
 
 
@@ -105,50 +137,44 @@ function diaHide() {
    olist: output list, where key is element ID and value is the element
    pe: Optional parent element
 */
-function mkForm(list,olist,pe,insrt) {
-    if(!pe) pe=$("<div>",{class:"form"});
-    list.forEach(o => {
+function mkForm(list,olist={},pe=el("div",{class:"form"})) {
+    list.forEach(o=>{
 	if(undefined != o.html) { // Non form element
-	    let el=$(`<${o.el}>`, {class: o.class || '', id: o.id || '' })
+	    let e=el(o.el,{class:o.class || "",id:o.id || ""});
 	    if(o.children)
-		mkForm(o.children,olist,el);
+		mkForm(o.children,olist,e);
 	    else
-		el.html(o.html);
-	    pe.append(el);
-	    if(insrt) olist[o.id]=el;
+		e.innerHTML=o.html; // Form definitions explicitly mark trusted HTML.
+	    pe.append(e);
+	    if(o.id) olist[o.id]=e;
 	    return;
 	}
+	let a={...o};
+	for(const k of ["el","children","label","description","rname"])
+	    delete a[k];
+	if(o.label) a.id=o.label;
+	let e=el(o.el,a);
+	if(e.id) olist[e.id]=e;
 	if("radio" == o.type) {
-	    let p={};
-	    for(let k in o)  p["label" == k ? "id" : k]=o[k];
-	    pe.append($('<input>',p));
-	    pe.append($('<label>',{text:o.rname,for:o.label}));
+	    pe.append(e,el("label",{text:o.rname,for:o.label}));
 	    return;
 	}
-	let l=o.label ? $('<label>',{text:o.name,for:o.label}) : $('<span>');
-	const tt=o.description ? $("<div>",{class:"tooltip"}).text("?").append($('<span>').text(o.description)) : $("<span>");
-	if(o.label)
-	    o.id=o.label;
-	let el=$(`<${o.el}>`,o);
+	let l=o.label ? el("label",{text:o.name,for:o.label}) : el("span");
+	const tt=o.description ? el("div",{class:"tooltip",text:"?"},el("span",{text:o.description})) : el("span");
 	if("switch"==o.class)
-	    pe.append($("<div>",{class:"frow"}).append($("<div>",{class:"switch"}).append(el).append(l))
-		      .append($("<div>").text(o.name)).append(tt));
+	    pe.append(el("div",{class:"frow"},el("div",{class:"switch"},e,l),el("div",{text:o.name}),tt));
 	else if("checkbox"==o.type)
-	    pe.append($("<div>",{class:"frow"}).append(el).append(l).append(tt));
+	    pe.append(el("div",{class:"frow"},e,l,tt));
 	else if(o.label)
-	    pe.append($("<div>",{class:"frow"}).append(l).append(tt)).append(el);
+	    pe.append(el("div",{class:"frow"},l,tt),e);
 	else {
 	    if(o.children) {
-		let oc={...o};
-		delete oc.children;
-		let c=$("<div>",oc);
-		mkForm(o.children,olist,c);
-		pe.append(c);
+		mkForm(o.children,olist,e);
+		pe.append(e);
 	    }
 	    else
-		pe.append($("<div>").append(el));
+		pe.append(el("div",{},e));
 	}
-	olist[o.id]=el;
     });
     return pe;
 };
@@ -264,54 +290,52 @@ function appCfg(pn,cfg,isNewNet) {
     if(cfg) { // Configure existing app
 	if(cfg.err)
 	    logErr(`App ${pn} is not configured correctly:\n`,cfg.err);
-	elems.AppCfgRunning.prop("checked", cfg.running);
-	elems.AppCfgAutostart.prop("checked", cfg.autostart);
-	elems.AppCfgName.val(cfg.name);
-	elems.AppCfgURL.val(cfg.url);
-	elems.startprio.val(isNaN(cfg.startprio) ? "" : cfg.startprio+"");
+	elems.AppCfgRunning.checked=cfg.running;
+	elems.AppCfgAutostart.checked=cfg.autostart;
+	elems.AppCfgName.value=cfg.name;
+	elems.AppCfgURL.value=cfg.url;
+	elems.startprio.value=isNaN(cfg.startprio) ? "" : cfg.startprio+"";
 	if(undefined !== cfg.dirname) {
-	    elems.AppCfgLspApp.prop("checked", true);
-	    elems.AppCfgDirName.val(cfg.dirname);
-	    elems.AppCfgDomainName.val(cfg.domainname);
-	    elems.AppCfgPriority.val(cfg.priority);
-	    $("#AppCfgLspAppDetails").show();
+	    elems.AppCfgLspApp.checked=true;
+	    elems.AppCfgDirName.value=cfg.dirname;
+	    elems.AppCfgDomainName.value=cfg.domainname || "";
+	    elems.AppCfgPriority.value=cfg.priority ?? "0";
+	    elems.AppCfgLspAppDetails.style.display="";
 	}
     }
     else { //Configure new app
 	let n=strMatch(pn,/\/([^/]+)(?:\.zip)?\/?$/)
 	if(n) {
-	    elems.AppCfgName.val(n);
-	    elems.AppCfgDirName.val(n);
+	    elems.AppCfgName.value=n;
+	    elems.AppCfgDirName.value=n;
 	}
-	elems.AppCfgURL.val(pn);
+	elems.AppCfgURL.value=pn;
     }
-    elems.AppCfgLspApp.click(function() {
-	$("#AppCfgLspAppDetails")[$(this).prop("checked") ? "show" : "hide"]();
-    });
+    elems.AppCfgLspApp.onclick=()=>elems.AppCfgLspAppDetails.style.display=elems.AppCfgLspApp.checked ? "" : "none";
     function saveCfg() {
 	function err() {alertErr("Invalid settings");return false;};
 	let ncfg={
-	    name:elems.AppCfgName.val().trim(),
-	    url:elems.AppCfgURL.val().trim(),
-	    running:elems.AppCfgRunning.prop("checked"),
-	    autostart:elems.AppCfgAutostart.prop("checked")
+	    name:elems.AppCfgName.value.trim(),
+	    url:elems.AppCfgURL.value.trim(),
+	    running:elems.AppCfgRunning.checked,
+	    autostart:elems.AppCfgAutostart.checked
 	};
-	let startprio=elems.startprio.val().trim();
+	let startprio=elems.startprio.value.trim();
 	if(startprio.length > 0) {
 	  startprio=parseInt(startprio)
 	  if(isNaN(startprio) || startprio < 0)
 	    return alertErr("Invalid Startup Priority");
 	  ncfg.startprio=startprio
 	}
-	if(elems.AppCfgLspApp.prop("checked")) {
-	    ncfg.dirname=elems.AppCfgDirName.val().trim();
-	    let dn=elems.AppCfgDomainName.val().trim();
+	if(elems.AppCfgLspApp.checked) {
+	    ncfg.dirname=elems.AppCfgDirName.value.trim();
+	    let dn=elems.AppCfgDomainName.value.trim();
 	    if(dn) {
 	      if(ncfg.dirname)
 		return alertErr("Directory name must be blank when using domain name filter.");
 	      ncfg.domainname=dn;
 	    }
-	    ncfg.priority=elems.AppCfgPriority.val().trim();
+	    ncfg.priority=elems.AppCfgPriority.value.trim();
 	}
 	if(ncfg.name.length == 0 || ncfg.url.length == 0) return err();
 	savefile(fsBase+(isNewNet ? "net/.appcfg" : (cfg ? pn : pn+".appcfg")),JSON.stringify(ncfg),(ok)=>{
@@ -326,9 +350,9 @@ function appCfg(pn,cfg,isNewNet) {
 	    }
 	});
     };
-    elems.AppCfgSave.click(saveCfg);
+    elems.AppCfgSave.onclick=saveCfg;
     if(cfg)
-	elems.AppCfgRunning.click(saveCfg);
+	elems.AppCfgRunning.onclick=saveCfg;
 };
 
 
@@ -342,6 +366,7 @@ let monacoEnabled=false; // Set if we can load Monaco from CDN
    false=content not changed, true=editor content changed
 */
 let editors={};
+let editorClose={};
 
 let lastEditorId=false; // the last selected editor tab
 
@@ -370,10 +395,16 @@ function getLanguage(fn) {
 
 /* Removes tabheader and editor from 'editors' pane
 */
+function eid(pn) {
+    return 'editor-'+pn.replace(/[^a-z0-9]/gi,'-').toLowerCase();
+}
 function closeEditor(editorId) {
-    $('#tabheader').find(`[data-target='${editorId}']`).remove();
-    $(`#${editorId}`).remove();
-    $(`#${editorId}-buttonsdiv`).remove();
+    let f=editorClose[editorId];
+    delete editorClose[editorId];
+    f?.();
+    q(`[data-target='${editorId}']`,q('#tabheader'))?.remove();
+    q(`#${editorId}`)?.remove();
+    q(`#${editorId}-buttonsdiv`)?.remove();
     delete editors[editorId];
     if(lastEditorId == editorId) lastEditorId=false;
 };
@@ -381,7 +412,7 @@ function closeEditor(editorId) {
 // Set editor was changed: add class to tab to indicate it was changed.
 function setMod(editorId,mod=true) {
     editors[editorId]=mod;
-    if (mod) $(`[data-target="${editorId}"]`).addClass('modified'); else $(`[data-target="${editorId}"]`).removeClass('modified');
+    q(`[data-target="${editorId}"]`)?.classList.toggle('modified',mod);
 }
  
 
@@ -392,15 +423,16 @@ function setMod(editorId,mod=true) {
    savecb: Optional save callback(data,cb), where data is what to save
 	   and cb is a callback that must be called when file is saved
 	   with the value cb(true) ok, or cb(false) failed.
-  newElem: Set if 'value' is null. This must be a DOM element. Used when
+   newElem: Set if 'value' is null. This must be a DOM element. Used when
 	   building form data in an editor frame. See function
 	   appCfg() for how this can be used.
+   closecb: Optional cleanup callback invoked when the editor closes.
 */
-function createEditor(pn,value,savecb,newElem) {
+function createEditor(pn,value,savecb,newElem,closecb) {
     diaHide();
-    function save(data) {savecb(data, ok => setMod(editorId, !ok.ok));};
+    function save(data) {savecb(data,ok=>setMod(editorId,!ok?.ok));};
     let saveData;
-    let editorId = 'editor-' + pn.replace(/[^a-z0-9]/gi, '-').toLowerCase();
+    let editorId=eid(pn);
     if(undefined!=editors[editorId]) {
 	if(true==editors[editorId])
 	    return;
@@ -408,50 +440,55 @@ function createEditor(pn,value,savecb,newElem) {
     }
     else if(false==editors[lastEditorId]) closeEditor(lastEditorId);
     lastEditorId=editorId;
-    let tabBtn = $('<button>', {class: 'tabbtn','data-target': editorId,text: pn.match(/[^/]+$/)[0]});
-    tabBtn.click((e)=>{
+    let tabBtn=el('button',{class:'tabbtn','data-target':editorId,text:pn.match(/[^/]+$/)[0]});
+    tabBtn.onclick=()=>{
 	if(lastEditorId==editorId) lastEditorId=false; 
-	$(e.target).addClass('pined'); 
+	tabBtn.classList.add('pined');
 	setActiveEditor(editorId);
-    });
-    let closeBtn=$('<span>',{class:'closebtn',text:'X'}).appendTo(tabBtn);
-    closeBtn.click(()=>{
+	};
+    let closeBtn=el('span',{class:'closebtn',text:'X'});
+    tabBtn.append(closeBtn);
+    closeBtn.onclick=e=>{
+	e.stopPropagation();
 	if(editors[editorId]) {
-	    var shouldClose = confirm('The file has unsaved changes. Are you sure you want to close the tab?');
-	    if (!shouldClose) return;
+	    if(!confirm('The file has unsaved changes. Are you sure you want to close the tab?')) return;
 	}
 	closeEditor(editorId);
-    });
-    let editorContainer = $('<div>', {class: 'editorcontainer',id: editorId});
-    let editorButtons = $('<div>', {class:'editor-buttons', id: editorId+'-buttonsdiv'});
-    if(value) {
+	};
+    let editorContainer=el('div',{class:'editorcontainer',id:editorId});
+    let editorButtons=el('div',{class:'editor-buttons',id:editorId+'-buttonsdiv'});
+    const button=(text,cb)=>{let b=el('button',{text,type:'submit'});b.onclick=cb;return b};
+    if(null != value) {
 	sendCmd("pn2info", (rsp) => {
 	    let addSaveBut=true;
 	    if(rsp.running) {
 		const ext=getFileExt(pn);
 		if('xlua' == ext) {
 		    addSaveBut=false;
-		    editorButtons.append($('<button>', { html: 'Save &amp; Run', type: 'submit'}).click(()=>saveData()));
+		    editorButtons.append(button('Save & Run',()=>saveData()));
 		}
 		else if(('lsp' == ext || 'htm' == ext || 'html' == ext) && rsp.lsp) {
-		    editorButtons.append($('<button>', { html: 'Open', type: 'submit'}).click( () => {
+		    editorButtons.append(button('Open',()=>{
 			sendCmd("pn2url", (rsp) => {if(rsp.ok) window.open(rsp.url,'lsp');}, {fn:pn});
 		    }));
 		}
 	    }
 	    if(addSaveBut)
-		editorButtons.append($('<button>', { html: 'Save', type: 'submit'}).click(()=>saveData()));
+		editorButtons.append(button('Save',()=>saveData()));
 	}, {fn:pn});
     }
     else if(savecb)
-	editorButtons.append($('<button>', { html: 'Run', type: 'submit'}).click(()=>saveData()));
-    $('#tabheader').append(tabBtn);
-    $('#editors').append(editorContainer).append(editorButtons)
-    if(newElem) editorContainer.html(newElem);
+	editorButtons.append(button('Run',()=>saveData()));
+    q('#tabheader').append(tabBtn);
+    q('#editors').append(editorContainer,editorButtons);
+    if(newElem) {
+	if('string'==typeof newElem) editorContainer.innerHTML=newElem;
+	else editorContainer.replaceChildren(newElem);
+    }
     else if(monacoEnabled) {
 	setTimeout(()=>{
 	require(['vs/editor/editor.main'],()=>{
-	    let editor = monaco.editor.create(editorContainer.get(0), {value:value,language:getLanguage(pn),theme:'vs-dark',automaticLayout:true});
+	    let editor = monaco.editor.create(editorContainer,{value:value??"",language:getLanguage(pn),theme:'vs-dark',automaticLayout:true});
 	    editor.onDidChangeModelContent(()=>setMod(editorId));
 	    editor.addAction({id:'save-content',label:'Save',
 		keybindings:[monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS],
@@ -462,19 +499,21 @@ function createEditor(pn,value,savecb,newElem) {
 	},10);
     }
     else {
-	let ta=$('<textarea>').val(value).on('keydown',function(ev){
+	let ta=el('textarea',{value:value??""});
+	ta.onkeydown=ev=>{
 	    if(ev.ctrlKey && ev.key === 's') {
 		ev.preventDefault();
-		save($(this).val());
+		save(ta.value);
 	    }
 	    else if(!ev.ctrlKey)
 		setMod(editorId)
-	});
-	editorContainer.html(ta);
-	saveData=function() {save(ta.val());};
+	};
+	editorContainer.append(ta);
+	saveData=()=>save(ta.value);
     }
 		
     setMod(editorId, false);
+    if(closecb) editorClose[editorId]=closecb;
     setActiveEditor(editorId);
     return editorId;
 };
@@ -482,41 +521,51 @@ function createEditor(pn,value,savecb,newElem) {
 /*  Activate editor tab; invoked by createEditor() event handlers.
 */
 function setActiveEditor(editorId) {
-  $('.tabbtn').removeClass('active');
-  $('.editor-buttons').hide();
-  $('.editorcontainer').hide();
-  $(`[data-target="${editorId}"]`).addClass('active');
-  $(`#${editorId}`).show();
-  $(`#${editorId}-buttonsdiv`).show();
+  qa('.tabbtn').forEach(e=>e.classList.remove('active'));
+  qa('.editor-buttons,.editorcontainer').forEach(e=>e.hidden=true);
+  q(`[data-target="${editorId}"]`).classList.add('active');
+  q(`#${editorId}`).hidden=false;
+  q(`#${editorId}-buttonsdiv`).hidden=false;
 };
 
 
+// Create a two-pane splitter. v selects vertical mode and d is the default percentage.
+function split(a,b,v,k,d) {
+    a=q(a);b=q(b);
+    let p=a.parentNode,z="client"+(v?"Height":"Width"),c="client"+(v?"Y":"X"),n;
+    let g=el("div",{class:"gutter gutter-"+(v?"vertical":"horizontal")});
+    a.after(g);b.style.flex="1";
+    function set(x) {
+	let s=p[z];
+	x=Math.max(100,Math.min(s-105,x));
+	n=100*x/s;
+	a.style.flex=`0 0 ${n}%`;
+    }
+    let x=+localStorage.getItem(k);
+    set(x ? (x>=100 ? x : x*p[z]/100) : p[z]*d/100);
+    g.onpointerdown=e=>{
+	g.setPointerCapture(e.pointerId);
+	let r=p.getBoundingClientRect(),o=v?r.top:r.left;
+	g.onpointermove=e=>set(e[c]-o);
+	g.onpointerup=g.onpointercancel=()=>{
+	    g.onpointermove=null;
+	    localStorage.setItem(k,n);
+	};
+    };
+}
+
 /* At startup, initialize split panes & preload Monaco; fallback to textarea if failed.
-*/ 
+*/
 function initEditor() {
-    try{
-	Split(['#left-pane', '#right-pane'], {
-	    sizes: [15, 75],
-	    minSize: 100,
-	    direction: 'horizontal',
-	    gutterSize: 5,
-	});
-	Split(['#editorpane', '#logpane'], {
-	    sizes: [75, 25],
-	    minSize: 100,
-	    direction: 'vertical',
-	    gutterSize: 5,
-	});
-    }
-    catch(e){
-      logErr("Cannot load the Monaco Editor; <a target='_blank' href='https://realtimelogic.com/ba/doc/en/Xedge.html#monaco'>Help</a>\n")
-    }
+    split('#left-pane','#right-pane',false,'left-pane',100/6);
+    split('#editorpane','#logpane',true,'editorpane',75);
     let loaderScript = document.createElement('script');
-    loaderScript.src = 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.52.2/min/vs/loader.min.js';
+    let monacoBase='https://cdn.jsdelivr.net/npm/monaco-editor@0.56.0/min/vs';
+    loaderScript.src = monacoBase+'/loader.min.js';
     loaderScript.onload = function() {
 	monacoEnabled=true;
 	require.config({
-	    paths: {'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.52.2/min/vs'}
+	    paths: {vs:monacoBase}
 	});
 	require(['vs/editor/editor.main'],()=>{
 	    monaco.languages.register({ id: 'lsp' });
@@ -601,7 +650,7 @@ const okFileExt={
   js:true,
   xml:true
 };
-let notOkFileExt={};
+let opening=new Set;
 
 // Check if known text file
 function ok2open(pn) {
@@ -623,8 +672,7 @@ function getDirList(path,cb) {
 	if(false != data) {
 	    let list=[];
 	    for(const [ix, st] of Object.entries(data)) {
-		if(st.s < 0) list[ix]={asynced: true, type: Tree.FOLDER, name:st.n}
-		else list[ix]={name:st.n}
+		list[ix]={name:st.n,dir:st.s<0}
 	    }
 	    cb(list);
 	}
@@ -637,10 +685,10 @@ function getDirList(path,cb) {
 
 /* Sends a Web File Manager compatible command.
 */
-function wfsReq(method,url,data,cb) {
+function wfsReq(method,url,data,cb,msg) {
     jsonReq({type:method,url:url,data:data}, (rsp)=> {
 	if(false != rsp) cb(rsp);
-    });
+    },msg);
 };
 
 
@@ -648,13 +696,13 @@ function wfsReq(method,url,data,cb) {
    e: event
    text: for label
    val: input element value
-   cb: callback(input-data, element) called when Enter key is pressed
+   cb: callback(input value) called when Enter key is pressed
 */
 function inputDia(e,text,val,cb) {
-    const d=diaShow(e);
-    d.html($('<label>',{text:text,for:"TreeDiaIn"})).
-	append($('<input>', {type:'text',id:"TreeDiaIn",value:val}).
-	       on('keydown',function(e) { if (e.key === 'Enter') cb(d,$(this)); }));
+    const i=el('input',{type:'text',id:'TreeDiaIn',value:val});
+    i.onkeydown=e=>{if(e.key==='Enter')cb(i.value.trim())};
+    diaShow(e).replaceChildren(el('label',{text,htmlFor:'TreeDiaIn'}),i);
+    setTimeout(()=>i.focus(),2);
 };
 	     
 /* Display the file tree context menu.
@@ -663,38 +711,29 @@ function inputDia(e,text,val,cb) {
    Activated on right click or long click.
 */
 function treeCtxMenu(e,node) {
-    let pn=selpn
-    if(!node ||!pn) return;
-    let h = tree.hierarchy(node.e);
+    if(!node) return;
+    let pn=tree.path(node);
+    if(!pn) return;
     let ion = strMatch(pn,/^([^\/]+)/);
     let isApp = ios[ion] ? false : true;
 
     // "New File" or "New Folder" clicked
     function newRes(isFolder) {
-	//We need to expand tree node if not opened or tree will fail to work.
-	if( !node.opn ) {
-	    let f=tree.active();
-	    getDirList(pn,(list)=>{if(list)tree.json(list,f);f.resolve();});
-	}
-	inputDia(e,isFolder?"New Folder":"New File","",(diaE,inpE)=>{
-	    let v=inpE.val().trim();
+	let ready=tree.open(node);
+	inputDia(e,isFolder?"New Folder":"New File","",v=>{
 	    if(v.length == 0) return;
 	    let fn = fsBase+pn+v;
-	    $.ajax({type:"HEAD",url:fn,
-	       success:()=> alertErr(`Resource ${fn} already exists`),
-	       error:()=> {
+	    const create=()=>{
 		   if(isFolder) {
 		       wfsReq("POST",fsBase+pn,{cmd:'mkdirt',dir:v},()=>{
-			   tree.folder({name:v,type:"folder"}, node.e);
-			   node.e.resolve();
-		       });
+			   ready.then(()=>tree.add({name:v,dir:true},node));
+		       },`Cannot create folder ${v}.`);
 		   }
 		   else { // Create new file
 		       function rsp(data) {
 			   savefile(fn, data, (ok)=> {
 			       if(ok) {
-				   tree.file({name:v,asynced:true}, node.e);
-				   node.e.resolve();
+				   ready.then(()=>tree.add({name:v},node));
 			       }
 			   });
 		       }
@@ -704,46 +743,42 @@ function treeCtxMenu(e,node) {
 		       else
 			   rsp("\n");
 		   }
-		   diaE.hide();
-	       }
-	    })
+		   diaHide();
+	    };
+	    request(fn,{type:"HEAD"}).then(r=>r.ok ?
+		alertErr(`Resource ${fn} already exists`) : create()).catch(create);
 	});
     };
 
     //Return parent directory
     function pd(){
-	return strMatch(pn,node.type ? /^(.*\/)[^/]+\/$/ : /^(.*\/)[^/]+$/);
+	return node.p ? tree.path(node.p) : '';
     };
 
     function rename() {
-	inputDia(e,"Rename",node.name, (diaE,inpE)=> {
-	    let v=inpE.val().trim();
+	inputDia(e,"Rename",node.name,v=>{
 	    const d=pd();
 	    if(v.length == 0 || v == node.name || !d) return;
 	    wfsReq("GET",fsBase+d,{cmd:'mv',from:node.name, to:fsBase+d+v},()=>{
-		tree.active().textContent=v; node.name=v;});
-	    diaE.hide();
+		tree.rename(node,v)},`Cannot rename ${node.name}.`);
+	    diaHide();
 	});
     };
 
     function rm() {
-	if(confirm(`Are you sure you wan to delete ${node.name} ?`)) {
+	if(confirm(`Are you sure you want to delete ${node.name}?`)) {
 	    wfsReq("POST",fsBase+pd(),{cmd:'rmt',file:node.name},()=>{
 		if(".appcfg" == node.name)
 		    createTree();
-		else {
-		    node=tree.active();
-		    tree.navigate('backward');
-		    tree.remove(node);
-		}
-	    });
+		else tree.remove(node);
+	    },`Cannot delete ${node.name}.`);
 	    diaHide();
 	}
     };
 
     function confApp() {
 	const n=pn+".appcfg";
-	$.get(fsBase+n).done((data)=>appCfg(n,JSON.parse(data)));
+	request(fsBase+n).then(r=>r.text()).then(data=>appCfg(n,JSON.parse(data)));
     };
 
     function newApp() {
@@ -754,22 +789,22 @@ function treeCtxMenu(e,node) {
 	else
 	    appCfg(pn);
     };
-    let list = h.length > 1 ? [["Rename",rename],["Delete",rm]] :
+	let list = node.p ? [["Rename",rename],["Delete",rm]] :
 	(isApp ? [["Configure App",confApp]] : []);
     function render() {
-	if(node.type) {
-	    if(h.length > 1 || "net" != node.name) {
+	if(node.dir) {
+	    if(node.p || "net" != node.name) {
 		list.push(["New File",()=>newRes(false)]);
 		list.push(["New Folder",()=>newRes(true)]);
 	    }
 	}
-	if((((!isApp && node.type) || "zip" == getFileExt(pn)) && pd()) || "net" == ion) list.push(["New App",newApp]);
-	const mlist = $('<ul>');
-	list.forEach(x => mlist.append($('<li>').text(x[0]).on('click', x[1])));
-	diaShow(e).html(mlist);
+	if((((!isApp && node.dir) || "zip" == getFileExt(pn)) && pd()) || "net" == ion) list.push(["New App",newApp]);
+	const mlist=el('ul');
+	list.forEach(x=>mlist.append(el('li',{text:x[0],onclick:x[1]})));
+	diaShow(e).replaceChildren(mlist);
     };
 
-    if(node.e.getAttribute('data-type') === 'file' && ['lsp', 'xlua'].includes(node.e.getAttribute('data-ext'))) {
+    if(!node.dir && ['lsp','xlua'].includes(getFileExt(node.name))) {
 	sendCmd("pn2info", (rsp) => {
 	    if(rsp.running) {
 		list.unshift(['Run', ()=>{
@@ -794,163 +829,212 @@ function treeCtxMenu(e,node) {
    content. The file content is then passed to the createEditor()
    function.
 */
-function openSelFile() {
-    const fn=fsBase+selpn;
-    const ext=getFileExt(selpn);
-    if(notOkFileExt[ext]) return;
-    notOkFileExt[ext]=true;
-    function err(xhr, stat, e){
-	if("Unauthorized"==e)
-	    loader.login(openSelFile);
+function openSelFile(node) {
+    const pn=tree.path(node),fn=fsBase+pn;
+    const ext=getFileExt(pn);
+    let id=eid(pn),b=q(`[data-target="${id}"]`);
+    if(b) {
+	setActiveEditor(id);
+	lastEditorId=b.classList.contains('pined')?false:id;
+	return;
+    }
+    if(opening.has(pn)) return;
+    opening.add(pn);
+    function err(e){
+	if(401 == e.status)
+	    loader.login(()=>openSelFile(node));
 	else
-	    alertErr('Request failed: '+e+ " : "+stat);
+	    alertErr('Request failed: '+(e.statusText || e.message || e));
     };
-    $.ajax({type:"HEAD",url:fn,
-	success: function(data, s, xhr) {
-	    const mt = xhr.getResponseHeader('Content-Type');
-	    const cl = xhr.getResponseHeader('Content-Length');
+	request(fn,{type:"HEAD"}).then(xhr=>{
+	    if(!xhr.ok) throw xhr;
+	    const mt = xhr.headers.get('Content-Type');
+	    const cl = xhr.headers.get('Content-Length');
 	    if(parseInt(cl) < 100000) {
-		if( !(mt && /^text\//.test(mt) || ok2open(selpn)) ) {
+		if( !(mt && /^text\//.test(mt) || ok2open(pn)) ) {
 		    if(!confirm("You can only open text files. Are you sure you want to open this file?"))
 			return;
 		    okFileExt[ext]=true;
 		}
-		$.get(fsBase+selpn).done((data)=>{
-		    if(selpn.match(/\/\.appcfg$/))
-		       appCfg(selpn,JSON.parse(data));
+		return request(fn).then(r=>{
+		    if(!r.ok) throw r;
+		    return r.text();
+		}).then((data)=>{
+		    if(pn.match(/\/\.appcfg$/))
+		       appCfg(pn,JSON.parse(data));
 		    else
-		       createEditor(selpn,data,(ndata,cb)=>savefile(fn,ndata,cb));
-		}).fail(err);
+		       createEditor(pn,data,(ndata,cb)=>savefile(fn,ndata,cb));
+		});
 	    }
 	    else
 		alertErr("File too big");
-	    notOkFileExt[ext]=undefined;
-	},
-	error: err
-    });
+	}).catch(err).finally(()=>opening.delete(pn));
 };
 
 /* At startup, initialize left pane tree.
 */
 function inittree() {
   let timer;
-  let curNode;
-  let rightClick=false;
   let longClick=false;
 
-  /* Hides tree dialog if event is outside an element in the
-     dialog. Also resets long press logic.
-  */
-  $("body").click(function (e) {
-    let el = e.target;
-    while(el.parentElement) {
-      if("TreeDia" == el.id)
-	return;
-      el=el.parentElement;
-    }
-    if(longClick)
-      longClick=false;
-    else
-      diaHide();
+  document.body.addEventListener('click',e=>{
+    if(q('#TreeDia').contains(e.target)) return;
+    if(longClick) longClick=false;
+    else diaHide();
   });
 
-  /* Inner createTree() function; called at startup & for new tree
-     rendering. See createTree=ct below.
-  */
   function ct() {
     selpn=undefined;
-    let appsEl={};
-    let jqTree=$("<div>").appendTo($('#TreeCont').empty());
-    // Right click: activate context menu
-    $(jqTree).contextmenu(ev=>{
-      treeCtxMenu(ev,curNode);
-      return false;
-    }).
-      // Double click = pin editor
-      on('dblclick', () => { $(`[data-target="${lastEditorId}"]`).addClass('pined'); lastEditorId = false;}).
-      // Start long click timer; call treeCtxMenu() upon timer completion.
-      on('mousedown touchstart',ev=>{
-	rightClick = 3 === ev.which;
-	timer=setTimeout(()=> {
-	  treeCtxMenu(ev,curNode);
-	  longClick=true;
-	  timer=null;
-	},1000);
-      }).
-      // Cancel long click timer
-      on('mouseup touchend', ()=>{
-	if(timer) {
-	  clearTimeout(timer);
-	  timer=null;
+    let selected,apps={},root=el('div',{class:'xtree'});
+    q('#TreeCont').replaceChildren(root);
+
+    function path(n) {
+      let dir=n.dir,a=[];
+      for(;n;n=n.p) a.unshift(n.name);
+      return a.join('/')+(dir?'/':'');
+    }
+    function visible() {
+      return [...root.querySelectorAll('summary,a')].filter(e=>e.getClientRects().length);
+    }
+    function select(n,act=true) {
+      selected?.e.classList.remove('selected');
+      selected=n;
+      n.e.classList.add('selected');
+      n.e.focus();
+      selpn=path(n);
+      if(!n.dir && act) openSelFile(n);
+    }
+    function add(o,p) {
+      let n={name:o.name,dir:!!o.dir,p},box=p?p.d:root;
+      if(p) p.loaded=true;
+      if(n.dir) {
+	n.d=el('details');
+	n.e=el('summary',{text:n.name});
+	n.d.append(n.e);
+	n.d.ontoggle=()=>{if(n.d.open)load(n)};
+	box.append(n.d);
+      }
+      else {
+	n.e=el('a',{text:n.name,href:'#'});
+	n.e.dataset.ext=getFileExt(n.name);
+	box.append(n.e);
+      }
+      n.e.n=n;
+      if(!p && !ios[n.name]) {
+	n.d?.classList.add('application');
+	n.e.classList.add('appnode');
+	apps[n.name]=n;
+      }
+      return n;
+    }
+    function load(n) {
+      n.d.open=true;
+      if(n.loaded) return Promise.resolve(n);
+      if(n.loading) return n.loading;
+      n.d.classList.add('loading');
+      return n.loading=new Promise(resolve=>{
+	function done(list=[]) {
+	  list.forEach(o=>add(o,n));
+	  n.loaded=!!list.length;
+	  n.d.classList.remove('loading');
+	  delete n.loading;
+	  resolve(n);
 	}
+	if(path(n)=='net/') {
+	  logErr("Cannot open the uninitialized NET IO.\n");
+	  log("However, you may right click 'net' and create a network app. See the <a target='_blank' href='https://realtimelogic.com/articles/Using-the-NetIO-Network-File-System-Client-on-an-Embedded-Device'>NetIo Tutorial</a> for details.\n");
+	  done();
+	}
+	else getDirList(path(n),done);
       });
-    tree = new Tree(jqTree.get(0),{navigate: true});
-    // Fetch all root directories, inclding any loaded apps.
+    }
+    function move(n,back) {
+      let a=visible(),i=a.indexOf(n.e),e=a[i+(back?-1:1)];
+      if(e) select(e.n);
+    }
+    function remove(n) {
+      let a=visible(),i=a.indexOf(n.e),next=(a[i-1]||a[i+1])?.n;
+      (n.d||n.e).remove();
+      if(selected==n) {
+	selected=undefined;
+	if(next) select(next,false); else selpn=undefined;
+      }
+    }
+    function rename(n,name) {
+      n.name=name;
+      n.e.textContent=name;
+      if(!n.dir) n.e.dataset.ext=getFileExt(name);
+      if(selected==n) selpn=path(n);
+    }
+    tree={path,add,open:load,remove,rename,select,active:()=>selected?.e};
+
+    root.onclick=e=>{
+      if(longClick) return e.preventDefault();
+      let a=e.target.closest('summary,a');
+      if(!a || !root.contains(a)) return;
+      if(!a.n.dir) e.preventDefault();
+      select(a.n);
+    };
+    root.oncontextmenu=e=>{
+      let a=e.target.closest('summary,a');
+      if(!a || !root.contains(a)) return;
+      e.preventDefault();
+      select(a.n,false);
+      treeCtxMenu(e,a.n);
+    };
+    root.ondblclick=e=>{
+      let n=e.target.n;
+      if(n && !n.dir) {
+	let id=eid(path(n));
+	q(`[data-target="${id}"]`)?.classList.add('pined');
+	if(lastEditorId==id) lastEditorId=false;
+      }
+    };
+    root.onpointerdown=e=>{
+      if(e.pointerType=='mouse') return;
+      let n=e.target.n;
+      if(n) timer=setTimeout(()=>{
+	select(n,false);
+	treeCtxMenu(e,n);
+	longClick=true;
+	timer=undefined;
+      },700);
+    };
+    root.onpointerup=root.onpointercancel=root.onpointermove=()=>{
+      if(timer) clearTimeout(timer),timer=undefined;
+    };
+    root.onkeydown=e=>{
+      let n=e.target.n;
+      if(!n) return;
+      if(e.key=='ArrowUp' || e.key=='ArrowDown') move(n,e.key=='ArrowUp');
+      else if(e.key=='ArrowRight' && n.dir) load(n);
+      else if(e.key=='ArrowLeft') {
+	if(n.dir && n.d.open) n.d.open=false;
+	else if(n.p) select(n.p,false);
+	else return;
+      }
+      else if(e.key=='Enter') n.dir ? n.d.open=!n.d.open : openSelFile(n);
+      else if(e.key=='ContextMenu' || e.shiftKey && e.key=='F10') select(n,false),treeCtxMenu(e,n);
+      else return;
+      e.preventDefault();
+    };
+
+    // Fetch all root directories, including any loaded apps.
     setTimeout(()=>{
       getDirList("",(list)=>{
-	tree.json(list);//Display root list; triggers 'created' event for each node.
+	list.forEach(o=>add(o));
 	sendCmd("getappsstat",(rsp)=>{
 	  for(const [name, running] of Object.entries(rsp.apps)) {
-	    appsEl[name].addClass(running ? "apprunning" : "appstopped");
+	    apps[name]?.e.classList.toggle('apprunning',!!running);
 	  }
 	});
-	// The 'created' event has now populated 'appsEl'
-	if(Object.keys(appsEl).length === 0) {// if no apps
+	if(Object.keys(apps).length === 0) {
 	  sendCmd("getintro",(rsp)=>{
-	    // Show introductory information if we have no apps.
 	    createEditor("Welcome",null,null,rsp.intro);
 	  });
 	}
       });
     },10);
-    // Called for each inserted node.
-    tree.on('created',(e,node)=>{
-      if(!selpn) { //If loading root dirs
-	if(!ios[node.name]) { // if an app
-	  appsEl[node.name] = $(e).addClass("appnode");
-	  $(e).parent().addClass('application')
-	}
-      }
-      //Code below based on: https://github.com/lunu-bounir/tree.js/issues/5
-      e.node=node;
-      node.e=e;
-    });
-
-    // On expand tree. 'opn' used by treeCtxMenu() -> newRes()
-    tree.on('open', e => e.node.opn=true);
-
-    // When tree node selected (clicked). Build 'selpn' based on
-    // data set in on 'created'
-    tree.on('select',e=>{
-      if(!e.node) return;
-      curNode=e.node;
-      selpn=tree.hierarchy(e).map(e=>[e, e.node]).
-	reduce((n, obj)=>{return obj[1].name + '/' + n;}, '');
-      if(!e.node.type) {//if file
-	selpn=selpn.slice(0, -1); // Remove '/' in file.ext/
-	if(timer) { // Cancel long press
-	  clearTimeout(timer);
-	  timer=null;
-	}
-	if(!rightClick) //Open file in editor if left click.
-	  openSelFile();
-      }
-    });
-
-    // When tree node clicked.
-    tree.on('fetch', folder=>{
-      if("net/" == selpn) {
-	folder.resolve();
-	logErr("Cannot open the uninitialized NET IO.\n");
-	log("However, you may right click 'net' and create a network app. See the <a target='_blank' href='https://realtimelogic.com/articles/Using-the-NetIO-Network-File-System-Client-on-an-Embedded-Device'>NetIo Tutorial</a> for details.\n");
-      }
-      else {
-	getDirList(selpn, (list)=>{
-	  if(list) tree.json(list,folder);
-	  folder.resolve();
-	});
-      }
-    });
   };
   createTree=ct;
   createTree();
@@ -1025,7 +1109,7 @@ const authenticationFormObj = [
 		type: "password",
 		label: "OpenidClientSecret",
 		name: "Client Secret",
-		description: "A confidential key/password for your application to authenticate with Azure AD, used to request access tokens securely.",
+		description: "A confidential key/password for your application to authenticate with Azure AD, used to request access tokens securely. Clear all three fields and save to disable SSO.",
 		placeholder: "Enter Client Secret",
 	    },
 	    {
@@ -1220,7 +1304,7 @@ const emailFormObj = [
 	    },
 	    {
 		el: "input",
-		type: "subject",
+		type: "text",
 		label: "EmailSubject",
 		name: "Subject",
 		description: "The default email subject",
@@ -1263,13 +1347,13 @@ const emailFormObj = [
 */
 let ideCfgCB=[]; //CB added by plugins
 function ideCfg(e) {
-    const mlist = $('<ul>');
-    mlist.append($('<li>').text("Lua Shell").on("click",()=>{
+    const m=el('ul'),add=(s,f)=>m.append(el('li',{text:s,onclick:f}));
+    add("Lua Shell",()=>{
 	diaHide();
-	createEditor("LuaShell","",(data,cb)=>sendCmd("execLua", cb, {code:data}));
-    }));
+	createEditor("LuaShell",null,(data,cb)=>sendCmd("execLua", cb, {code:data}));
+    });
     if( ! nodisk ) {
-	mlist.append($('<li>').text("Authentication").on("click",()=>{
+	add("Authentication",()=>{
 	    diaHide();
 	    sendCmd("credentials",(rsp)=>{
 		if(!rsp) return;
@@ -1280,42 +1364,45 @@ function ideCfg(e) {
 		    let elems={};
 		    let editorId=createEditor(" Authentication",null,null,mkForm(authenticationFormObj,elems));
 		    if(cfg.name)
-			elems.AuthName.val(cfg.name);
+			elems.AuthName.value=cfg.name;
 		    if(oid.tenant)
-			elems.OpenidTenantId.val(oid.tenant);
+			elems.OpenidTenantId.value=oid.tenant;
 		    if(oid.client_id)
-			elems.OpenidClientId.val(oid.client_id);
+			elems.OpenidClientId.value=oid.client_id;
 		    if(oid.client_secret)
-			elems.OpenidClientSecret.val(oid.client_secret);
-		    elems.AuthSave.click(()=>{
+			elems.OpenidClientSecret.value=oid.client_secret;
+		    elems.AuthSave.onclick=()=>{
 			let data={
-			    name:elems.AuthName.val().trim(),
-			    pwd:elems.AuthPassword.val().trim(),
+			    name:elems.AuthName.value.trim(),
+			    pwd:elems.AuthPassword.value.trim(),
 			};
 			sendCmd("credentials",(rsp)=>{
-			    if(rsp) closeEditor(editorId);
+			    if(rsp) {
+				closeEditor(editorId);
+				if(!cfg.name && data.pwd) loader.login();
+			    }
 			}, data);
-		    });
-		    elems.OpenidSave.click(()=>{
+		    };
+		    elems.OpenidSave.onclick=()=>{
 			let data={ // Matches format used by Lua module "ms-sso"
-			    tenant:elems.OpenidTenantId.val().trim(),
-			    client_id:elems.OpenidClientId.val().trim(),
-			    client_secret:elems.OpenidClientSecret.val().trim(),
+			    tenant:elems.OpenidTenantId.value.trim(),
+			    client_id:elems.OpenidClientId.value.trim(),
+			    client_secret:elems.OpenidClientSecret.value.trim(),
 			};
 			sendCmd("openid",(rsp)=>{
 			    if(rsp) closeEditor(editorId);
 			}, data);
-		    });
+		    };
 		});
 	    });
-	}));
-	mlist.append($('<li>').text("TLS Certificate").on("click",()=>{
-	    diaShow(e).html("<p>Waiting for online server...</p>");
+	});
+	add("TLS Certificate",()=>{
+	    diaShow(e).replaceChildren(el('p',{text:"Waiting for online server..."}));
 	    sendAcmeCmd("isreg",(rsp)=>{
 		diaHide();
+		if(!rsp) return;
 		if(undefined == rsp.isreg) {
-		    closeEditor(editorId);
-		    alertErr(`Cannot connect to SharkTrustX portal ${rsp.portal}`);
+		    alert(`Cannot connect to SharkTrustX portal ${rsp.portal}`);
 		    return;
 		}
 		let elems={};
@@ -1323,102 +1410,104 @@ function ideCfg(e) {
 		if(! rsp.isreg ) {
 		    sendCmd("getmac",(rsp)=>{
 			if(rsp.ok) {
-			    elems.SetCertName.val(rsp.mac.slice(-6))
+			    elems.SetCertName.value=rsp.mac.slice(-6)
 			}
 		    });
 		}
-		elems.SetCertIp.val(rsp.sockname);
-		elems.SetCertWan.val(rsp.wan);
-		elems.SetCertPortal.val(rsp.portal);
+		elems.SetCertIp.value=rsp.sockname || "";
+		elems.SetCertWan.value=rsp.wan || "";
+		elems.SetCertPortal.value=rsp.portal || "";
 		if(rsp.name)
-		    elems.SetCertName.val(rsp.name);
-		elems.SetCertRevcon.prop("checked", rsp.revcon);
+		    elems.SetCertName.value=rsp.name;
+		elems.SetCertRevcon.checked=rsp.revcon;
 		let email;
 		let name;
 		function validate() {
-		    email=elems.SetCertEmail.val().trim();
-		    name=elems.SetCertName.val().trim();
+		    email=elems.SetCertEmail.value.trim();
+		    name=elems.SetCertName.value.trim();
 		    if(/^\w+([\.-]?\w+)*@\w+([\.-]?\w+)*(\.\w{2,3})+$/.test(email) &&
 		       name.length > 2 && /^[a-zA-Z0-9]+$/.test(name))
 			return true;
-		    alertErr("Invalid settings");
+		    alert("Invalid settings");
 		    return false;
 		};
 		function sendAuto() {
-		  let d={email:email,name:name,revcon:elems.SetCertRevcon.prop("checked")};
-		  sendAcmeCmd("auto",(rsp)=>closeEditor(editorId),d);
+		  let d={email:email,name:name,revcon:elems.SetCertRevcon.checked};
+		  sendAcmeCmd("auto",(rsp)=>{if(rsp)closeEditor(editorId)},d);
 		};
 		if(rsp.isreg) {
-		    elems.SetCertName.attr("readonly",true);
+		    elems.SetCertName.readOnly=true;
 		    if(rsp.email)
-			elems.SetCertEmail.val(rsp.email).attr("readonly",true);
-		    elems.SetCertSave.click(() => {if(validate()) sendAuto();});
+			elems.SetCertEmail.value=rsp.email,elems.SetCertEmail.readOnly=true;
+		    elems.SetCertSave.onclick=()=>{if(validate()) sendAuto();};
 		}
 		else
 		{
-		    elems.SetCertSave.click(()=>{
+		    elems.SetCertSave.onclick=()=>{
 			if(validate()) {
 			    sendAcmeCmd("available",(rsp)=>{
+				if(!rsp) return;
 				if(rsp.available) 
 				    sendAuto();
 				else
-				    alertErr(`${name} is in use. Please select another name.`);
+				    alert(`${name} is in use. Please select another name.`);
 			    },{name:name});
 			}
-		    });
+		    };
 		}
 	    });
-	}));
-	mlist.append($('<li>').text("SMTP Server").on("click",()=>{
+	});
+	add("SMTP Server",()=>{
 	    let elems={};
 	    let editorId=createEditor(" SMTP Server",null,null,mkForm(emailFormObj,elems));
 	    sendCmd("smtp",(rsp)=>{
-		function x(s,v) {return s ? s : ""};
-		elems.EmailEmail.val(x(rsp.email));
-		elems.EmailServer.val(x(rsp.server));
-		elems.EmailServerPort.val(x(rsp.port));
-		elems.EmailUsername.val(x(rsp.user));
-		elems.EmailPassword.val(x(rsp.password));
+		if(!rsp) return;
+		let x=s=>s??"";
+		elems.EmailEmail.value=x(rsp.email);
+		elems.EmailServer.value=x(rsp.server);
+		elems.EmailServerPort.value=x(rsp.port);
+		elems.EmailUsername.value=x(rsp.user);
+		elems.EmailPassword.value=x(rsp.password);
 		if(rsp.connsec)
-		    $(`input[name="EmailConnsec"][value="${rsp.connsec}"]`).prop('checked', true);
-		elems.EmailSubject.val(x(rsp.subject));
-		elems.EmailMaxBuf.val(x(rsp.maxbuf));
-		elems.EmailMaxTime.val(x(rsp.maxtime));
-		elems.EmailEnableLog.prop("checked", rsp.enablelog);
+		    document.querySelector(`input[name="EmailConnsec"][value="${rsp.connsec}"]`).checked=true;
+		elems.EmailSubject.value=x(rsp.subject);
+		elems.EmailMaxBuf.value=x(rsp.maxbuf);
+		elems.EmailMaxTime.value=x(rsp.maxtime);
+		elems.EmailEnableLog.checked=rsp.enablelog;
 	    });
-	    elems.EmailSave.click(()=>{
+	    elems.EmailSave.onclick=()=>{
 		let d={
-		    email:elems.EmailEmail.val().trim(),
-		    server:elems.EmailServer.val().trim(),
-		    port:elems.EmailServerPort.val().trim(),
-		    user:elems.EmailUsername.val().trim(),
-		    password:elems.EmailPassword.val().trim(),
-		    connsec:$('input[name="EmailConnsec"]:checked').val()
+		    email:elems.EmailEmail.value.trim(),
+		    server:elems.EmailServer.value.trim(),
+		    port:elems.EmailServerPort.value.trim(),
+		    user:elems.EmailUsername.value.trim(),
+		    password:elems.EmailPassword.value.trim(),
+		    connsec:document.querySelector('input[name="EmailConnsec"]:checked').value
 		};
 		sendCmd("smtp",(rsp)=>{if(rsp) closeEditor(editorId);},d);
-	    });
-	    elems.EmailEnableLog.click(()=>{
+	    };
+	    elems.EmailEnableLog.onclick=()=>{
 		let d={
-		    enablelog:elems.EmailEnableLog.prop("checked"),
-		    subject:elems.EmailSubject.val(),
-		    maxbuf:elems.EmailMaxBuf.val(),
-		    maxtime:elems.EmailMaxTime.val()
+		    enablelog:elems.EmailEnableLog.checked,
+		    subject:elems.EmailSubject.value,
+		    maxbuf:elems.EmailMaxBuf.value,
+		    maxtime:elems.EmailMaxTime.value
 		}
 		sendCmd("elog",()=>{}, d);
-	    });
-	}));
+	    };
+	});
     }
-    mlist.append($('<li>').text("Xedge Documentation").on("click",()=>{
+    add("Xedge Documentation",()=>{
 	diaHide();
 	window.open('https://realtimelogic.com/ba/doc/?url=Xedge.html', '_blank')
-    }));
-    ideCfgCB.forEach((cb) => cb(mlist,nodisk));
-    diaShow(e).html(mlist);
+    });
+    ideCfgCB.forEach(cb=>cb(m,nodisk));
+    diaShow(e).replaceChildren(m);
 };
 
 /************** Init ***************/
-$( window ).on( "load",()=> {
-    let iframe=$("#tracelogger")[0];
+addEventListener("load",()=> {
+    let iframe=q("#tracelogger");
     let cw=iframe.contentWindow;
     trLog = cw.log ? cw.log : (msg)=>console.log(msg);
     trLogErr = cw.logErr ? cw.logErr : (msg)=>console.log(msg);
@@ -1428,23 +1517,23 @@ $( window ).on( "load",()=> {
     loader=(function() {
 	let cb;
 	let hasLoader=true;
-	let l=$('#loader');
-	let spinner=l.html(); // Save
-	function show() { l.css('z-index',1000).show();hasLoader=true; };
+	let l=q('#loader');
+	let spinner=l.innerHTML; // Save
+	function show(){l.style.cssText='z-index:1000;display:flex';hasLoader=true}
 	let o={
 	    remove:()=>{
 		if(hasLoader) {
 		    hasLoader=false;
-		    l.hide().css('z-index', -1);
+		    l.style.display='none';
 		}
 	    },
 	    login:(callback)=>{
 		cb=callback;
-		l.html('<iframe src="login/" width="500" height="700"></iframe>');
+		l.innerHTML='<iframe src="login/" width="500" height="700"></iframe>';
 		show();
 	    },
 	    spinner:()=>{
-		l.html(spinner);
+		l.innerHTML=spinner;
 		show();
 	    },
 	    isActive:()=> hasLoader
@@ -1455,14 +1544,14 @@ $( window ).on( "load",()=> {
 		cb();
 		cb=null;
 	    }
-	    startTL();
+	    else startTL();
 	};
 	return o;
     })();
 
     // Get list of all known IOs. This call also activates login if an
     // authenticator is installed.
-    let data={xedgeconfig:localStorage.getItem("xedge")};
+    let data={xedgeconfig:localStorage.getItem("xedge") || ""};
     sendCmd("getionames",(rsp)=>{
 	loader.spinner();
 	nodisk=rsp.nodisk;
@@ -1471,15 +1560,14 @@ $( window ).on( "load",()=> {
 	//Continue initialization after possible login.
 	if(!tree) inittree();
 	startTL(); // tracelogger can now establish websocket connection.
-	sendCmd("lsPlugins",(rsp)=>{
-	    for(let i = 0; i < rsp.length; i++)
-		$.getScript("private/command.lsp?cmd=getPlugin&name="+encodeURIComponent(rsp[i]));
+	Object.assign(window,{el,ideCfgCB,log,logR,mkForm,createEditor,alertErr,sendCmd,closeEditor,createTree});
+	sendCmd("lsPlugins",async rsp=>{
+	    for(const name of rsp)
+		await loadScript("private/command.lsp?cmd=getPlugin&name="+encodeURIComponent(name));
 	});
-	$("#IdeCfg").click(ideCfg);
+	q("#IdeCfg").onclick=ideCfg;
     }, data);
-    $( window ).on("beforeunload",function(e) {
-	window.localStorage.setItem('left-pane', $('#left-pane').width());
-	window.localStorage.setItem('editorpane', $('#editorpane').height());
+	addEventListener("beforeunload",e=>{
 	for(const [file,changed] of Object.entries(editors)) {
 	    if(changed) {
 		e.returnValue = 'You have unfinished changes!';
@@ -1487,7 +1575,7 @@ $( window ).on( "load",()=> {
 		return false;
 	    }
 	}
-    });
+	});
 });
 
 function onreconnect() { //Called by TraceLogger

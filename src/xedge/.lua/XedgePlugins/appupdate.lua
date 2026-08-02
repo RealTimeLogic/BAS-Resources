@@ -18,7 +18,7 @@ function commands.uploadfw(cmd)
       fn=n.."."..ext
       local io = mako and ba.openio"home" or ba.openio"disk"
       if io:stat(n) then
-	 rsp={err="<p><b>Conflict Detected:</b> The server has found an existing directory with the same name as your uploaded zip file, indicating a non-deployed application already exists with this name. Deployed applications are uploaded and managed as zip files, whereas non-deployed applications exist as directories on the server.</p><p>To resolve this:</p><ul><li>If you intend to update or replace the existing non-deployed application, please delete the corresponding directory on the server first, then attempt the upload again.</li><li>If deploying a new application, rename your zip file to avoid naming conflicts and upload it again.</li></ul>"}
+	 rsp={err="An application directory with this name already exists. Delete it before replacing it, or rename the ZIP file."}
       else
 	 local upgrade = io:stat(fn) and true or false
 	 local fp,err = io:open(fn,"w")

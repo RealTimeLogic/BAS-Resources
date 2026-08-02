@@ -5,7 +5,6 @@ The Barracuda App Server's resource files. See the [build directory](build/READM
 ## Files
 
 - **core**
-    - jquery.js - Jquery and a few additional libs assembled by [mkJquery.sh](#mkjquerysh)
     - smq.js
     - sha1.js - optionally used by [form authenticator](https://realtimelogic.com/ba/doc/en/lua/lua.html#sha1_login)
     - spark-md5.min.js optionally used by form authenticator
@@ -89,43 +88,4 @@ The Barracuda App Server's resource files. See the [build directory](build/READM
 wget https://curl.se/ca/cacert.pem
 SharkSSLParseCAList -b cacert.shark cacert.pem
 rm -f cacert.pem 
-```
-
-
-## mkJquery.sh
-
-```
-# Shell script for fetching the latest jquery, tablesorter, and cookie
-# plugin. These 3 files are concatenated together and put
-# in core/jquery.js
-export JQVER=3.7.0
-function abort() {
-    echo "Oops"
-    sleep 5
-    exit 1
-}
-mkdir tmp
-cd tmp
-wget https://code.jquery.com/jquery-$JQVER.min.js || abort
-wget https://mottie.github.io/tablesorter/dist/js/jquery.tablesorter.min.js || abort
-wget --no-check-certificate https://raw.githubusercontent.com/carhartl/jquery-cookie/master/src/jquery.cookie.js || abort
-wget https://raw.githubusercontent.com/briceburg/jqModal/master/jqModal.js || abort
-wget https://raw.githubusercontent.com/gaarf/jqDnR-touch/master/jqdnr.js || abort
-mkdir out
-echo "//cat: jquery + jquery.cookie + jquery.tablesorter + jqModal" >a.js
-cat a.js >x.js
-cat jquery-$JQVER.min.js >> x.js
-echo "" >> x.js
-cat out/jquery.cookie.js >> x.js
-echo "" >> x.js
-cat jquery.tablesorter.min.js >> x.js
-echo "" >> x.js
-cat out/jqModal.js >> x.js
-echo "" >> x.js
-cat out/jqdnr.js >> x.js
-
-cp x.js ../core/jquery.js 
-rm *.js
-cd ..
-rm -rf tmp
 ```

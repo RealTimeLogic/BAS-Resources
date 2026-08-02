@@ -51,8 +51,8 @@ end
 
 local function setSecH(dir)
    dir:header{
-      ["Content-Security-Policy"] = "default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com 'unsafe-inline' blob:; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; img-src 'self' data:; media-src 'self' https://simplemq.com; font-src 'self' https://cdnjs.cloudflare.com; worker-src blob:;",
-      ["x-content-type"] = "nosniff",
+      ["Content-Security-Policy"] = "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net 'unsafe-inline' blob:; connect-src 'self' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; img-src 'self' data:; media-src 'self' https://simplemq.com; font-src 'self' https://cdn.jsdelivr.net; worker-src blob:;",
+      ["X-Content-Type-Options"] = "nosniff",
    }
 end
 
@@ -159,6 +159,7 @@ local function lsPlugins(ext)
 	 end
       end
    end
+   table.sort(rsp)
    return rsp
 end
 
@@ -757,9 +758,10 @@ local function appsInit(cfg)
 end
 
 local function ssoInit()
+   local id=xcfg.openid
    sso=nil
-   if xcfg.openid then
-      sso=require"ms-sso".init(xcfg.openid)
+   if id and #(id.tenant or "") > 0 and #(id.client_id or "") > 0 then
+      sso=require"ms-sso".init(id)
    end
 end
 
@@ -791,6 +793,14 @@ local function xinit(aio,rwCfgFile,_tldir,_rtld)
    end
    ios=t
    local resrdr=ba.create.resrdr(not _rtld and "rtl" or nil,127,aio)
+   if not _rtld then --Backward compat.
+      local jqdir=ba.create.dir()
+      resrdr:insert(jqdir,true)
+      jqdir:setfunc(function(_ENV,relpath)
+	 if "jquery.js"==relpath then response:sendredirect"https://code.jquery.com/jquery-3.7.1.min.js" return true end
+	 return false
+      end)
+   end
    setSecH(resrdr)
    resrdr:lspfilter{io=aio}
    rtld=_rtld or resrdr
@@ -1052,7 +1062,12 @@ local commands={
 	 local new=t2s(d)
 	 if old ~= new or not id then
 	    if d.tenant and d.client_id and d.client_secret then
-	       if #d.tenant > 20 and #d.client_id > 20 and #d.client_secret > 10 then
+	       if #d.tenant==0 and #d.client_id==0 and #d.client_secret==0 then
+		  xcfg.openid=nil
+		  ssoInit()
+		  saveCfg()
+		  installAuth()
+	       elseif #d.tenant > 20 and #d.client_id > 20 and #d.client_secret > 10 then
 		  local ok,err,desc=require"ms-sso".validate(d)
 		  if ok then
 		     xcfg.openid=d
@@ -1062,7 +1077,7 @@ local commands={
 		  else
 		     rsp.ok,rsp.err=false,(desc or err)
 		  end
-	       elseif #d.client_secret==0 then
+	       elseif #d.tenant > 20 and #d.client_id > 20 and #d.client_secret==0 then
 		  d.client_secret=nil
 		  xcfg.openid=d
 		  ssoInit()

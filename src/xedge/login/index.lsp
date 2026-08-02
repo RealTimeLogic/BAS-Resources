@@ -141,12 +141,11 @@ end
 <style>
 .login-frame h2 {font: normal bold 20px/30px sans-serif; text-align: center; padding: 10px; color: #FFF; }
 .center {display: flex;justify-content: center;align-items: center;flex-direction:column-reverse;height: calc(100vh - 30px - 20px);grid-gap:10px;}
-#sso {width:220px;padding:10px 12px;box-shadow: 0px 0px 7px;background: #000;font-size: 15px;line-height: 23px;}
+#sso {width:220px;padding:10px 12px;box-shadow: 0px 0px 7px;background: #000;color:#fff;font-size: 15px;line-height: 23px;}
 #sso:hover {background: #2F2F2F;}
 #sso .frow{gap: 12px; margin: 0;}
 #sso svg {max-height:20px}
 </style>
-<script src="../jquery.js"></script>
 <script>
 function authenticated() {
   if(window.opener) {
@@ -161,9 +160,10 @@ function authenticated() {
   else
     location.href="../";
 };
-$(function(){
-  let w=null;
-  $("#sso").click(function() {
+addEventListener("DOMContentLoaded",()=>{
+  let w,b=document.getElementById("sso");
+  if(!b) return;
+  b.addEventListener("click",()=>{
     if(w) return;
     let width = 500;
     let height = 600;
@@ -172,6 +172,7 @@ $(function(){
     let options = 'toolbar=no, location=no, directories=no, status=no, menubar=no, scrollbars=yes, resizable=yes, copyhistory=no, ' +
       'width=' + width + ', height=' + height + ', top=' + top + ', left=' + left;
     w=window.open("./?sso=", 'Sign in with Microsoft', options);
+    if(!w) return;
     let i = setInterval(function() {
       if(w.closed) {
 	clearInterval(i);

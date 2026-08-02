@@ -255,10 +255,11 @@ select option {
 .advanced {display:none;}
 </style>
 <title>TraceLogger</title>
-<script type="text/javascript" src="/rtl/jquery.js"></script>
 <script>
 const trUrl = "/rtl/tracelogger.service/"
 const docUrl = "https://realtimelogic.com/ba/doc/?url=auxlua.html#tracelogger";
+const q = id => document.getElementById(id);
+const on = (e,n,f) => e.addEventListener(n,f);
 
 //Must match C code
 const TR_set = 1
@@ -272,43 +273,6 @@ const TS_setResponseHeaders = 4
 const TS_setResponseBody = 5
 const TS_TraceButtonState = 6
 const TS_TraceLevel = 7
-
-function Utf8ArrayToStr(inp, offset, length) {
-    let outp = "";
-    let utf16;
-    if (offset == undefined) offset = 0;
-    if (length == undefined) length = (inp.length - offset);
-    let ix = offset;
-    while (ix < offset + length) {
-	let b1 = inp[ix++];
-	if (b1 < 128) utf16 = b1;
-	else {
-	    let b2 = inp[ix++] - 128;
-	    if (b2 < 0) return null;
-	    if (b1 < 0xE0)
-		utf16 = 64 * (b1 - 0xC0) + b2;
-	    else {
-		let b3 = inp[ix++] - 128;
-		if (b3 < 0) return null;
-		if (b1 < 0xF0) utf16 = 4096 * (b1 - 0xE0) + 64 * b2 + b3;
-		else {
-		    let b4 = inp[ix++] - 128;
-		    if (b4 < 0) return null;
-		    if (b1 < 0xF8) utf16 = 262144 * (b1 - 0xF0) + 4096 * b2 + 64 * b3 + b4;
-		    else return null;
-		}
-	    }
-	}
-	if (utf16 > 0xFFFF) {
-	    utf16 -= 0x10000;
-	    outp += String.fromCharCode(0xD800 + (utf16 >> 10));
-	    utf16 = 0xDC00 + (utf16 & 0x3FF);
-	}
-	outp += String.fromCharCode(utf16);
-    }
-    return outp;
-};
-
 
 function escapeHtml(unsafe) {
     return unsafe
@@ -330,7 +294,7 @@ let busy=false;
 let connect;
 function startTL() {
     started=true;
-    $("#ctrl").fadeIn();
+    q("ctrl").style.display="";
     if( !websock && !busy ) {
 	busy=true;
 	writeCon("Starting <a target='_blank' href='"+docUrl+"'>TraceLogger</a>....\n");
@@ -338,15 +302,16 @@ function startTL() {
     }
 }
 
-$(function () {
+addEventListener("DOMContentLoaded", function () {
 
     let serverSetTraceState;
-    let conElem = $("#console");
+    let conElem = q("console");
+    let ctrl = q("ctrl");
     let conHasData = false;
     let reconnect=true;
 
     let hv=false; //ctrl header visible
-    $("#ctrl").hide();
+    ctrl.style.display="none";
     let hvtimer=false
     function showH() {
 	if(hvtimer) {
@@ -354,33 +319,34 @@ $(function () {
 	    hvtimer=false;
 	}
 	else if(!hv && started) {
-	    $("#ctrl").fadeIn();
+	    ctrl.style.display="";
 	    hv=true;
 	}
     };
     function delayedHideH() {
 	if(websock && !hvtimer) {
 	    hvtimer=setTimeout(()=>{
-		$("#ctrl").fadeOut();
+		ctrl.style.display="none";
 		hvtimer=false;
 		hv=false;
 	    }, 3000);
 	}
     };
-    $("body").on("mouseenter",showH).on("mouseleave",delayedHideH);
+    on(document.body,"mouseenter",showH);
+    on(document.body,"mouseleave",delayedHideH);
 
     function clearCon() {
 	conHasData = false;
-	conElem.empty();
-	$("#EraseTrace").prop("disabled", true);
+	conElem.textContent="";
+	q("EraseTrace").disabled=true;
     };
 
     writeCon=function(txt) {
 	if (!conHasData) {
 	    conHasData = true;
-	    $("#EraseTrace").prop("disabled", false);
+	    q("EraseTrace").disabled=false;
 	}
-	conElem.append(txt);
+	conElem.insertAdjacentHTML("beforeend",txt);
 	if (document.body.scrollHeight)
 	    window.scrollTo(0, document.body.scrollHeight);
     };
@@ -390,27 +356,26 @@ $(function () {
     }
 
     function isChecked(self) {
-	return $(self).prop('checked');
+	return self.checked;
     };
 
     function setChecked(elem, checked) {
-	return $("#" + elem).prop('checked', checked);
+	q(elem).checked=checked;
     };
 
     function setConnectedState(connected) {
 	if(connected) delayedHideH();
 	else showH();
-	let tc=$("#ToggleConnect");
-	if(connected) tc.removeClass("red");
-	else tc.addClass("red");
-	$("#led").removeClass().addClass(connected ? "led-green" : "led-red");
+	q("ToggleConnect").classList.toggle("red",!connected);
+	q("led").className=connected ? "led-green" : "led-red";
 	setConnectBut("Connect", false);
-	eh=null;
     };
 
 
     function setConnectBut(txt, disabled) {
-	$("#ToggleConnect").html(txt).prop("disabled", disabled);
+	let b=q("ToggleConnect");
+	b.textContent=txt;
+	b.disabled=disabled;
     };
 
     function setDisconState() {
@@ -442,10 +407,10 @@ $(function () {
 		setChecked("SetResponseHeaders",d[3]?true:false);
 		setChecked("SetHttp11State",	d[4]?true:false);
 		setChecked("SetResponseBody",	d[5]?true:false);
-		$("#TraceLevel").val(d[6]);
+		q("TraceLevel").value=d[6];
 		break;
 	    case TR_data:
-		writeCon(escapeHtml(Utf8ArrayToStr(d,1,d.length-1)));
+		writeCon(escapeHtml(new TextDecoder().decode(d.subarray(1))));
 		break;
 	    case TR_acquired:
 		writeConErr("Connection closed by another client.\n");
@@ -467,12 +432,11 @@ $(function () {
     connect=function(force) {
 	reconnect=true;
 	setConnectBut("Connecting...", true);
-	function ajaxRsp(jqXHR) {
-	    if( jqXHR.getResponseHeader('tracelogger') && 
-		(jqXHR.status == 204 || jqXHR.status == 503) )
+	function ajaxRsp(status,tl) {
+	    if( tl && (status == 204 || status == 503) )
 	    {
 		busy=false;
-		if(jqXHR.status == 204 || force) {
+		if(status == 204 || force) {
 		    startWS(true);
 		}
 		else {
@@ -482,14 +446,14 @@ $(function () {
 				"Click the Connect button to force the other client to disconnect!\n");
 		}
 	    }
-	    else if(jqXHR.status == 401) {
+	    else if(status == 401) {
 		setConnectBut("(disabled)",true);
 		if(window.top && window.top.authenticate)
 		    window.top.authenticate();
 		else
 		    writeConErr("You are not authenticated!\n");
 	    }
-	    else if(jqXHR.status == 0) {
+	    else if(status == 0) {
 		writeConErr("Cannot connect\n");
 		setTimeout(connect, 3000);
 	    }
@@ -499,11 +463,7 @@ $(function () {
 		writeConErr("Service at "+trUrl+" is not a TraceLogger or the TraceLogger service is not running!\nSee the <a href='"+docUrl+"'>documentation</a> for details.\n");
 	    }
 	};
-	$.ajax({
-	    url:trUrl,
-	    success: function(data, textStatus, jqXHR){ ajaxRsp(jqXHR); },
-	    error: function (jqXHR){ ajaxRsp(jqXHR); }
-	});
+	fetch(trUrl,{headers:{"X-Requested-With":"XMLHttpRequest"}}).then(r=>ajaxRsp(r.status,r.headers.get("tracelogger"))).catch(()=>ajaxRsp(0));
     };
     clearCon();
 
@@ -516,28 +476,28 @@ $(function () {
 	};
     };
 
-    $("#SetRequest").click(function(){sendCmd(TS_Request,isChecked(this));});
-    $("#SetRequestHeaders").click(function(){
+    on(q("SetRequest"),"click",function(){sendCmd(TS_Request,isChecked(this));});
+    on(q("SetRequestHeaders"),"click",function(){
 	sendCmd(TS_RequestHeaders,isChecked(this));
 	if(isChecked(this)) setChecked("SetRequest", true);
     });
-    $("#SetResponseHeaders").click(function(){sendCmd(TS_setResponseHeaders,isChecked(this));});
-    $("#SetResponseBody").click(function(){
-	if(isChecked("#SetResponseHeaders")) {
+    on(q("SetResponseHeaders"),"click",function(){sendCmd(TS_setResponseHeaders,isChecked(this));});
+    on(q("SetResponseBody"),"click",function(){
+	if(q("SetResponseHeaders").checked) {
 	    sendCmd(TS_setResponseHeaders,false);
 	    setChecked("SetResponseHeaders", false);
 	}
 	sendCmd(TS_setResponseBody,isChecked(this));
     });
-    $("#SetHttp11State").click(function(){sendCmd(TS_Http11State,isChecked(this));});
-    $("#TraceLevel").click(function() {sendCmd(TS_TraceLevel,$(this).val());});
-    $("#EraseTrace").click(clearCon);
-    $("#ToggleConnect").click(function() {
+    on(q("SetHttp11State"),"click",function(){sendCmd(TS_Http11State,isChecked(this));});
+    on(q("TraceLevel"),"change",function() {sendCmd(TS_TraceLevel,this.value);});
+    on(q("EraseTrace"),"click",clearCon);
+    on(q("ToggleConnect"),"click",function() {
 	if(websock) { websock.close(); websock=null; reconnect=false; setDisconState(); }
 	else connect(true);
     });
     if(location.search.includes('?advanced='))
-	$('#ctrl').find('.advanced').removeClass('advanced');
+	ctrl.querySelectorAll('.advanced').forEach(e=>e.classList.remove('advanced'));
     if( ! location.search.includes('?embedded=') ) startTL();
 });
 </script>
