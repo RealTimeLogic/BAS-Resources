@@ -367,6 +367,7 @@ let monacoEnabled=false; // Set if we can load Monaco from CDN
 */
 let editors={};
 let editorClose={};
+let editorRename={};
 
 let lastEditorId=false; // the last selected editor tab
 
@@ -401,6 +402,7 @@ function eid(pn) {
 function closeEditor(editorId) {
     let f=editorClose[editorId];
     delete editorClose[editorId];
+    delete editorRename[editorId];
     f?.();
     q(`[data-target='${editorId}']`,q('#tabheader'))?.remove();
     q(`#${editorId}`)?.remove();
@@ -457,6 +459,23 @@ function createEditor(pn,value,savecb,newElem,closecb) {
 	};
     let editorContainer=el('div',{class:'editorcontainer',id:editorId});
     let editorButtons=el('div',{class:'editor-buttons',id:editorId+'-buttonsdiv'});
+    function rename(to) {
+	let old=editorId;
+	editorId=eid(to);
+	tabBtn.dataset.target=editorId;
+	tabBtn.firstChild.data=to.match(/[^/]+$/)[0];
+	editorContainer.id=editorId;
+	editorButtons.id=editorId+'-buttonsdiv';
+	editors[editorId]=editors[old];
+	delete editors[old];
+	if(editorClose[old]) editorClose[editorId]=editorClose[old],delete editorClose[old];
+	delete editorRename[old];
+	editorRename[editorId]=rename;
+	rename.pn=to;
+	if(lastEditorId==old) lastEditorId=editorId;
+    }
+    rename.pn=pn;
+    editorRename[editorId]=rename;
     const button=(text,cb)=>{let b=el('button',{text,type:'submit'});b.onclick=cb;return b};
     if(null != value) {
 	sendCmd("pn2info", (rsp) => {
@@ -760,6 +779,10 @@ function treeCtxMenu(e,node) {
 	    const d=pd();
 	    if(v.length == 0 || v == node.name || !d) return;
 	    wfsReq("GET",fsBase+d,{cmd:'mv',from:node.name, to:fsBase+d+v},()=>{
+		let to=d+v+(node.dir?'/':'');
+		Object.values(editorRename).forEach(f=>{
+		    if(f.pn==pn || node.dir && f.pn.startsWith(pn)) f(to+f.pn.slice(pn.length));
+		});
 		tree.rename(node,v)},`Cannot rename ${node.name}.`);
 	    diaHide();
 	});
@@ -863,7 +886,7 @@ function openSelFile(node) {
 		    if(pn.match(/\/\.appcfg$/))
 		       appCfg(pn,JSON.parse(data));
 		    else
-		       createEditor(pn,data,(ndata,cb)=>savefile(fn,ndata,cb));
+		       createEditor(pn,data,(ndata,cb)=>savefile(fsBase+tree.path(node),ndata,cb));
 		});
 	    }
 	    else
