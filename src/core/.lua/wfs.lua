@@ -125,7 +125,7 @@ local nolist={["."]=true,[".."]=true,[".DAV"]=true,[".LOCK"]=true}
 
 local function newWFS(name,priority,io,lockdir,maxuploads,maxlocks,lspfunc)
    local authenticate,authorize=doNothing,doNothing  -- Default
-   local dav,resrdr,sesTmo,hasAuth,hasSesUri
+   local dav,resrdr,sesTmo,hasAuth,hasSesUri,pageaccessdenied
    local uploader=ba.create.upload(io)
 
    local function sessionuri(_ENV,rel)
@@ -337,7 +337,7 @@ local function newWFS(name,priority,io,lockdir,maxuploads,maxlocks,lspfunc)
       local c = cmd:data("cmd")
       if not c or #c == 0 then
 	 if lspfunc and not isPost then
-	    authorize(_ENV,rel,"PROPFIND",true)
+	    authorize(_ENV,rel,"PROPFIND","page")
 	    _ENV.rel=rel
 	    return lspfunc(_ENV,rel)
 	 end
@@ -512,8 +512,14 @@ local function newWFS(name,priority,io,lockdir,maxuploads,maxlocks,lspfunc)
 	    cmd:abort()
 	 end
       end
-      local function _authorize(_ENV,rel,method)
+      local function _authorize(_ENV,rel,method,mode)
 	 if not authorizer:authorize(cmd,method,rel) then
+	    if mode == "page" and pageaccessdenied then
+	       if not cmd.write then cmd=cmd:response() end
+	       cmd:setstatus(403)
+	       pageaccessdenied(_ENV,rel,method)
+	       cmd:abort()
+	    end
 	    if #rel == 0 then rel="root" end
 	    -- If cmd is a 'upload' type
 	    if not cmd.write then cmd=cmd:response() end
@@ -534,6 +540,10 @@ local function newWFS(name,priority,io,lockdir,maxuploads,maxlocks,lspfunc)
    end
 
    local function configure(t)
+      if t.pageaccessdenied ~= nil and type(t.pageaccessdenied) ~= "function" then
+	 error("pageaccessdenied must be a function",2)
+      end
+      pageaccessdenied=t.pageaccessdenied
       if not t.tmo or t.tmo == 0 then
 	 sesTmo=nil
       else
