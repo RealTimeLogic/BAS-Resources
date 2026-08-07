@@ -419,6 +419,21 @@ local function terminateApp(name, nosave)
    if not nosave then saveCfg() end
 end
 
+local function appreq(mT,env,n)
+   local ln,f,err,m,ok
+   m=mT[n]
+   if m then return m end
+   ln=sfmt(".lua/%s.lua",n:gsub("%.","/"))
+   if not env.io:stat(ln) then error(sfmt("%s not found",n),3) end
+   local f,err=env.io:loadfile(ln,env)
+   if f then
+      ok,err = xpcall(f,errh)
+      if ok then mT[n]=err return err end -- err is now mod.
+   end
+   error(sfmt("%s failed: %s",n,err or "?"),3)
+end
+
+
  -- start/stop/restart app by giving it a name and by using appc and io
 local function controlApp(name,appc,io,isStartup)
    local ok,err=true,nil
@@ -443,12 +458,16 @@ local function controlApp(name,appc,io,isStartup)
 	    end
 	    return false
 	 end)
-	 dir:lspfilter(app.env)
+	 dir:lspfilter(env)
 	 dir:insert()
       end
       local cnt=0
       app.running=true
-      if io:stat".preload" then ok,err=loadAndRunLua(io,".preload", app.env) end
+      if io:stat".preload" then
+	 local mT={}
+	 function env.appreq(n) return appreq(mT,env,n) end
+	 ok,err=loadAndRunLua(io,".preload", env)
+      end
       if not err then
 	 for path,fn in recDirIter(io,"") do
 	    if fn:find"%.xlua$" then
