@@ -46,10 +46,7 @@ local function cfgIo(key)
       return cfg
    end
    return function(cfg)
-      if cfg then
-	 rwCfgFile(enc(cfg))
-	 return
-      end
+      if cfg then return rwCfgFile(enc(cfg)) end
       return dec(rwCfgFile())
    end
 end
@@ -71,11 +68,26 @@ local function runXedge()
       tldir:configure{priority=9}
    end
    tldir:unlink()
-   xinit(io,cfgIo(ba.crypto.hash("sha256")(ba.tpm.uniquekey(secret,64))(true)),tldir,mako.rtldir)
+   xinit(io,cfgIo(ba.crypto.hash("sha256")(ba.tpm.uniquekey(secret,64))(true)),tldir,mako.rtldir,function(setUser)
+      if not xedge.authenticator then
+	 for ix,arg in ipairs(mako.argv) do
+	    if "-credentials" == arg then
+	       arg=mako.argv[ix+1]
+	       local sep=arg and arg:find(":", 1, true)
+	       if sep then
+		  setUser(arg:sub(1,sep-1),arg:sub(sep+1))
+	       else
+		  trace("Error: Xedge bootstrap credentials must use username:password")
+	       end
+	       return
+	    end
+	 end
+	 if mako.udb then
+	    xedge.appsd:setauth(ba.create.authenticator(mako.udb()))
+	 end
+      end
+   end)
    xinit=nil
-   if mako.udb and not xedge.authenticator then
-      xedge.appsd:setauth(ba.create.authenticator(mako.udb()))
-   end
 end
 dir:unlink()
 dir=nil

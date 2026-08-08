@@ -796,7 +796,8 @@ function xedge.ssoSetSecret(secret)
    end
 end
 
-local function xinit(aio,rwCfgFile,_tldir,_rtld)
+local function xinit(aio,rwCfgFile,_tldir,_rtld,onAuth)
+   onAuth=onAuth or function() end
    tldir=_tldir
    saveCfg = rwCfgFile and function() rwCfgFile(xcfg) end or function() end
    local cfg=rwCfgFile and rwCfgFile() or {apps={}}
@@ -863,7 +864,13 @@ local function xinit(aio,rwCfgFile,_tldir,_rtld)
    end)
    dir404:insert()
    if dio or rwCfgFile then
-      ba.thread.run(function() appsInit(cfg) installAuth() end)
+      local function setUser(name,pwd)
+	 pwd=xedge.ha1(name,pwd)
+	 xcfg.userdb[name]={pwd={pwd},roles={},maxusers=2}
+	 saveCfg()
+	 installAuth()
+      end
+      ba.thread.run(function() appsInit(cfg) installAuth() onAuth(setUser) end)
       if dio and (os.time()+86400) > xedge.compileTime then startAcmeDns() end
    else
       noDiskCfg=true
