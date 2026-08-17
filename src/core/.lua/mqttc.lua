@@ -376,7 +376,7 @@ local function mqttRec(self)
    local bta
    if len > 0 then
       bta=btaCreate(len)
-      local overflow=btaCopy(bta,1,data,ix+1,-ix-1)
+      local overflow=btaCopy(bta,1,data,ix+1,-1)
       local plen=#data-ix
       while plen < len do
 	 data,err=sock:read()
