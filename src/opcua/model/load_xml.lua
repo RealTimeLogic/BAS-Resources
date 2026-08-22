@@ -6,6 +6,7 @@ local compat = require("opcua.compat")
 local AttributeId = const.AttributeId
 local NodeClass = const.NodeClass
 local VariantType = const.VariantType
+local HAS_ENCODING = "i=38"
 
 local tins = table.insert
 local strmatch = string.match
@@ -379,13 +380,32 @@ end
 -- References
 -------------------------------------------------------------
 
-local function addReference(refs, newRef)
-  for _,ref in ipairs(refs) do
-    if ref.target == newRef.target and ref.type == newRef.type and ref.isForward == newRef.isForward then
-      return
+local function addReference(refs, newRef, nodeRefsMap)
+  if nodeRefsMap then
+    local map = nodeRefsMap[refs]
+    if not map then
+      map = {}
+      nodeRefsMap[refs] = map
+      for _, ref in ipairs(refs) do
+        local key = ref.target .. "|" .. ref.type .. "|" .. tostring(ref.isForward)
+        map[key] = true
+      end
+    end
+
+    local key = newRef.target .. "|" .. newRef.type .. "|" .. tostring(newRef.isForward)
+    if map[key] then
+      return false
+    end
+    map[key] = true
+  else
+    for _,ref in ipairs(refs) do
+      if ref.target == newRef.target and ref.type == newRef.type and ref.isForward == newRef.isForward then
+        return false
+      end
     end
   end
   tins(refs, newRef)
+  return true
 end
 
 local ReferenceParser = {
@@ -403,7 +423,7 @@ local ReferenceParser = {
     if not node then
       return "Node " .. self.NodeId .. " not found"
     end
-    addReference(node.Refs, {target=targetId, type=self.RefType, isForward=self.IsForward})
+    addReference(node.Refs, {target=targetId, type=self.RefType, isForward=self.IsForward}, self.Model._nodeRefsMap)
 
     self.RefType = nil
     self.TargetId = nil
@@ -614,6 +634,22 @@ local function newNodeIdValueParser(value, isArray)
   return parser
 end
 
+local function touint16(value)
+  value = tonumber(value)
+  if value and value < 0 then
+    value = value + 0x10000
+  end
+  return value
+end
+
+local function touint32(value)
+  value = tonumber(value)
+  if value and value < 0 then
+    value = value + 0x100000000
+  end
+  return value
+end
+
 
 local function newScalarParser(value, tagname, isarray)
   if tagname == "String" then
@@ -633,9 +669,9 @@ local function newScalarParser(value, tagname, isarray)
   elseif tagname == "Int16" then
     return newNumberValueParser(value, VariantType.Int16, isarray, tonumber)
   elseif tagname == "UInt16" then
-    return newNumberValueParser(value, VariantType.UInt16, isarray, tonumber)
+    return newNumberValueParser(value, VariantType.UInt16, isarray, touint16)
   elseif tagname == "UInt32" then
-    return newNumberValueParser(value, VariantType.UInt32, isarray, tonumber)
+    return newNumberValueParser(value, VariantType.UInt32, isarray, touint32)
   elseif tagname == "Int32" then
     return newNumberValueParser(value, VariantType.Int32, isarray, tonumber)
   elseif tagname == "Int64" then
@@ -1035,6 +1071,7 @@ local function parseNodeSet(xml, dbgTrace)
     NsIndex = 0,
     Nodes = {},
     Aliases = {},
+    _nodeRefsMap = {},
   }
 
   local context = {
@@ -1067,6 +1104,44 @@ local function checkModelDependencies(self, uaNodeSet)
       end
     end
   end
+end
+
+local function removeXmlEncodingNodes(nodes)
+  local candidates = {}
+  local removed = {}
+
+  for nid, node in pairs(nodes) do
+    local browseName = node.Attrs[AttributeId.BrowseName]
+    if browseName ~= nil and browseName.Name == "Default XML" then
+      candidates[nid] = true
+    end
+  end
+
+  for nid, node in pairs(nodes) do
+    for _, ref in ipairs(node.Refs) do
+      if ref.type == HAS_ENCODING then
+        if ref.isForward == false and candidates[nid] then
+          removed[nid] = true
+        elseif ref.isForward == true and candidates[ref.target] then
+          removed[ref.target] = true
+        end
+      end
+    end
+  end
+
+  for nid in pairs(removed) do
+    nodes[nid] = nil
+  end
+
+  for _, node in pairs(nodes) do
+    for index = #node.Refs, 1, -1 do
+      if removed[node.Refs[index].target] then
+        table.remove(node.Refs, index)
+      end
+    end
+  end
+
+  return removed
 end
 
 local function loadModel(self, xml, dbgTrace)
@@ -1150,33 +1225,72 @@ local function loadModel(self, xml, dbgTrace)
     newNodes[newId] = node
   end
   uaNodeSet.Nodes = newNodes
+  local removedXmlEncodingIds =
+    removeXmlEncodingNodes(uaNodeSet.Nodes)
 
   for alias, nid in pairs(uaNodeSet.Aliases) do
     local newNid = changeNs(nid, uaNodeSet.Namespaces)
-    -- local oldId = self.Aliases[alias]
-    dbgTrace("New alias ''" .. alias .. "'' for node " .. nid .. " changed to " .. newNid)
-    self.Aliases[alias] = newNid
+    if not removedXmlEncodingIds[newNid] then
+      -- local oldId = self.Aliases[alias]
+      dbgTrace(
+        "New alias ''" .. alias .. "'' for node " ..
+        nid .. " changed to " .. newNid)
+      self.Aliases[alias] = newNid
+    end
   end
 
-  -- Connect nodes from XML file to nodes in the address space
+  -- Add reciprocal references. References whose target belongs to NS0 or a
+  -- previously loaded model are stored as writable deltas on that target.
+  -- This lets a separately packed model contribute children to shared folders
+  -- and subtypes to type nodes owned by another readonly provider.
+  local externalTargets = {}
+  local externalTargetNodes = {}
   for nid, node in pairs(uaNodeSet.Nodes) do
     for _,ref in ipairs(node.Refs) do
       local targetNode = uaNodeSet.Nodes[ref.target]
       if targetNode then
-        addReference(targetNode.Refs, {target=nid, type=ref.type, isForward=(ref.isForward == false)})
+        addReference(targetNode.Refs, {target=nid, type=ref.type, isForward=(ref.isForward == false)}, uaNodeSet._nodeRefsMap)
       else
-        dbgTrace(fmt("Broken reference from node '%s' to '%s'", nid, ref.target))
+        targetNode = externalTargetNodes[ref.target]
+        if targetNode == nil then
+          targetNode = self.Nodes[ref.target]
+          externalTargetNodes[ref.target] = targetNode or false
+        elseif targetNode == false then
+          targetNode = nil
+        end
+
+        if targetNode then
+          local inserted = addReference(targetNode.Refs, {
+            target=nid,
+            type=ref.type,
+            isForward=(ref.isForward == false)
+          })
+          if inserted then
+            externalTargets[targetNode] = true
+          end
+        else
+          dbgTrace(fmt(
+            "Broken reference from node '%s' to '%s'", nid, ref.target))
+        end
       end
     end
   end
 
-  -- Connect nodes from XML file to nodes in the address space
+  local externalBatch = {}
+  for targetNode in pairs(externalTargets) do
+    externalBatch[#externalBatch + 1] = targetNode
+  end
+  if #externalBatch > 0 then
+    self.Nodes:saveNodes(externalBatch)
+  end
+
+  -- Add nodes from the XML file to the address space.
   for nid, node in pairs(uaNodeSet.Nodes) do
     local newNode = self.Nodes[nid]
     if not newNode then
       dbgTrace("Node " .. nid .. " already exists. Adding Refs")
       newNode = self.Nodes:newNode(nid, node.Attrs, node.Refs)
-      self.Nodes:saveNode(newNode)
+      self.Nodes:saveNodes({newNode})
     end
   end
 

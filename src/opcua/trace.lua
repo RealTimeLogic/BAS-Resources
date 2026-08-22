@@ -9,9 +9,9 @@ local function traceLog(level, msg)
 end
 
 local trace = {
-  dbg = function(msg) traceLog("[DBG] ", msg) end,  -- Debug loging print
+  dbg = function(msg) traceLog("[DBG] ", msg) end,  -- Debug logging print
   inf = function(msg) traceLog("[INF] ", msg) end,  -- Information logging print
-  err = function(msg) traceLog("[ERR] ", msg) end   -- Error loging print
+  err = function(msg) traceLog("[ERR] ", msg) end   -- Error logging print
 }
 
 return trace

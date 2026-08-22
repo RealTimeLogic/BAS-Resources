@@ -5,9 +5,8 @@ local traceI = trace.inf
 
 local function checkRefs(self, callback)
   local unreferencedNodes = {}
-  for nodeId in pairs(self.Nodes) do
-    unreferencedNodes[nodeId] = true
-  end
+
+  for nodeId in pairs(self.Nodes) do unreferencedNodes[nodeId] = true end
 
   for nodeId, node in pairs(self.Nodes) do
     -- Check if node has nodeID
@@ -19,8 +18,8 @@ local function checkRefs(self, callback)
       if ref.target == nil then
         callback(fmt("Node '%s' Reference #%s target is nil", nodeId, i))
       else
-        local tagetNode = self.Nodes[ref.target]
-        if tagetNode == nil then
+        local targetExists = self.Nodes[ref.target]
+        if not targetExists then
           callback(fmt("Node '%s' Reference %s target node '%s' absent", nodeId, i, ref.target))
         else
           unreferencedNodes[ref.target] = nil

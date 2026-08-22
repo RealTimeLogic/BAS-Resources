@@ -96,7 +96,7 @@ local xml2table = {
   START_ELEMENT = function(context, tagname, attribs)
     local node = { type = "element", tag_name = tagname, attributes = attribs or {} }
     local parent = context.stack[#context.stack]
-    
+
     if parent then
       if not parent.elements then parent.elements = {} end
       table.insert(parent.elements, node)
@@ -111,7 +111,7 @@ local xml2table = {
     table.insert(context.stack, node)
   end,
 
-  END_ELEMENT = function(context, tagname)
+  END_ELEMENT = function(context)
     local node = context.stack[#context.stack]
     if node and node.text then
       node.text = table.concat(node.text, " ")
@@ -135,17 +135,17 @@ local xparser = {
   create = function(handler)
     local context = { doc = {}, stack = {} }
     local lHandler = {
-      StartElement = function(parser, elementName, attributes)
+      StartElement = function(_, elementName, attributes)
         if handler.START_ELEMENT then
           return handler.START_ELEMENT(context, elementName, attributes)
         end
       end,
-      EndElement = function(parser, tagname)
+      EndElement = function(_, tagname)
         if handler.END_ELEMENT then
           return handler.END_ELEMENT(context, tagname)
         end
       end,
-      CharacterData = function(parser, data)
+      CharacterData = function(_, data)
         if handler.TEXT then
           return handler.TEXT(context, data)
         end
@@ -154,7 +154,7 @@ local xparser = {
 
     local impl = lxp.new(lHandler)
     local parser = {
-      parse = function(self, data)
+      parse = function(_, data)
         local ok, msg, line, col, pos
         if data then
           ok, msg, line, col, pos = impl:parse(data)
@@ -162,18 +162,18 @@ local xparser = {
           ok, msg, line, col, pos = impl:parse()
           impl:close()
         end
-        
+
         if not ok then
           return true, msg, line, col, pos
         end
-        
-        -- In export tests the parser is called exactly once with the full string, 
+
+        -- In export tests the parser is called exactly once with the full string,
         -- so we must send EOF to finish parsing if handler == xml2table and we aren't chunking
         if data and handler == xml2table then
           impl:parse()
           impl:close()
         end
-        
+
         if handler == xml2table then
            return context.status, context.doc, nil
         end
@@ -202,7 +202,7 @@ local function to_timestamp(str)
   tz_h = tonumber(tz_h)
   tz_m = tonumber(tz_m)
 
-  if #ms > 0 then 
+  if #ms > 0 then
     ms = tonumber("0."..ms)
   else
     ms = 0

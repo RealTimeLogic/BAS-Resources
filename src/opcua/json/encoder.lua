@@ -492,7 +492,9 @@ function enc:extensionObject(v, encoder)
   end
 
   self:beginField("TypeId")
-  self:nodeId(extObject and extObject.JsonId or v.TypeId)
+  self:nodeId(
+    extObject and
+      extObject:getEncodingNodeId(encoder.CodecType) or v.TypeId)
   self:endField("TypeId")
 
   self:beginField("Encoding")

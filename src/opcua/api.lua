@@ -8,7 +8,7 @@ end
 
 local function assertVersion(str)
   if not versionValid(str) then
-    error(string.format("Wrong OPCUA version %s. Requred %s", version.Version, str))
+    error(string.format("Wrong OPCUA version %s. Required %s", version.Version, str))
   end
 end
 
@@ -18,6 +18,8 @@ local ua = {
   newMqttClient = function(config, model) return require("opcua.pubsub.mqtt").newClient(config, model) end,
   emptyModel = function(config) return require("opcua.model.import").createModel(config) end,
   baseModel = function(config) return require("opcua.model.import").getBaseModel(config) end,
+  clientConfig = function(config) return require("opcua.config").client(config) end,
+  serverConfig = function(config) return require("opcua.config").server(config) end,
 
   Version = version,
   StatusCode = require("opcua.status_codes"),

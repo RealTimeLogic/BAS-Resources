@@ -21,7 +21,6 @@ local traceE = trace.err
 local fmt = string.format
 local tins = table.insert
 
-local HasSubtype = "i=45"
 local HasTypeDefinition = "i=40"
 
 local Good = s.Good
@@ -162,6 +161,10 @@ function Svc:listEndpoints()
     if string.find(endpointUrl, "opc.tcp") == 1 then
       for _,policy in ipairs(self.config.securePolicies) do
         self:addEndpointDescriptions(endpoint.endpointUrl, const.TranportProfileUri.TcpBinary, policy, endpoints)
+      end
+    elseif string.find(endpointUrl, "opc.wss") == 1 then
+      for _,policy in ipairs(self.config.securePolicies) do
+        self:addEndpointDescriptions(endpoint.endpointUrl, const.TranportProfileUri.WebSocketBinary, policy, endpoints)
       end
     elseif string.find(endpointUrl, "http://") or string.find(endpointUrl, "https://") then
       local policy = {}
@@ -464,42 +467,13 @@ function Svc:closeSession(req, channel)
   return {}
 end
 
-function Svc:getSubtypes(parent, cont)
-  if parent == nil then
-    return cont
+local function nodeClassMatches(mask, nodeClass)
+  if mask == NodeClass.Unspecified then
+    return true
   end
 
-  cont[parent.Attrs.NodeId] = 1
-
-  local nodeClass = parent.Attrs.NodeClass -- node class of an inspecting type hierarchy
-  for _,ref in ipairs(parent.Refs) do
-    if ref.type ~= HasSubtype then
-      goto continue
-    end
-
-    local subtypeId = ref.target
-    local subtype = self.nodeset[subtypeId]
-    if subtype == nil then
-      traceE(fmt("Services:getSubtypes | INTERNAL ERROR: Unknown subtype NodeId '%s'", subtypeId))
-      error(BadInternalError)
-    end
-
-    if ref.isForward == false then
-      goto continue
-    end
-
-    -- Collect only the same node class
-    if subtype.Attrs.NodeClass ~= nodeClass then
-      goto continue
-    end
-
-    self:getSubtypes(subtype, cont)
-    ::continue::
-  end
-
-  return cont
+  return (mask & nodeClass) ~= 0
 end
-
 
 function Svc:browse(req, channel)
   local errOn = self.trace.errOn
@@ -552,7 +526,7 @@ function Svc:browse(req, channel)
       local refTypes = {}
       if n.IncludeSubtypes == true then
         if dbgOn then traceD(fmt("Services:browse(%s) | Collecting subtypes of refererence", sessionId)) end
-        self:getSubtypes(refNode, refTypes)
+        self.nodeset:getSubtypes(refNode, refTypes)
       else
         refTypes[n.ReferenceTypeId] = 1
       end
@@ -586,6 +560,10 @@ function Svc:browse(req, channel)
           end
 
           local nodeClass = targetNode.Attrs.NodeClass
+          if not nodeClassMatches(n.NodeClassMask, nodeClass) then
+            break
+          end
+
           local typeDefinition = NodeId.Null
 
           if nodeClass == NodeClass.Object or nodeClass == NodeClass.Variable then
@@ -711,7 +689,7 @@ function Svc:read(req, channel)
           val = { StatusCode = const.StatusCode.BadInternalError }
         end
       else
-        val = node.VAttrs[r.AttributeId]
+        val = node:getDataValue(r.AttributeId)
       end
       if val.StatusCode == nil then
         val.StatusCode = s.Good
@@ -743,14 +721,34 @@ function Svc:writeNode(val)
   if dbgOn then traceD(fmt("Services:Write | updating attribute '%d' of node '%s' ", attributeId, nodeId)) end
   if attributeId == AttributeId.Value and n.Attrs.NodeCallback then
     if dbgOn then traceD(fmt("Services:Write | writing value node '%s' to custom source", attributeId, nodeId)) end
-    n.Attrs.NodeCallback(nodeId, value)
+    local callbackOk, callbackValue =
+      pcall(n.Attrs.NodeCallback, nodeId, tools.copy(value))
+    local storedValue
+    local result
+
+    if callbackOk and callbackValue == nil then
+      storedValue = tools.copy(value)
+      storedValue.StatusCode = Good
+      result = Good
+    elseif callbackOk and tools.dataValueValid(callbackValue) then
+      storedValue = tools.copy(callbackValue)
+      if storedValue.StatusCode == nil then
+        storedValue.StatusCode = Good
+      end
+      result = storedValue.StatusCode
+    else
+      result = not callbackOk and type(callbackValue) == "number" and
+        callbackValue or BadInternalError
+      storedValue = tools.copy(value)
+      storedValue.StatusCode = result
+    end
+
+    n.Attrs[attributeId] = storedValue
+    return n, result, storedValue, true
   else
     n.Attrs[attributeId] = value
+    return n, Good, value, false
   end
-
-  self.nodeset:saveNode(n)
-  self:callWriteHook(nodeId, attributeId, value)
-  if dbgOn then traceD(fmt("Services:Write | updated attribute '%d' of node '%s' ", attributeId, nodeId)) end
 end
 
 function Svc:write(req, channel)
@@ -769,14 +767,49 @@ function Svc:write(req, channel)
   end
 
   local results = {}
-  for _, val in ipairs(req.NodesToWrite) do
+  local dirtyNodes = {}
+  local staged = {}
+  for index, val in ipairs(req.NodesToWrite) do
     if infOn then traceI(fmt("Services:Write(%s) | Writing '%s'", sessionId, val.NodeId)) end
-    local suc, code = pcall(self.writeNode, self, val)
+    local suc, node, code, storedValue, callbackBacked =
+      pcall(self.writeNode, self, val)
     if suc then
-      code = 0
+      results[index] = code
+      dirtyNodes[#dirtyNodes + 1] = node
+      staged[#staged + 1] = {
+        Index = index,
+        NodeId = val.NodeId,
+        AttributeId = val.AttributeId,
+        Value = storedValue,
+        CallbackBacked = callbackBacked,
+      }
+    else
+      results[index] = type(node) == "number" and node or BadInternalError
     end
-    if dbgOn then traceD(fmt("Services:Write(%s) | '%s' result '%s'", sessionId, val.NodeId, code)) end
-    tins(results, code)
+    if dbgOn then traceD(fmt("Services:Write(%s) | '%s' result '%s'", sessionId, val.NodeId, results[index])) end
+  end
+
+  if #dirtyNodes > 0 then
+    local saved, saveError = pcall(self.nodeset.saveNodes, self.nodeset, dirtyNodes)
+    if not saved then
+      saveError = type(saveError) == "number" and saveError or BadInternalError
+      for _, operation in ipairs(staged) do
+        if not operation.CallbackBacked then
+          results[operation.Index] = saveError
+        end
+      end
+    else
+      for _, operation in ipairs(staged) do
+        if results[operation.Index] == Good then
+          self:callWriteHook(
+            operation.NodeId, operation.AttributeId, operation.Value)
+        end
+      end
+      if dbgOn then
+        traceD(fmt("Services:Write(%s) | published %d dirty nodes",
+          sessionId, #dirtyNodes))
+      end
+    end
   end
 
   return {Results=results}
@@ -844,7 +877,15 @@ function Svc:addNode(node)
   local newNode
   if node.NodeClass == const.NodeClass.Variable then
     if infOn then traceI("Services:addNode | Adding new variable node.") end
-    newNode = parent:addVariable(node.BrowseName, node.NodeAttributes.Body.Value, typeDefinition, node.RequestedNewNodeId, refType)
+    local initialValue = node.NodeAttributes.Body.Value
+    if tools.dataValueValid(initialValue) and initialValue.StatusCode == nil then
+      initialValue.StatusCode = Good
+    end
+    if type(initialValue) == "table" and initialValue.Type ~= nil and
+       initialValue.IsArray == nil then
+      initialValue.IsArray = false
+    end
+    newNode = parent:addVariable(node.BrowseName, initialValue, typeDefinition, node.RequestedNewNodeId, refType)
     setVariableAttributes(newNode, node)
   elseif node.NodeClass == const.NodeClass.Object then
     if infOn then traceI("Services:addNode | Adding new object.") end
@@ -854,6 +895,7 @@ function Svc:addNode(node)
     error(BadNodeClassInvalid)
   end
 
+  editor.Nodes:saveNodes({newNode.Node})
   editor:save()
 
   if infOn then traceI(fmt("Services:addNode | new node '%s' added", newNode.Attrs.NodeId)) end
@@ -885,6 +927,39 @@ function Svc:addNodes(req, channel)
     else
       if errOn then traceD(fmt("Services:addNodes(%s) | Error adding node %s", sessionId, result)) end
       tins(results, {StatusCode=result, AddedNodeId="i=0"})
+    end
+  end
+
+  return {Results=results}
+end
+
+function Svc:deleteNode(item)
+  local editor = self.model:edit()
+  editor.Nodes:deleteNode(item.NodeId, item.DeleteTargetReferences)
+  editor:save()
+end
+
+function Svc:deleteNodes(req, channel)
+  local dbgOn = self.trace.dbgOn
+  local errOn = self.trace.errOn
+  local infOn = self.trace.infOn
+  local session = self:checkSession(req, channel)
+  local sessionId = session.sessionId
+
+  if req.NodesToDelete == nil or req.NodesToDelete[1] == nil then
+    if infOn then traceD(fmt("Services:deleteNodes(%s) | Nothing to do", sessionId)) end
+    error(BadNothingToDo)
+  end
+
+  local results = {}
+  for _, item in ipairs(req.NodesToDelete) do
+    local success, result = pcall(self.deleteNode, self, item)
+    if success then
+      if dbgOn then traceD(fmt("Services:deleteNodes(%s) | Deleted node '%s'", sessionId, item.NodeId)) end
+      tins(results, Good)
+    else
+      if errOn then traceE(fmt("Services:deleteNodes(%s) | Failed to delete node '%s': %s", sessionId, item.NodeId, result)) end
+      tins(results, result)
     end
   end
 
@@ -1019,7 +1094,7 @@ function Svc:setValueCallback(nodeId, func)
   end
 
   node.Attrs.NodeCallback = func
-  self.nodeset:saveNode(node)
+  self.nodeset:saveNodes({node})
   if dbgOn then traceD(fmt("Source callback for nodeId '%s' was set", nodeId)) end
 end
 

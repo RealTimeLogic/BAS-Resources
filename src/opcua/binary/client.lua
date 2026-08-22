@@ -69,7 +69,14 @@ local function processConnect(err, callback)
 end
 
 function C:connectServer(endpointUrl, transportProfile, connectCallback)
-  assert(transportProfile == const.TranportProfileUri.TcpBinary)
+  local tcpTransport = transportProfile == const.TranportProfileUri.TcpBinary
+  local webSocketTransport = transportProfile == const.TranportProfileUri.WebSocketBinary
+  if not tcpTransport and not webSocketTransport then
+    return processConnect(
+      "Binary client with transport profile '"..tostring(transportProfile).."' not supported",
+      connectCallback
+    )
+  end
 
   local config = self.config
   local sock
@@ -88,29 +95,38 @@ function C:connectServer(endpointUrl, transportProfile, connectCallback)
   if err then
     return processConnect(err, connectCallback)
   end
-  if url.scheme ~= "opc.tcp" then
+  local validScheme = tcpTransport and url.scheme == "opc.tcp"
+  if webSocketTransport then
+    validScheme =
+      url.scheme == "opc.wss" or url.scheme == "ws" or url.scheme == "wss"
+  end
+  if not validScheme then
     err = "Unknown protocol scheme '"..url.scheme.. "'"
     return processConnect(err, connectCallback)
   end
 
   if self.sock == nil then
-    if infOn then traceI("binary | conecting to host '"..url.host.."' port '"..url.port.."'") end
-    sock, err = compat.socket.connect(url.host, url.port, {timeout=20000})
+    if webSocketTransport then
+      if infOn then traceI("binary | upgrading WebSocket endpoint '"..endpointUrl.."'") end
+      sock, err = require("opcua.ws.websocket").connectWebSocket(endpointUrl, config)
+    else
+      if infOn then traceI("binary | connecting to host '"..url.host.."' port '"..url.port.."'") end
+      sock, err = compat.socket.connect(url.host, url.port, {timeout=20000})
+      if err == nil then
+        sock:queuelen(0)
+        sock = newClientSock(sock, config)
+        sock:setTimeout(config.socketTimeout)
+      end
+    end
     if infOn then traceI(fmt("binary | sock='%s' err='%s'", sock, err)) end
     if err ~= nil then
-      if errOn then traceE("binary | tcp error: "..err) end
+      if errOn then traceE("binary | connection error: "..tostring(err)) end
       processConnect(err, connectCallback)
       return err
     end
-    sock:queuelen(0)
 
-    if self.sock == nil then
-      if infOn then traceI(fmt("binary | connected: %s", sock)) end
-      self.sock = newClientSock(sock, config)
-      self.sock:setTimeout(config.socketTimeout)
-    else
-      self.sock.sock = sock
-    end
+    if infOn then traceI(fmt("binary | connected: %s", sock)) end
+    self.sock = sock
   end
 
   if self.dec == nil then
@@ -146,7 +162,10 @@ end
 function C:coRun(endpointUrl, transportProfile, connectCallback, messageCallback)
   local infOn = self.config.logging.binary.infOn
 
-  if transportProfile ~= const.TranportProfileUri.TcpBinary then
+  if
+    transportProfile ~= const.TranportProfileUri.TcpBinary and
+    transportProfile ~= const.TranportProfileUri.WebSocketBinary
+  then
     error("Binary client with transport profile '"..tostring(transportProfile).."' not supported")
   end
 

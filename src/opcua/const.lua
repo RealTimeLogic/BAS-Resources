@@ -365,6 +365,7 @@ local c = {
 
   TranportProfileUri = {
     TcpBinary   = "http://opcfoundation.org/UA-Profile/Transport/uatcp-uasc-uabinary",
+    WebSocketBinary = "http://opcfoundation.org/UA-Profile/Transport/wss-uasc-uabinary",
     HttpsBinary = "http://opcfoundation.org/UA-Profile/Transport/https-uabinary",
     HttpsJson   = "http://opcfoundation.org/UA-Profile/Transport/https-uajson",
     MqttBinary  = "http://opcfoundation.org/UA-Profile/Transport/pubsub-mqtt-uadp",

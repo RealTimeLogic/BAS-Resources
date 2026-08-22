@@ -2,6 +2,8 @@ local BinaryMessageEncoder = require("opcua.binary.chunks_encode")
 local BinaryMessageDecoder = require("opcua.binary.chunks_decode")
 local JsonMessageEncoder = require("opcua.json.chunks_encode")
 local JsonMessageDecoder = require("opcua.json.chunks_decode")
+local BinaryServerConnection = require("opcua.binary.server_connection")
+local WebSocketSocket = require("opcua.ws.websocket")
 local securePolicy = require("opcua.binary.crypto.policy")
 local Msg = require("opcua.binary.message_id")
 local compat = require("opcua.compat")
@@ -20,9 +22,36 @@ local BadNotImplemented = StatusCode.BadNotImplemented
 local BadCommunicationError = StatusCode.BadCommunicationError
 local BadDecodingError = StatusCode.BadDecodingError
 
+local WEBSOCKET_SUBPROTOCOL = "opcua+uacp"
+
 
 local S = {}
 S.__index = S
+
+local function supportsWebSocketSubprotocol(header)
+  if not header then
+    return true
+  end
+  for token in header:gmatch("[^,]+") do
+    if token:match("^%s*(.-)%s*$") == WEBSOCKET_SUBPROTOCOL then
+      return true
+    end
+  end
+  return false
+end
+
+local function processWebSocket(socket, connection)
+  while true do
+    local ok, err = pcall(connection.processData, connection)
+    if not ok then
+      if connection.trace.errOn and err ~= BadCommunicationError then
+        traceE(fmt("%s WebSocket error '%s'", connection.logId, err))
+      end
+      break
+    end
+  end
+  socket:shutdown()
+end
 
 function S:processData(securityPolicyUri)
   local dbgOn = self.trace.dbgOn
@@ -64,6 +93,8 @@ function S:processData(securityPolicyUri)
     self:processRequest(nil, msg, Msg.TRANSLATE_BROWSE_PATHS_TO_NODE_IdS_RESPONSE, self.services.translateBrowsePaths, "TranslateBrowsePathsToNodeIds")
   elseif i == Msg.ADD_NODES_REQUEST then
     self:processRequest(nil, msg, Msg.ADD_NODES_RESPONSE, self.services.addNodes, "AddNodes")
+  elseif i == Msg.DELETE_NODES_REQUEST then
+    self:processRequest(nil, msg, Msg.DELETE_NODES_RESPONSE, self.services.deleteNodes, "DeleteNodes")
   else
     -- TODO NEED REMOVE EXTRA DATA OF NOT IMPLEMENTED REQUEST BODY
     if errOn then traceE(fmt("%s Invalid message ID: %d", self.logId, i)) end
@@ -149,9 +180,35 @@ function S:processHttp(request, response)
   local errOn = logging.errOn
 
   if infOn then  traceI(fmt("%s HTTP request", self.logId)) end
+  local env
   if type(request) == "table" and request.request then
+    env = request
     response = request.response
     request = request.request
+  end
+
+  if request:header("Sec-WebSocket-Key") then
+    local protocol = request:header("Sec-WebSocket-Protocol")
+    if not supportsWebSocketSubprotocol(protocol) then
+      response:senderror(400, "Unsupported WebSocket subprotocol")
+      return
+    end
+
+    local socketApi = env and env.ba and env.ba.socket or ba.socket
+    local rawSocket = socketApi.req2sock(request)
+    if rawSocket then
+      local socket = WebSocketSocket.new(rawSocket)
+      local connection = BinaryServerConnection.new(
+        self.config,
+        self.services,
+        socket,
+        self.model
+      )
+      rawSocket:event(function()
+        processWebSocket(socket, connection)
+      end, "s")
+    end
+    return
   end
 
   local securityPolicyUri = request:header("OPCUA-SecurityPolicy")

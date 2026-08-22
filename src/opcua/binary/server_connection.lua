@@ -274,6 +274,8 @@ function S:processMessage()
       self:processRequest(msg, Msg.TRANSLATE_BROWSE_PATHS_TO_NODE_IdS_RESPONSE, self.services.translateBrowsePaths, "TranslateBrowsePathsToNodeIds")
     elseif i == Msg.ADD_NODES_REQUEST then
       self:processRequest(msg, Msg.ADD_NODES_RESPONSE, self.services.addNodes, "AddNodes")
+    elseif i == Msg.DELETE_NODES_REQUEST then
+      self:processRequest(msg, Msg.DELETE_NODES_RESPONSE, self.services.deleteNodes, "DeleteNodes")
     elseif i == Msg.CALL_REQUEST then
       self:processRequest(msg, Msg.CALL_RESPONSE, self.services.call, "Call")
     else

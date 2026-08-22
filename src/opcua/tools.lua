@@ -230,7 +230,7 @@ function T.diagnosticInfoValid(v)
   if v.SymbolicId ~= nil and not T.int32Valid(v.SymbolicId) then
     return false
   end
-  if v.NsUri ~= nil and not T.int32Valid(v.NsUri) then
+  if v.NamespaceURI ~= nil and not T.int32Valid(v.NamespaceURI) then
     return false
   end
   if v.Locale ~= nil and not T.int32Valid(v.Locale) then
@@ -431,7 +431,9 @@ function T.dataValueValid(v)
   if type(v) ~= 'table' then
     return false
   end
-  if not T.variantValid(v) then
+  -- A DataValue may omit its Value field entirely. In that case no Variant
+  -- Type is present in the binary encoding either.
+  if (v.Value ~= nil or v.Type ~= nil) and not T.variantValid(v) then
     return false
   end
   if v.StatusCode ~= nil and not T.uint32Valid(v.StatusCode) then
@@ -753,14 +755,14 @@ T.newVariableParams = function(parentNodeId, name, val, newNodeId)
 end
 
 T.createGuid = function()
-  local crypto = crypto.crypto
-  local n1 = crypto.rnds(8) & 0xFFFFFFFF
-  local n2 = crypto.rnds(4) & 0xFFFF
-  local n3 = crypto.rnds(4) & 0xFFFF
-  local n4 = crypto.rnds(4) & 0xFFFF
-  local n5 = crypto.rnds(4) & 0xFFFF
-  local n6 = crypto.rnds(4) & 0xFFFF
-  local n7 = crypto.rnds(4) & 0xFFFF
+  local cr = crypto.crypto
+  local n1 = cr.rnds(8) & 0xFFFFFFFF
+  local n2 = cr.rnds(4) & 0xFFFF
+  local n3 = cr.rnds(4) & 0xFFFF
+  local n4 = cr.rnds(4) & 0xFFFF
+  local n5 = cr.rnds(4) & 0xFFFF
+  local n6 = cr.rnds(4) & 0xFFFF
+  local n7 = cr.rnds(4) & 0xFFFF
   -- print(n1,n2,n3,n4,n5,n6)
   local guid <const> =  string.format("%0.8x-%0.4x-%0.4x-%0.4x-%0.4x%0.4x%0.4x",n1,n2,n3,n4,n5,n6,n7)
   -- print(guid)

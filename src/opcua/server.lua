@@ -11,7 +11,7 @@ S.__index = S
 
 
 function S:initialize(initAddons)
-  -- services responsible for buisness logic: sessions, address space etc.
+  -- services responsible for business logic: sessions, address space etc.
   self.services = require("opcua.services").new(self.config, self.model)
   self.services:start()
 
@@ -129,6 +129,10 @@ function S:addNodes(params)
   return self.services:addNodes(params)
 end
 
+function S:deleteNodes(params)
+  return self.services:deleteNodes(params)
+end
+
 function S:setValueCallback(nodeId, callback)
   return self.services:setValueCallback(nodeId, callback)
 end
@@ -137,8 +141,8 @@ function S:setWriteHook(nodeId, callback)
   return self.services:setWriteHook(nodeId, callback)
 end
 
-function S:loadXmlModels(modelFiles)
-  self.model:loadXmlModels(modelFiles)
+function S:loadModels(modelSources)
+  self.model:loadModels(modelSources)
   self.model:commit()
 end
 
@@ -146,24 +150,8 @@ function S:createNamespace(namespaceUri)
   return self.model:createNamespace(namespaceUri)
 end
 
-function S:exportXmlModels(output, namespaceUris)
-  -- Handle file path output
-  if type(output) == "string" then
-    local file = io.open(output, "w")
-    if not file then
-      error("Could not open file for writing: " .. output)
-    end
-
-    local function fileCallback(str)
-      file:write(str)
-    end
-
-    self.model:exportXml(fileCallback, namespaceUris)
-    file:close()
-  else
-    -- Handle callback function output
-    self.model:exportXml(output, namespaceUris)
-  end
+function S:exportXmlModels(output, namespaceURIs)
+  return self.model:exportXml(output, namespaceURIs)
 end
 
 function S.new(config, model)
@@ -193,10 +181,7 @@ function S.new(config, model)
   end
 
   local uaConfig = require("opcua.config")
-  local err = uaConfig.server(config)
-  if err ~= nil then
-    error("Configuration error: "..err)
-  end
+  config = uaConfig.server(config)
   local infOn = config.logging.services.infOn
 
   if infOn then traceI("Creating model") end

@@ -6,6 +6,7 @@
 local compat = require("opcua.compat")
 
 local const = require("opcua.const")
+local exportUtils = require("opcua.model.export_utils")
 local NodeId = require("opcua.node_id")
 local NodeClass = const.NodeClass
 local VariantType = const.VariantType
@@ -435,7 +436,9 @@ local function exportNode(self, output, context, nodeId, node)
   func(self, output, context, nodeId, node)
 end
 
-local function exportXml(self, output, namespaceUris)
+local function exportXml(self, output, namespaceURIs)
+  assert(type(output) == "function", "output must be a function")
+
   local context = {
     refs = {},
     namespaces = {},
@@ -444,16 +447,19 @@ local function exportXml(self, output, namespaceUris)
   output('<?xml version="1.0" encoding="utf-8" ?>\n')
   output('<UANodeSet xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:uax="http://opcfoundation.org/UA/2008/02/Types.xsd" LastModified="2022-02-24T00:00:00Z" xmlns="http://opcfoundation.org/UA/2011/03/UANodeSet.xsd">\n')
 
-  if namespaceUris then
-    for i, namespace in ipairs(namespaceUris) do
+  if namespaceURIs then
+    local namespaces =
+      exportUtils.selectedNamespaces(self, namespaceURIs)
+    for i, namespace in ipairs(namespaces) do
       local ns = {
-        NamespaceUri = namespace,
+        NamespaceUri = namespace.NamespaceUri,
         Index = i,
       }
-      context.namespaces[namespace] = ns
+      context.namespaces[namespace.NamespaceUri] = ns
       context.namespaces[i] = ns
     end
   else
+    exportUtils.selectedNamespaces(self, nil)
     context.namespaces = self.Namespaces
   end
 

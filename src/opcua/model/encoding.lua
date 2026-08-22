@@ -5,6 +5,13 @@ local fmt = string.format
 
 local dbg = false
 
+local function getTypeInfo(codec, nodeId)
+  local info = codec.model.Nodes:getTypeInfo(nodeId)
+  if info == nil then
+    error("No TypeInfo for node: " .. nodeId)
+  end
+  return info
+end
 
 local Encoder <const> = {
   bit = function(s, v, n) s.Serializer:bit(v, n) end,
@@ -93,8 +100,8 @@ local Decoder <const> = {
 -- Search function for decoding base type node
 function Encoder:encodeEnum(val, dataTypeId)
   if type(val) == "string" then
-    local definition = self.model.Nodes[dataTypeId].Attrs.DataTypeDefinition
-    for _, field in ipairs(definition) do
+    local fields = getTypeInfo(self, dataTypeId):iterateFields()
+    for _, field in fields do
       if field.Name == val then
         val = field.Value
         break
@@ -105,16 +112,17 @@ function Encoder:encodeEnum(val, dataTypeId)
 end
 
 function Encoder:encodeStructure(struct, dataTypeId)
-  local definition = self.model.Nodes[dataTypeId].Attrs.DataTypeDefinition
+  local fields, fieldCount =
+    getTypeInfo(self, dataTypeId):iterateFields()
   local enc = self
-  if not definition then
+  if not fields or fieldCount == 0 then
     return enc:extensionObject(struct, self.model)
   end
 
   enc:beginObject()
-  for _, field in ipairs(definition) do
+  for _, field in fields do
     local dataType = field.DataType
-    local baseId = self.model.Nodes[dataType].BaseId
+    local baseId = getTypeInfo(self, dataType):getBaseId()
     local encF = self[baseId]
     if not encF then
       error("No encoder for type: " .. dataType)
@@ -147,14 +155,15 @@ function Decoder:decodeStructure(dataTypeId)
   local struct = {}
   local dec = self
   dec:beginObject()
-  local definition = self.model.Nodes[dataTypeId].Attrs.DataTypeDefinition
-  if not definition or #definition == 0 then
+  local fields, fieldCount =
+    getTypeInfo(self, dataTypeId):iterateFields()
+  if not fields or fieldCount == 0 then
     struct = dec:extensionObject(self.model)
   else
-    for _, field in ipairs(definition) do
+    for _, field in fields do
       if dbg then print(fmt("decoding field: %s (%s)", field.Name, field.DataType)) end
       local dataType = field.DataType
-      local baseId = self.model.Nodes[dataType].BaseId
+      local baseId = getTypeInfo(self, dataType):getBaseId()
       local decF = self[baseId]
       if not decF then
         error("No decoder for type: " .. dataType)
@@ -188,9 +197,9 @@ end
 
 function Decoder:decodeEnum(dataTypeId)
   local val = self:uint32()
-  local definition = self.model.Nodes[dataTypeId].Attrs.DataTypeDefinition
-  if definition then
-    for _, field in ipairs(definition) do
+  local fields = getTypeInfo(self, dataTypeId):iterateFields()
+  if fields then
+    for _, field in fields do
       if field.Value == val then
         return field.Name
       end
@@ -201,7 +210,7 @@ end
 
 
 function Encoder:Encode(nodeId, value)
-  local baseId = self.model.Nodes[nodeId].BaseId
+  local baseId = getTypeInfo(self, nodeId):getBaseId()
   local enc = self[baseId]
   if not enc then
     error("No encoder for node: " .. nodeId)
@@ -210,33 +219,25 @@ function Encoder:Encode(nodeId, value)
 end
 
 function Encoder:BinaryEncode(nodeId, value)
-  local baseId = self.model.Nodes[nodeId].BaseId
-  local enc = Encoder[baseId]
+  local baseId = getTypeInfo(self, nodeId):getBaseId()
+  local enc = self[baseId]
   if not enc then
     error("No Binary encoder for node: " .. nodeId)
   end
-  enc(self, self.BinarySerializer, value, nodeId)
+  enc(self, value, nodeId)
 end
 
 function Encoder.JsonEncode(self, nodeId, value)
-  local extObj = self.model.Nodes[nodeId]
-  if not extObj then
-    error("No node: " .. nodeId)
-  end
-  local baseId = extObj.BaseId
-  local enc = Encoder[baseId]
+  local baseId = getTypeInfo(self, nodeId):getBaseId()
+  local enc = self[baseId]
   if not enc then
     error("No JSON encoder for node: " .. nodeId)
   end
-  enc(self, self.JsonSerializer, value, nodeId)
+  enc(self, value, nodeId)
 end
 
 function Decoder:Decode(nodeId)
-  local extObj = self.model.Nodes[nodeId]
-  if not extObj then
-    error("No node: " .. nodeId)
-  end
-  local dec = self[extObj.BaseId]
+  local dec = self[getTypeInfo(self, nodeId):getBaseId()]
   if not dec then
     error("No decoder for node: " .. nodeId)
   end
@@ -244,33 +245,33 @@ function Decoder:Decode(nodeId)
 end
 
 function Decoder:BinaryDecode(nodeId)
-  local baseId = self.Nodes[nodeId].BaseId
-  local dec = self.Decoder[baseId]
+  local baseId = getTypeInfo(self, nodeId):getBaseId()
+  local dec = self[baseId]
   if not dec then
     error("No Binary decoder for node: " .. nodeId)
   end
-  return dec(self, self.BinaryDeserializer, nodeId)
+  return dec(self, nodeId)
 end
 
 function Decoder:JsonDecode(nodeId)
-  local baseId = self.Nodes[nodeId].BaseId
-  local dec = self.Decoder[baseId]
+  local baseId = getTypeInfo(self, nodeId):getBaseId()
+  local dec = self[baseId]
   if not dec then
     error("No JSON decoder for node: " .. nodeId)
   end
-  return dec(self, self.JsonDeserializer, nodeId)
+  return dec(self, nodeId)
 end
 
 function Decoder:getExtObject(nodeId)
-  local extObj = self.model.Nodes[nodeId]
-  local encF = extObj and self[extObj.BaseId]
-  return extObj, encF
+  local extObject = self.model.Nodes:getTypeInfo(nodeId)
+  local encF = extObject and self[extObject:getBaseId()]
+  return extObject, encF
 end
 
 function Encoder:getExtObject(nodeId)
-  local extObj = self.model.Nodes[nodeId]
-  local encF = extObj and self[extObj.BaseId]
-  return extObj, encF
+  local extObject = self.model.Nodes:getTypeInfo(nodeId)
+  local encF = extObject and self[extObject:getBaseId()]
+  return extObject, encF
 end
 
 Encoder["i=1"] = Encoder.boolean
@@ -335,9 +336,17 @@ Decoder["i=27"] = "error" -- Integer
 Decoder["i=28"] = "error" -- UInteger
 Decoder["i=29"] = Decoder.uint32 -- Enumeration
 
+local function checkCodecType(codecType)
+  assert(
+    codecType == "Binary" or codecType == "Json",
+    "unsupported OPC UA encoding: " .. tostring(codecType))
+end
+
 return {
-  CreateEncoder = function(model, serializer)
+  CreateEncoder = function(model, serializer, codecType)
+    checkCodecType(codecType)
     local encoder = {
+      CodecType = codecType,
       model = model,
       Serializer = serializer,
     }
@@ -350,9 +359,11 @@ return {
     })
     return encoder
   end,
-  CreateDecoder = function(model, deserializer)
+  CreateDecoder = function(model, deserializer, codecType)
+    checkCodecType(codecType)
 
     local decoder = {
+      CodecType = codecType,
       model = model,
       Deserializer = deserializer,
     }

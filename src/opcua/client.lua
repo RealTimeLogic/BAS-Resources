@@ -31,59 +31,154 @@ local NodeClass = const.NodeClass
 local BrowseResultMask = const.BrowseResultMask
 local AttributeId = const.AttributeId
 
+local Lock = {}
+Lock.__index = Lock
+
+local lockTokenMetatable = {
+  __close = function(token)
+    local lock = token.lock
+    lock.servingTicket = lock.servingTicket + 1
+  end
+}
+
+function Lock:acquire()
+  local ticket = self.nextTicket
+  self.nextTicket = ticket + 1
+
+  while self.servingTicket ~= ticket do
+    compat.sleep(0)
+  end
+
+  return setmetatable({lock = self}, lockTokenMetatable)
+end
+
+local function newLock()
+  return setmetatable({nextTicket = 0, servingTicket = 0}, Lock)
+end
+
 local C={} -- OpcUa Client
 C.__index=C
 
-local function syncExecRequest(self, request)
+local function syncSendRequest(self, request)
   local dbgOn = self.config.logging.services.dbgOn
-  if dbgOn then tools.printTable("services | execRequest", request, traceD) end
+  if dbgOn then traceD("client | syncSendRequest") end
+
+  local lock <close> = self.lock:acquire() -- luacheck: ignore
+  if dbgOn then traceD("client | syncSendRequest LOCKED") end
 
   local suc, err = pcall(self.services.sendMessage, self.services, request, true)
   if not suc then
-    return self:processResponse(nil, err)
+  if dbgOn then traceD(fmt("client | sendMessage error %s", err)) end
+    return nil, err
+  end
+  if dbgOn then traceD("client | sendMessage done") end
+end
+
+local function syncExecRequest(self, request)
+  local dbgOn = self.config.logging.services.dbgOn
+  if dbgOn then tools.printTable("client | syncExecRequest", request, traceD) end
+
+  local _, err = syncSendRequest(self, request)
+  if err then
+    if dbgOn then traceD(fmt("client | syncExecRequest send error %s", err)) end
+    return nil, err
   end
 
-  local resp
+  local suc, resp
+  if dbgOn then traceD("client | recvMessage") end
   suc, resp = pcall(self.services.recvMessage, self.services)
   if not suc then
-    return self:processResponse(nil, resp)
+    if dbgOn then traceD(fmt("client | recvMessage ERROR %s", resp)) end
+    return nil, resp
   end
 
+  if dbgOn then traceD("client | syncExecRequest processing response") end
   return self:processResponse(resp)
+end
+
+local function coSendRequest(self, request, callback)
+  local dbgOn = self.config.logging.services.dbgOn
+  if dbgOn then tools.printTable("client | coSendRequest", request, traceD) end
+
+  self.requests[request.RequestHeader.RequestHandle] = callback
+  local suc, err
+  do
+    -- Only one request sending at a time.
+    local lock <close> = self.lock:acquire() -- luacheck: ignore
+    if dbgOn then traceD("client | coSendRequest locked") end
+    suc, err = pcall(self.services.sendMessage, self.services, request)
+  end
+
+  if not suc then
+    if dbgOn then traceD(fmt("client | coSendRequest send error %s", err)) end
+    self.requests[request.RequestHeader.RequestHandle] = nil
+    return nil, err
+  end
 end
 
 local function coExecRequest(self, request, callback)
   local dbgOn = self.config.logging.services.dbgOn
-  if dbgOn then tools.printTable("services | execRequest", request, traceD) end
+  if dbgOn then tools.printTable("client | coExecRequest", request, traceD) end
 
-  local defCallback
   local coSock = compat.socket.getsock()
-  if not coSock and not self.hasSecureChannel and not callback then
-    return syncExecRequest(self, request)
-  end
+  if not coSock then
+    if dbgOn then traceD("client | coExecRequest no cosocket environment") end
 
-  if callback == nil then
-    defCallback = function(m, e)
-      if dbgOn then traceD("default cosock callback called") end
-      coSock:enable(m, e)
+    if callback ~= nil then
+      local _, err = coSendRequest(self, request, callback)
+      if err then
+        if dbgOn then traceD(fmt("client | coExecRequest send error %s", err)) end
+        callback(nil, err)
+      end
+      return
+    else
+      local resp, err, _
+      _, err = coSendRequest(self, request, function(m, e)
+        resp, err = m, e
+      end)
+
+      if err then
+        if dbgOn then traceD(fmt("client | coExecRequest send error %s", err)) end
+        return nil, err
+      end
+
+      if dbgOn then traceD("client | coExecRequest waiting for response") end
+
+      local startTime = os.time()
+      while not resp and not err and (os.time() - startTime) < (request.RequestHeader.TimeoutHint*2/1000) do
+        compat.sleep(0)
+      end
+      if dbgOn then traceD("client | coExecRequest response received") end
+      return resp, err
     end
-    callback = defCallback
-  end
+  else
+    if dbgOn then traceD("client | coExecRequest Cosock environment") end
+    if callback ~= nil then
+      local _, err = coSendRequest(self, request, callback)
+      if err then
+        if dbgOn then traceD("client | coExecRequest send failed, calling callback") end
+        callback(nil, err)
+        return
+      end
+      return nil, err
+    else
+      local defCallback = function(m, err)
+        if dbgOn then traceD("client | coExecRequest default cosock callback called") end
+        coSock:enable(m, err)
+      end
+      local _, err = coSendRequest(self, request, defCallback)
+      if err then
+        return nil, err
+      end
 
-  self.requests[request.RequestHeader.RequestHandle] = callback
-  local suc, err = pcall(self.services.sendMessage, self.services, request)
-  if not suc then
-    self.requests[request.RequestHeader.RequestHandle] = nil
-    return self:processResponse(nil, err)
-  end
-
-  if coSock and defCallback then
-    if dbgOn then traceD("waiting default cosock callback") end
-    return coSock:disable()
+      if dbgOn then traceD("client | coExecRequest waiting default cosock callback") end
+      return coSock:disable()
+    end
   end
 end
 
-local function coProcessResp(self, resp, err)
+local function coDispatchResp(self, resp, err)
+  local errOn = self.config.logging.services.errOn
   if err then
     -- Error when receiving a message. In our case it is fatal.
     -- pass error to all handlers and disconnect.
@@ -91,26 +186,57 @@ local function coProcessResp(self, resp, err)
       callback(resp, err)
     end
     self.requests = {}
-  else
-    local callback = self.requests[resp.ResponseHeader.RequestHandle]
-    if callback then
-      if resp.ResponseHeader.ServiceResult ~= 0 then
-        return callback(nil, resp.ResponseHeader.ServiceResult)
-      else
-        return callback(resp, err)
-      end
+    return
+  end
+
+  local callback = self.requests[resp.ResponseHeader.RequestHandle]
+  if callback then
+    if resp.ResponseHeader.ServiceResult ~= 0 then
+      return callback(nil, resp.ResponseHeader.ServiceResult)
     else
-      error("unknown response handle: "..resp.ResponseHeader.RequestHandle)
+      return callback(resp)
     end
+  else
+    if errOn then traceE("unknown response handle: "..resp.ResponseHeader.RequestHandle) end
   end
 end
 
-local function syncProcessResp(_, resp, err)
+local function syncDispatchResp(_, resp, err)
+  if err then
+    return nil, err
+  end
+
   if resp and resp.ResponseHeader.ServiceResult ~= 0 then
     return nil, resp.ResponseHeader.ServiceResult
   end
 
-  return resp, err
+  return resp
+end
+
+function C:processResponse(msg, err)
+  local dbgOn = self.config.logging.services.dbgOn
+
+  if dbgOn then
+    tools.printTable("client | processingResponse", msg, traceD)
+  end
+  local response
+  if msg then
+    local typeId = msg.TypeId
+    response = msg.Body
+    if typeId == MessageId.OPEN_SECURE_CHANNEL_RESPONSE then
+      if dbgOn then traceD("client | received OPEN_SECURE_CHANNEL_RESPONSE") end
+      self:processOpenSecureChannelResponse(response)
+    elseif typeId == MessageId.CREATE_SESSION_RESPONSE then
+      if dbgOn then traceD("client | received CREATE_SESSION_RESPONSE") end
+      self:processCreateSessionResponse(response)
+    elseif typeId == MessageId.ACTIVATE_SESSION_RESPONSE then
+      if dbgOn then traceD("client | received ACTIVATE_SESSION_RESPONSE") end
+      self:processActivateSessionResponse(response)
+    end
+    return self:dispatchResp(response)
+  end
+
+  return self:dispatchResp(nil, err)
 end
 
 function C:connect(endpointUrl, transportProfile, connectCallback)
@@ -131,9 +257,16 @@ function C:connect(endpointUrl, transportProfile, connectCallback)
   end
   self.endpointUrl = endpointUrl
 
-  if url.scheme == "opc.tcp" then
+  if
+    url.scheme == "opc.tcp" or
+    url.scheme == "opc.wss" or url.scheme == "ws" or url.scheme == "wss"
+  then
     if transportProfile == nil then
-      transportProfile = TranportProfileUri.TcpBinary
+      if url.scheme == "opc.tcp" then
+        transportProfile = TranportProfileUri.TcpBinary
+      else
+        transportProfile = TranportProfileUri.WebSocketBinary
+      end
     end
 
     local binary = require("opcua.binary.client")
@@ -156,7 +289,7 @@ function C:connect(endpointUrl, transportProfile, connectCallback)
 
   if config.cosocketMode == true then
     self.execRequest = coExecRequest
-    self.processResp = coProcessResp
+    self.dispatchResp = coDispatchResp
     local responseCallback = function(msg, e)
       self:processResponse(msg, e)
     end
@@ -167,9 +300,9 @@ function C:connect(endpointUrl, transportProfile, connectCallback)
       error("OPCUA: can't use callbacks in non-cosocket mode")
     end
 
-    if infOn then traceI(fmt("services | Connecting to endpoint '%s' in synchronous mode", endpointUrl)) end
+    if infOn then traceI(fmt("client | Connecting to endpoint '%s' in synchronous mode", endpointUrl)) end
     self.execRequest = syncExecRequest
-    self.processResp = syncProcessResp
+    self.dispatchResp = syncDispatchResp
     return self.services:connectServer(endpointUrl, transportProfile)
   end
 end
@@ -180,6 +313,7 @@ end
 
 function C:disconnect()
   local infOn = self.config.logging.services.infOn
+  if infOn then traceI("client | disconnecting") end
 
   self.endpointUrl = nil
   self.channelNonce = nil
@@ -190,8 +324,8 @@ function C:disconnect()
     return nil, BadNotConnected
   end
 
-  if self.channelTimer then
-    if infOn then traceI("services | closing secure channel") end
+  if self.channelLifetime then
+    if infOn then traceI("client | closing secure channel") end
     self:closeSecureChannel()
   end
 
@@ -201,68 +335,57 @@ function C:disconnect()
   return resp, err
 end
 
-function C:processResponse(msg, err)
-  local infOn = self.config.logging.services.infOn
-  local dbgOn = self.config.logging.services.dbgOn
-
-  if dbgOn then
-    tools.printTable("services | processingResponse", msg, traceD)
-  end
-  local response
-  if msg then
-    local typeId = msg.TypeId
-    response = msg.Body
-    if response.ResponseHeader.ServiceResult == 0 then
-      if typeId == MessageId.OPEN_SECURE_CHANNEL_RESPONSE then
-        if infOn then traceI("services | received OPEN_SECURE_CHANNEL_RESPONSE") end
-        err = self:processOpenSecureChannelResponse(response)
-      elseif typeId == MessageId.CREATE_SESSION_RESPONSE then
-        err = self:processCreateSessionResponse(response)
-      elseif typeId == MessageId.ACTIVATE_SESSION_RESPONSE then
-        err = self:processActivateSessionResponse(response)
-      end
-    end
-  end
-
-  return self:processResp(response, err)
-end
-
 function C:processOpenSecureChannelResponse(response)
+  local dbgOn = self.config.logging.services.dbgOn
   local infOn = self.config.logging.services.infOn
+  local errOn = self.config.logging.services.errOn
+
+  if response.ResponseHeader.ServiceResult ~= 0 then
+    if errOn then traceE(fmt("client | Secure channel error: %s", response.ResponseHeader.ServiceResult)) end
+    return
+  end
 
   local serverNonce = response.ServerNonce
 
   self.services:setSecureMode(self.securityMode)
   self.services:setNonces(self.channelNonce, serverNonce)
 
-  if infOn then traceI(fmt("services | newChannelID %s, tokenID=%s", response.SecurityToken.ChannelId, response.SecurityToken.TokenId)) end
-
   self.services.enc:setChannelId(response.SecurityToken.ChannelId)
   self.services.enc:setTokenId(response.SecurityToken.TokenId)
-  local timeoutMs = response.SecurityToken.RevisedLifetime
-  self.timeoutMs = timeoutMs
-  if infOn then traceI(fmt("services | secure channel token lifetime %s ms", timeoutMs)) end
-  timeoutMs = timeoutMs * 3 / 4
+
+  self.channelLifetime = response.SecurityToken.RevisedLifetime
+  local timeout = response.SecurityToken.RevisedLifetime * 0.75
+  self.channelRenewAfter = os.time() + timeout / 1000
   if self.channelTimer == nil then
     self.channelTimer = compat.timer(function()
-      self.needRenewChannel = true
-      return true
+      if dbgOn then traceD("client | secure channel timer fired") end
+      local curTime = os.time()
+      local timeoutMs = (self.channelRenewAfter - curTime) * 1000
+      if timeoutMs > 0 then
+        self.channelTimer:reset(timeoutMs)
+        return
+      end
+      self:renewSecureChannel()
     end)
-    if infOn then traceI(fmt("services | set timer for renewing secure channel: %s ms", timeoutMs)) end
-    self.channelTimer:set(timeoutMs)
+    if dbgOn then traceD(fmt("client | set timer for renewing secure channel: %s ms", timeout)) end
+    self.channelTimer:set(timeout)
   else
-    if infOn then traceI(fmt("services | reset timer for renewing secure channel: %s ms", timeoutMs)) end
-    self.channelTimer:reset(timeoutMs)
+    if dbgOn then traceD(fmt("client | reset timer for renewing secure channel: %s ms", timeout)) end
+    self.channelTimer:reset(timeout)
+  end
+
+  if infOn then
+    traceI(fmt("client | Secure channel renewed. ChannelID %s, TokenID=%s, lifetime=%s ms",
+      response.SecurityToken.ChannelId, response.SecurityToken.TokenId, timeout))
   end
 end
 
 function C:processCreateSessionResponse(response)
   local dbgOn = self.config.logging.services.dbgOn
-  local infOn = self.config.logging.services.infOn
   local errOn = self.config.logging.services.errOn
 
   if dbgOn then
-    traceI("services | received CREATE_SESSION_RESPONSE SessionId='"..response.SessionId..
+    traceD("client | received CREATE_SESSION_RESPONSE SessionId='"..response.SessionId..
           "' MaxRequestMessageSize="..response.MaxRequestMessageSize..
           " AuthenticationToken='"..response.AuthenticationToken..
           "' RevisedSessionTimeout="..response.RevisedSessionTimeout)
@@ -278,11 +401,11 @@ function C:processCreateSessionResponse(response)
       self.services.sessionId = response.SessionId
       self.services.sessionAuthToken = response.AuthenticationToken
 
-      if infOn then
-        traceI(fmt("services | activated session. SessionId='%s'", response.SessionId))
+      if dbgOn then
+        traceD(fmt("client | activated session. SessionId='%s'", response.SessionId))
       end
       if dbgOn then
-        traceD(fmt("services | activated session. sessionAuthToken='%s'", response.AuthenticationToken))
+        traceD(fmt("client | activated session. sessionAuthToken='%s'", response.AuthenticationToken))
       end
 
       self.session = {
@@ -295,15 +418,14 @@ function C:processCreateSessionResponse(response)
   end
 
   if not self.session then
-    if errOn then traceE("services | failed to find session") end
-    return BadSessionIdInvalid
+    if errOn then traceE("client | failed to find session") end
   end
 end
 
 function C:processActivateSessionResponse(response)
-  local infOn = self.config.logging.services.infOn
-  if infOn then
-    traceI("services | received ACTIVATE_SESSION_RESPONSE")
+  local dbgOn = self.config.logging.services.dbgOn
+  if dbgOn then
+    traceD("client | received ACTIVATE_SESSION_RESPONSE")
   end
 
   if response.ResponseHeader.ServiceResult ~= 0 then
@@ -324,8 +446,10 @@ function C:openSecureChannel(timeoutMs, securityPolicyUri, securityMode, remoteC
   end
 
   local infOn = self.config.logging.services.infOn
-  if infOn then traceI("services | Opening secure channel") end
+  local errOn = self.config.logging.services.errOn
+  if infOn then traceI("client | Opening secure channel") end
   if not self:connected() then
+    if errOn then traceE("client | Not Connected") end
     return nil, BadNotConnected
   end
 
@@ -359,9 +483,9 @@ function C:openSecureChannel(timeoutMs, securityPolicyUri, securityMode, remoteC
   return self:execRequest(request, callback)
 end
 
-function C:renewSecureChannel(timeoutMs, callback)
-  local infOn = self.config.logging.services.infOn
-  if infOn then traceI("services | Renew secure channel") end
+function C:renewSecureChannel()
+  local dbgOn = self.config.logging.services.dbgOn
+  if dbgOn then traceD("client | Renew secure channel") end
   if not self:connected() then
     return nil, BadNotConnected
   end
@@ -377,40 +501,38 @@ function C:renewSecureChannel(timeoutMs, callback)
   request.RequestType = SecurityTokenRequestType.Renew
   request.SecurityMode = self.securityMode
   request.ClientNonce = self.channelNonce
-  request.RequestedLifetime = timeoutMs
+  request.RequestedLifetime = self.channelLifetime
 
-  return self:execRequest(request, callback)
+  return self:execRequest(request, function() end)
 end
 
 function C:checkSecureChannel()
-  if not self.needRenewChannel then
+  if not self.hasSecureChannel then
     return
   end
 
-  local infOn = self.config.logging.services.infOn
-  local errOn = self.config.logging.services.errOn
-
-  if infOn then traceI("services | renewing secure channel token") end
-  local _, err = self:renewSecureChannel(self.timeoutMs)
-  if err ~= nil then
-    if errOn then traceE(fmt("Failed to renew secure channel: %s", err)) end
-    return err
+  local dbgOn = self.config.logging.services.dbgOn
+  local curTime = os.time()
+  if self.channelRenewAfter and curTime < self.channelRenewAfter then
+    if dbgOn then traceD(fmt("client | secure channel not expired: curTime = %d, channelRenewAfter = %d", curTime, self.channelRenewAfter)) end
+    return
   end
 
-  self.needRenewChannel = false
+  if dbgOn then traceD("client | secure channel expired, renewing") end
+  return self:renewSecureChannel()
 end
 
 
 function C:createSession(name, timeoutMs, callback)
-  local infOn = self.config.logging.services.infOn
+  local dbgOn = self.config.logging.services.dbgOn
 
-  if infOn then traceI(fmt("services | Creating session '%s' lifetime '%s' ms", name, timeoutMs)) end
+  if dbgOn then traceD(fmt("client | Creating session '%s' lifetime '%s' ms", name, timeoutMs)) end
 
   if not self:connected() then
     return nil, BadNotConnected
   end
 
-  local err = self:checkSecureChannel()
+  local _, err = self:checkSecureChannel()
   if err then
     return nil, err
   end
@@ -512,7 +634,7 @@ end
 function C:activateSession(params, token, token2, callback)
   local infOn = self.config.logging.services.infOn
   local errOn = self.config.logging.services.errOn
-  if infOn then traceI("services | Activating session") end
+  if infOn then traceI("client | Activating session") end
 
   if not self:connected() then
     return nil, BadNotConnected
@@ -522,7 +644,7 @@ function C:activateSession(params, token, token2, callback)
     return nil, BadSessionIdInvalid
   end
 
-  local err = self:checkSecureChannel()
+  local _, err = self:checkSecureChannel()
   if err then
     return nil, err
   end
@@ -576,7 +698,7 @@ function C:activateSession(params, token, token2, callback)
         authPolicy:setLocalCertificate(token, token2)
       end
       if not self.session.serverCertificate then
-        if errOn then traceE("services | Server didn't certificate sent for encrypting token") end
+        if errOn then traceE("client | Server didn't certificate sent for encrypting token") end
         return nil, BadIdentityTokenInvalid
       end
       authPolicy:setRemoteCertificate(self.session.serverCertificate)
@@ -628,15 +750,28 @@ function C:activateSession(params, token, token2, callback)
   return self:execRequest(request, callback)
 end
 
+local function setBrowseDefaults(params)
+  if params.BrowseDirection == nil then
+    params.BrowseDirection = BrowseDirection.Forward
+  end
+  if params.ReferenceTypeId == nil then
+    params.ReferenceTypeId = "i=33" -- HierarchicalReferences
+  end
+  if params.NodeClassMask == nil then
+    params.NodeClassMask = NodeClass.Unspecified
+  end
+  if params.ResultMask == nil then
+    params.ResultMask = BrowseResultMask.All
+  end
+  if params.IncludeSubtypes == nil then
+    params.IncludeSubtypes = true
+  end
+
+  return params
+end
+
 local function browseParams(nid)
-  return {
-    NodeId = nid, -- nodeId we want to browse
-    BrowseDirection =  BrowseDirection.Forward,
-    ReferenceTypeId = "i=33", -- HierarchicalReferences,
-    NodeClassMask = NodeClass.Unspecified,
-    ResultMask = BrowseResultMask.All,
-    IncludeSubtypes = true,
-  }
+  return setBrowseDefaults({NodeId = nid})
 end
 
 function C:browse(params, callback)
@@ -647,7 +782,7 @@ function C:browse(params, callback)
     return nil, BadNotConnected
   end
 
-  local err = self:checkSecureChannel()
+  local _, err = self:checkSecureChannel()
   if err then
     return nil, err
   end
@@ -667,14 +802,21 @@ function C:browse(params, callback)
   else
     -- manual
     request = params
+    if request.NodesToBrowse ~= nil then
+      for _, nodeParams in ipairs(request.NodesToBrowse) do
+        setBrowseDefaults(nodeParams)
+      end
+    end
   end
 
   if request.View == nil then
-    request.View = {
-      ViewId = nodeId.Null,
-      Timestamp = nil, -- not specified ~1600 year
-      ViewVersion = 0
-    }
+    request.View = {}
+  end
+  if request.View.ViewId == nil then
+    request.View.ViewId = nodeId.Null
+  end
+  if request.View.ViewVersion == nil then
+    request.View.ViewVersion = 0
   end
   if request.RequestedMaxReferencesPerNode == nil then
     request.RequestedMaxReferencesPerNode = 1000
@@ -693,14 +835,14 @@ local function allAttributes(nid, attrs)
 end
 
 function C:read(params, callback)
-  local infOn = self.config.logging.services.infOn
-  if infOn then traceI("services | Reading attributes") end
+  local dbgOn = self.config.logging.services.dbgOn
+  if dbgOn then traceD("client | Reading attributes") end
 
   if not self:connected() then
     return nil, BadNotConnected
   end
 
-  local err = self:checkSecureChannel()
+  local _, err = self:checkSecureChannel()
   if err then
     return nil, err
   end
@@ -753,7 +895,7 @@ function C:write(nodes, callback)
     return nil, BadNotConnected
   end
 
-  local err = self:checkSecureChannel()
+  local _, err = self:checkSecureChannel()
   if err then
     return nil, err
   end
@@ -770,7 +912,7 @@ function C:addNodes(params, callback)
     return nil, BadNotConnected
   end
 
-  local err = self:checkSecureChannel()
+  local _, err = self:checkSecureChannel()
   if err then
     return nil, err
   end
@@ -781,12 +923,29 @@ function C:addNodes(params, callback)
   return self:execRequest(request, callback)
 end
 
+function C:deleteNodes(params, callback)
+  if not self:connected() then
+    return nil, BadNotConnected
+  end
+
+  local _, err = self:checkSecureChannel()
+  if err then
+    return nil, err
+  end
+
+  local request
+  request, err =
+    self.services:createRequest(MessageId.DELETE_NODES_REQUEST, params)
+  if err then return nil, err end
+  return self:execRequest(request, callback)
+end
+
 function C:createSubscription(sub, callback)
   if not self:connected() then
     return nil, BadNotConnected
   end
 
-  local err = self:checkSecureChannel()
+  local _, err = self:checkSecureChannel()
   if err then
     return nil, err
   end
@@ -802,7 +961,7 @@ function C:translateBrowsePaths(browsePaths, callback)
     return nil, BadNotConnected
   end
 
-  local err = self:checkSecureChannel()
+  local _, err = self:checkSecureChannel()
   if err then
     return nil, err
   end
@@ -825,7 +984,7 @@ function C:closeSession(callback)
     DeleteSubscriptions = true
   }
 
-  local err = self:checkSecureChannel()
+  local _, err = self:checkSecureChannel()
   if err then
     return nil, err
   end
@@ -840,11 +999,10 @@ function C:closeSession(callback)
 end
 
 function C:closeSecureChannel(callback)
-  local infOn = self.config.logging.services.infOn
-  local errOn = self.config.logging.services.errOn
+  local dbgOn = self.config.logging.services.dbgOn
 
   -- Just send request: there is no CloseSecureChannelResponse.
-  if infOn then traceI("services | Closing secure channel") end
+  if dbgOn then traceD("client | Closing secure channel") end
   if not self:connected() then
     return nil, BadNotConnected
   end
@@ -859,16 +1017,22 @@ function C:closeSecureChannel(callback)
   end
 
   if self.channelTimer then
-    if infOn then traceI("services | Stop channel refresh timer") end
+    if dbgOn then traceD("client | Stop channel refresh timer") end
     self.channelTimer:cancel()
+    if dbgOn then traceD("client | channel refresh timer stopped") end
     self.channelTimer = nil
     self.needRenewChannel = false
   end
 
+  if dbgOn then traceD(fmt("client | Sending close secure channel request")) end
   local request, err = self.services:createRequest(MessageId.CLOSE_SECURE_CHANNEL_REQUEST)
-  if err and errOn then traceI(fmt("services | Failed to close secure channel: %s", err)) end
+  if err and dbgOn then traceD(fmt("client | Failed to close secure channel: %s", err)) end
   if err then return nil, err end
-  return self:execRequest(request, callback)
+  err = self:execRequest(request, callback)
+  if err and dbgOn then traceD(fmt("client | Failed to send close secure channel request: %s", err)) end
+  if err then return nil, err end
+
+  return nil, BadSecureChannelClosed
 end
 
 function C:findServers(params, callback)
@@ -881,7 +1045,7 @@ function C:findServers(params, callback)
     params = nil
   end
 
-  local err = self:checkSecureChannel()
+  local _, err = self:checkSecureChannel()
   if err then
     return nil, err
   end
@@ -909,7 +1073,7 @@ function C:getEndpoints(params, callback)
     params = nil
   end
 
-  local err = self:checkSecureChannel()
+  local _, err = self:checkSecureChannel()
   if err then
     return nil, err
   end
@@ -929,7 +1093,7 @@ function C:call(ojectId, methodId, inputArguments, callback)
     return nil, BadNotConnected
   end
 
-  local err = self:checkSecureChannel()
+  local _, err = self:checkSecureChannel()
   if err then
     return nil, err
   end
@@ -965,10 +1129,7 @@ local function NewUaClient(clientConfig, sock, model)
     error("no OPCUA configuration")
   end
   local uaConfig = require("opcua.config")
-  local err = uaConfig.client(clientConfig)
-  if err ~= nil then
-    error("Configuration error: "..err)
-  end
+  clientConfig = uaConfig.client(clientConfig)
 
   if model == nil then
     model = require("opcua.model.import").getBaseModel(clientConfig)
@@ -982,6 +1143,7 @@ local function NewUaClient(clientConfig, sock, model)
     sock = sock,
     model = model,
     hasSecureChannel = true,
+    lock = newLock(),
 
     -- endpointUrl
     -- userIdentityTokens

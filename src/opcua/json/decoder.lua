@@ -600,7 +600,6 @@ end
 function dec:stackLast()
   if self.stack == nil then
     local data = tostring(self.data)
-    local err
     local ok, res = pcall(compat.parseJson, data)
     if not ok then
       error(BadDecodingError)

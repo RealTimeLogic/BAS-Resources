@@ -66,7 +66,8 @@ local compat = {
     getsock = getsock,
     bind = bind,
     connect = connect,
-    event = ba.socket.event
+    event = ba.socket.event,
+    http2sock = ba.socket.http2sock
   },
 
   to_timestamp = function(str)

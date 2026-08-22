@@ -328,6 +328,7 @@ local function serverConfig(config)
       end
 
     elseif
+      url.scheme == "opc.wss" or
       url.scheme == "opc.http" or url.scheme == "http" or
       url.scheme == "opc.https" or url.scheme == "https"
     then
@@ -361,6 +362,7 @@ local function serverConfig(config)
 
   -- Identity tokens goes last bcause can check security policies section
   identityTokens(config)
+  return config
 end
 
 local function clientConfig(config)
@@ -368,6 +370,7 @@ local function clientConfig(config)
   if config.userIdentityTokens then
     error("Client config cannot contain userIdentityTokens section")
   end
+  return config
 end
 
 return {

@@ -113,7 +113,8 @@ function ch:message(body)
 
   if dbgOn then traceD(fmt("binary | encoding message")) end
   local extObject = self.Encoder:getExtObject(type)
-  self.Encoder:nodeId(extObject.BinaryId)
+  self.Encoder:nodeId(
+    extObject:getEncodingNodeId(self.Encoder.CodecType))
   self.Encoder:Encode(type, body)
 
   self:finishMessage()

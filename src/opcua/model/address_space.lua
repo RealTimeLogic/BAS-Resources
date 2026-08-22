@@ -18,6 +18,9 @@
 --    isForward is a boolean
 
 local const = require("opcua.const")
+local compat = require("opcua.compat")
+local memoryProvider = require("opcua.model.memory_provider")
+local typeInfo = require("opcua.model.type_info")
 local tools = require("opcua.tools")
 local StatusCode = require("opcua.status_codes")
 
@@ -37,6 +40,9 @@ local BadNoMatch = StatusCode.BadNoMatch
 local BadNodeIdExists = StatusCode.BadNodeIdExists
 local BadNodeIdUnknown = StatusCode.BadNodeIdUnknown
 local Good = StatusCode.Good
+
+local JSON_NULL = compat.jsonNull
+local RESET = memoryProvider.RESET
 
 local attrNames <const> = {}
 for id, name in pairs(AttributeId) do
@@ -114,6 +120,8 @@ local nodeClassMask <const> = {
   [NodeClass.DataType]      = dataTypeMask,
   [NodeClass.View]          = viewMask,
 }
+
+local directSupertypeId
 
 local function getAttributeId(key)
   if key == "NodeCallback" then
@@ -223,7 +231,7 @@ local function fromDataValue(attrId, val)
 
 
   local dataValue = val
-  if not tools.dataValueValid(val) then
+  if type(val) ~= "table" or val.Type == nil then
     dataValue = {Type = expectedType, IsArray=isArray, Value = val}
   end
 
@@ -234,7 +242,7 @@ local function fromDataValue(attrId, val)
   if dataValue.Type ~= expectedType then
     error(BadNodeAttributesInvalid)
   end
-  if attrId == AttributeId.Rank and val < -2 then
+  if attrId == AttributeId.Rank and val < -3 then
     error(BadNodeAttributesInvalid)
   end
 
@@ -242,6 +250,12 @@ local function fromDataValue(attrId, val)
 end
 
 local function toDataValue(attrId, val, node)
+  local nodeClass = node.Attrs.NodeClass
+  local mask = assert(nodeClassMask[nodeClass], "Invalid NodeClass")
+  if (mask & (1 << attrId)) == 0 then
+    return { StatusCode = BadAttributeIdInvalid }
+  end
+
   if attrId == AttributeId.Value then
     if not val then
       return { StatusCode = Good }
@@ -255,6 +269,7 @@ local function toDataValue(attrId, val, node)
     end
     return val
   end
+
 
   local expectedType
   local isArray
@@ -305,7 +320,11 @@ local function toDataValue(attrId, val, node)
     expectedType = VariantType.Boolean
   elseif attrId == AttributeId.DataTypeDefinition then
     if val then
-      local baseId = node.BaseId
+      local info = node:getTypeInfo()
+      if info == nil then
+        return { StatusCode = BadInternalError }
+      end
+      local baseId = info:getBaseId()
       local typeId
       local structureType
       if baseId == "i=22" then
@@ -358,8 +377,8 @@ local function toDataValue(attrId, val, node)
       local body = {
         TypeId = typeId,
         Body = {
-          DefaultEncodingId = node.BinaryId,
-          BaseDataType = node.BaseId,
+          DefaultEncodingId = info:getEncodingNodeId("Binary"),
+          BaseDataType = info.BaseDataType or info:getBaseId(),
           StructureType = structureType,
           Fields = val
         }
@@ -436,95 +455,627 @@ local function createNodeAttrs(data)
   return attrs
 end
 
-local VAttrs = {}
-
-function VAttrs:__newindex(key, value)
-  self.Attrs[key] = value
-end
-
-function VAttrs:__index(key)
-  local k = getAttributeId(key)
-  if (rawget(self.Attrs, "mask") & (1 << k)) == 0 then
-    return { StatusCode = BadAttributeIdInvalid }
-  end
-  local val = rawget(self.Attrs, "data")[k]
-  return toDataValue(k, val, self.Node)
-end
-
-local function createVAttrs(attrs, node)
-  assert(rawget(attrs, "data"))
-  local vAttrs = {
-    Attrs = attrs,
-    Node = node,
-  }
-  setmetatable(vAttrs, VAttrs)
-  return vAttrs
-end
-
 local address_space = {}
 
-local function copyNode(n)
-  if not n then
-    return
+directSupertypeId = function(node)
+  for _, ref in ipairs(node.Refs or {}) do
+    if ref.type == HasSubtype and ref.isForward == false then
+      return ref.target
+    end
+  end
+  return nil
+end
+
+local function referenceKey(referenceTypeId, targetNodeId, isForward)
+  return #referenceTypeId .. ":" .. referenceTypeId ..
+    #targetNodeId .. ":" .. targetNodeId ..
+    (isForward and "1" or "0")
+end
+
+local function markDirty(node)
+  local space = rawget(node, "_space")
+  space.dirtyNodes[node] = true
+end
+
+local function node_getDataValue(self, attrId)
+  local value = self.Attrs[attrId]
+  if attrId == AttributeId.DataTypeDefinition then
+    local fields = self:iterateFields()
+    if fields then
+      value = {}
+      for _, field in fields do
+        value[#value + 1] = field
+      end
+    end
+  end
+  return toDataValue(attrId, value, self)
+end
+
+local lua_node_mt = {
+  __index = function(_, key)
+    if key == "getDataValue" then
+      return node_getDataValue
+    end
+  end
+}
+
+-- Metatable for the copy-on-write node.Attrs view. Reads merge pending
+-- _changes, the writable provider, and the readonly base. Writes only update
+-- _changes with a prepared value, JSON_NULL, or RESET until saveNodes().
+local proxy_attrs_mt = {
+  __index = function(t, k)
+    if k == "reset" then
+      return function(attrs, attributeId)
+        attributeId = getAttributeId(attributeId)
+        rawget(attrs, "_changes")[attributeId] = RESET
+        markDirty(rawget(attrs, "_proxyNode"))
+      end
+    end
+
+    local proxyNode = rawget(t, "_proxyNode")
+    local space = rawget(proxyNode, "_space")
+    local nodeId = rawget(proxyNode, "_nodeId")
+    if k == "NodeCallback" then
+      local callbackChange = rawget(t, "_callbackChange")
+      if callbackChange ~= nil then
+        return callbackChange ~= JSON_NULL and callbackChange or nil
+      end
+      local callback = space.callbacks[nodeId]
+      if callback ~= nil then
+        return callback ~= JSON_NULL and callback or nil
+      end
+      local base = rawget(proxyNode, "_base")
+      local baseAttrs = base and base.Attrs
+      return type(baseAttrs) == "table" and baseAttrs.NodeCallback or nil
+    end
+
+    local attributeId = getAttributeId(k)
+    local change = rawget(t, "_changes")[attributeId]
+    if change ~= nil then
+      if change == JSON_NULL then
+        return nil
+      end
+      if change ~= RESET then
+        return change
+      end
+    end
+
+    if change ~= RESET then
+      local writable = space.provider:getNode(nodeId)
+      local found, value = false, nil
+      if writable and writable ~= JSON_NULL then
+        found, value = writable:getAttribute(attributeId)
+      end
+      if found then
+        if attributeId == AttributeId.Value and type(value) == "table" and
+           space.trackMutableReads then
+          local entry = tools.copy(value)
+          rawget(t, "_changes")[attributeId] = entry
+          markDirty(proxyNode)
+          return entry
+        end
+        return value
+      end
+    end
+
+    local base = rawget(proxyNode, "_base")
+    local baseAttrs = base and base.Attrs
+    if base and not baseAttrs then
+      error("Invalid base node for " .. tostring(nodeId))
+    end
+    if baseAttrs then
+      local value = baseAttrs[attributeId]
+      if attributeId == AttributeId.Value and type(value) == "table" and
+         space.trackMutableReads then
+        local entry = tools.copy(value)
+        rawget(t, "_changes")[attributeId] = entry
+        markDirty(proxyNode)
+        return entry
+      end
+      return value
+    end
+    return nil
+  end,
+  __newindex = function(t, k, v)
+    local proxyNode = rawget(t, "_proxyNode")
+    if k == "NodeCallback" then
+      if v ~= nil and type(v) ~= "function" then
+        error(BadAttributeIdInvalid)
+      end
+      rawset(t, "_callbackChange", v or JSON_NULL)
+      markDirty(proxyNode)
+      return
+    end
+
+    local attrId = getAttributeId(k)
+    local nodeClass = proxyNode.Attrs.NodeClass
+    local mask = nodeClassMask[nodeClass]
+    if not mask or (mask & (1 << attrId)) == 0 then
+      error(BadAttributeIdInvalid)
+    end
+    if attrId == AttributeId.NodeId then
+      error(BadNodeIdInvalid)
+    end
+    if attrId == AttributeId.NodeClass then
+      error(BadInternalError)
+    end
+
+    local changes = rawget(t, "_changes")
+    if v == nil then
+      changes[attrId] = JSON_NULL
+    else
+      local value = fromDataValue(attrId, v)
+      changes[attrId] = tools.copy(value)
+    end
+    markDirty(proxyNode)
+  end,
+  __pairs = function(t)
+    local proxyNode = rawget(t, "_proxyNode")
+    local space = rawget(proxyNode, "_space")
+    local nodeId = rawget(proxyNode, "_nodeId")
+    local merged = {}
+    local base = rawget(proxyNode, "_base")
+
+    if base then
+      for attributeId, value in pairs(base.Attrs) do
+        merged[attributeId] = value
+      end
+    end
+    local writable = space.provider:getNode(nodeId)
+    if writable and writable ~= JSON_NULL then
+      for attributeId, value in writable:iterateAttributes() do
+        merged[attributeId] = value
+      end
+    end
+    for attributeId, value in pairs(rawget(t, "_changes")) do
+      if value == JSON_NULL then
+        merged[attributeId] = nil
+      elseif value == RESET then
+        merged[attributeId] = base and base.Attrs[attributeId] or nil
+      else
+        merged[attributeId] = value
+      end
+    end
+    local callback = t.NodeCallback
+    if callback then
+      merged.NodeCallback = callback
+    end
+    return pairs(merged)
+  end
+}
+
+local nodeMethods = {}
+local getTypeInfo
+
+local function iterateNodeReferences(node)
+  local iterate = node and node.iterateReferences
+  if type(iterate) == "function" then
+    return iterate(node)
+  end
+  return ipairs(node and node.Refs or {})
+end
+
+local readonlyNode
+
+local function mergeReferences(space, nodeId)
+  local refs = {}
+  local indexes = {}
+
+  local function add(ref)
+    local key = referenceKey(ref.type, ref.target, ref.isForward)
+    local index = indexes[key]
+    if index then
+      refs[index] = tools.copy(ref)
+    else
+      refs[#refs + 1] = tools.copy(ref)
+      indexes[key] = #refs
+    end
   end
 
-  local attrsData = tools.copy(rawget(n.Attrs, "data") or n.Attrs)
+  for _, provider in ipairs(space.readonlyProviders) do
+    local node = readonlyNode(provider, nodeId)
+    if node then
+      for _, ref in iterateNodeReferences(node) do
+        add(ref)
+      end
+    end
+  end
 
-  local node = {
-    BaseId = n.BaseId,
-    BinaryId = n.BinaryId,
-    JsonId = n.JsonId,
-    DataTypeId = n.DataTypeId,
-    Attrs = createNodeAttrs(attrsData),
-    Refs = tools.copy(n.Refs) or {}
-  }
+  local writable = space.provider:getNode(nodeId)
+  if writable and writable ~= JSON_NULL then
+    for key, ref in writable:iterateReferences() do
+      if ref == nil then
+        local index = indexes[key]
+        if index then
+          refs[index] = false
+          indexes[key] = nil
+        end
+      else
+        add(ref)
+      end
+    end
+  end
 
-  node.VAttrs = createVAttrs(node.Attrs, n)
+  local merged = {}
+  for _, ref in ipairs(refs) do
+    if ref and space.provider:getNode(ref.target) ~= JSON_NULL then
+      merged[#merged + 1] = ref
+    end
+  end
+  return merged
+end
 
-  return node
+local proxy_node_mt = {
+  __index = function(t, key)
+    if key == "Attrs" then
+      local attrsProxy = rawget(t, "_attrsProxy")
+      if not attrsProxy then
+        attrsProxy = setmetatable({
+          _proxyNode = t,
+          _changes = {},
+        }, proxy_attrs_mt)
+        rawset(t, "_attrsProxy", attrsProxy)
+      end
+      return attrsProxy
+    end
+    if nodeMethods[key] then
+      return nodeMethods[key]
+    end
+    if key == "Refs" then
+      local refsProxy = rawget(t, "_refsProxy")
+      if not refsProxy then
+        local space = rawget(t, "_space")
+        local nodeId = rawget(t, "_nodeId")
+        refsProxy = mergeReferences(space, nodeId)
+        rawset(t, "_refsProxy", refsProxy)
+      end
+      if rawget(t, "_space").trackMutableReads then
+        markDirty(t)
+      end
+      return refsProxy
+    end
+
+    local fieldChanges = rawget(t, "_fieldChanges")
+    if fieldChanges[key] ~= nil then
+      if fieldChanges[key] == JSON_NULL then
+        return nil
+      end
+      return fieldChanges[key]
+    end
+    local space = rawget(t, "_space")
+    local writable = space.provider:getNode(rawget(t, "_nodeId"))
+    local found, value = false, nil
+    if writable and writable ~= JSON_NULL then
+      found, value = writable:getMetadata(key)
+    end
+    if found then
+      return value
+    end
+    local base = rawget(t, "_base")
+    return base and base[key] or nil
+  end,
+  __newindex = function(t, key, value)
+    if key == "Attrs" or key == "Refs" then
+      error(BadInternalError)
+    end
+    rawget(t, "_fieldChanges")[key] =
+      value == nil and JSON_NULL or tools.copy(value)
+    markDirty(t)
+  end,
+  __pairs = function(t)
+    local merged = {}
+    local base = rawget(t, "_base")
+    if base then
+      for key, value in pairs(base) do
+        merged[key] = value
+      end
+    end
+    local space = rawget(t, "_space")
+    local nodeId = rawget(t, "_nodeId")
+    local writable = space.provider:getNode(nodeId)
+    if writable and writable ~= JSON_NULL then
+      for key, value in writable:iterateMetadata() do
+        merged[key] = value
+      end
+    end
+    for key, value in pairs(rawget(t, "_fieldChanges")) do
+      if value == JSON_NULL then
+        merged[key] = nil
+      else
+        merged[key] = value
+      end
+    end
+    merged.Attrs = t.Attrs
+    merged.Refs = t.Refs
+    return pairs(merged)
+  end
+}
+
+nodeMethods.getDataValue = node_getDataValue
+local function collectDefinitionFields(node)
+  local space = rawget(node, "_space")
+  local hierarchy = {}
+  local visited = {}
+  local current = node
+
+  while current do
+    local nodeId = current.Attrs.NodeId
+    if visited[nodeId] then
+      error(BadInternalError)
+    end
+    visited[nodeId] = true
+    hierarchy[#hierarchy + 1] = current
+
+    local parentId = directSupertypeId(current)
+    current = parentId and space[parentId] or nil
+  end
+
+  local fields = {}
+  local fieldIndexes = {}
+  local hasDefinition = false
+  for hierarchyIndex = #hierarchy, 1, -1 do
+    local definition =
+      hierarchy[hierarchyIndex].Attrs.DataTypeDefinition
+    if definition ~= nil then
+      hasDefinition = true
+      for _, field in ipairs(definition) do
+        local fieldIndex = fieldIndexes[field.Name]
+        if fieldIndex then
+          fields[fieldIndex] = field
+        else
+          fields[#fields + 1] = field
+          fieldIndexes[field.Name] = #fields
+        end
+      end
+    end
+  end
+  return hasDefinition and fields or nil
+end
+
+nodeMethods.getDefinition = function(node)
+  return collectDefinitionFields(node)
+end
+nodeMethods.getTypeInfo = function(node)
+  return getTypeInfo(
+    rawget(node, "_space"), rawget(node, "_nodeId"))
+end
+nodeMethods.iterateFields = function(node)
+  local definition = collectDefinitionFields(node)
+  if definition == nil then
+    return nil, 0
+  end
+  local index = 0
+  return function()
+    index = index + 1
+    local field = definition[index]
+    if field ~= nil then
+      return index, field
+    end
+  end, #definition
+end
+nodeMethods.iterateReferences = function(node)
+  return ipairs(node.Refs)
+end
+nodeMethods.getReference = function(
+  node, referenceTypeId, targetNodeId, isForward)
+  for _, ref in ipairs(node.Refs) do
+    if ref.type == referenceTypeId and ref.target == targetNodeId and
+       ref.isForward == isForward then
+      return true, tools.copy(ref)
+    end
+  end
+  return false, nil
+end
+
+readonlyNode = function(provider, nodeId)
+  local getNodeMethod = provider.getNode
+  if type(getNodeMethod) == "function" then
+    return getNodeMethod(provider, nodeId)
+  end
+  return provider[nodeId]
+end
+
+local function baseNode(self, nodeId)
+  for _, provider in ipairs(self.readonlyProviders) do
+    local node = readonlyNode(provider, nodeId)
+    if node ~= nil then
+      return node
+    end
+  end
+  return nil
+end
+
+local function makeProxy(self, nodeId, base)
+  return setmetatable({
+    _space = self,
+    _nodeId = nodeId,
+    _base = base,
+    _fieldChanges = {},
+  }, proxy_node_mt)
 end
 
 local function getNode(self, nodeId)
-  assert(type(nodeId) == 'string')
-  local node = self.n[nodeId]
-  if node then
-    assert(rawget(node.Attrs, "data"))
-    return node
+  assert(type(nodeId) == "string")
+  local writable = self.provider:getNode(nodeId)
+  if writable == JSON_NULL then
+    return nil
   end
 
-  node = self.ns0[nodeId]
-  local nodeCopy = copyNode(node)
-  return nodeCopy
+  local base = baseNode(self, nodeId)
+  if not base and not writable then
+    return nil
+  end
+  return makeProxy(self, nodeId, base)
 end
 
-local function saveNode(self, node)
-  assert(self ~= nil)
-  assert(rawget(node.Attrs, "data"))
-  local id = node.Attrs.NodeId
-  self.n[id] = node
+getTypeInfo = function(self, nodeId)
+  local cached = self.typeInfos[nodeId]
+  if cached ~= nil then
+    return cached
+  end
+
+  local info = typeInfo.resolve(self, nodeId)
+  if info == nil then
+    return nil
+  end
+
+  self.typeInfos[nodeId] = info
+  self.typeInfos[info.DataTypeId] = info
+  if info.BinaryId then
+    self.typeInfos[info.BinaryId] = info
+  end
+  if info.JsonId then
+    self.typeInfos[info.JsonId] = info
+  end
+  return info
+end
+
+local function copyWritableReferences(provider, nodeId)
+  local refs = {}
+  local node = provider:getNode(nodeId)
+  if node == nil or node == JSON_NULL then
+    return refs
+  end
+
+  for key, ref in node:iterateReferences() do
+    if type(key) == "number" then
+      refs[#refs + 1] = ref
+    else
+      refs[key] = ref or JSON_NULL
+    end
+  end
+  return refs
+end
+
+local function linkExternalReferences(self, providers)
+  local additions = {}
+
+  -- Validate and collect every provider contribution before changing the
+  -- writable provider. A missing external target therefore leaves the
+  -- composite address space unchanged.
+  for _, provider in ipairs(providers) do
+    local iterate = provider.iterateExternalReferences
+    if type(iterate) == "function" then
+      for sourceNodeId, ref in iterate(provider) do
+        if self[ref.target] == nil then
+          error(
+            "external reference target does not exist: " .. ref.target)
+        end
+        local refs = additions[ref.target]
+        if refs == nil then
+          refs = {}
+          additions[ref.target] = refs
+        end
+        refs[#refs + 1] = {
+          type = ref.type,
+          target = sourceNodeId,
+          isForward = not ref.isForward,
+        }
+      end
+    end
+  end
+
+  local batch = {}
+  for targetNodeId, contributed in pairs(additions) do
+    local refs = copyWritableReferences(self.provider, targetNodeId)
+    local present = {}
+    for _, ref in ipairs(self[targetNodeId].Refs) do
+      present[referenceKey(ref.type, ref.target, ref.isForward)] = true
+    end
+    for key, ref in pairs(refs) do
+      if type(key) == "string" and ref == JSON_NULL then
+        present[key] = true
+      end
+    end
+
+    local changed = false
+    for _, ref in ipairs(contributed) do
+      local key = referenceKey(ref.type, ref.target, ref.isForward)
+      if not present[key] then
+        refs[#refs + 1] = ref
+        present[key] = true
+        changed = true
+      end
+    end
+    if changed then
+      batch[#batch + 1] = {
+        NodeId = targetNodeId,
+        Attributes = {},
+        Refs = refs,
+      }
+    end
+  end
+
+  if #batch > 0 then
+    self.provider:save(batch)
+  end
 end
 
 -- iterator over nodes
 function address_space:__pairs()
-  assert(self ~= nil)
-  local n,nn = pairs(self.n)
-  local n0,nn0 = pairs(self.ns0)
-  local k = nil
+  local seen = {}
+  local providerIndex = 1
+  local baseIter
+  local baseState
+  local baseKey
+  local overlayKey
+  local readingBase = true
+
   return function()
-    local v
-    if n then
-      k,v = n(nn,k)
-      if k then
-        assert(rawget(v.Attrs, "data"))
-        return k,v
+    while readingBase do
+      if baseIter == nil then
+        local provider = self.readonlyProviders[providerIndex]
+        if provider == nil then
+          readingBase = false
+          break
+        end
+        baseIter, baseState, baseKey = pairs(provider)
+      end
+
+      while true do
+        local _
+        baseKey, _ = baseIter(baseState, baseKey)
+        if baseKey == nil then
+          providerIndex = providerIndex + 1
+          baseIter = nil
+          break
+        end
+        if not seen[baseKey] then
+          seen[baseKey] = true
+          local node = getNode(self, baseKey)
+          if node then
+            return baseKey, node
+          end
+        end
       end
     end
-    n = nil
-    nn = nil
 
-    k,v = n0(nn0,k)
-    return k, copyNode(v)
+    while true do
+      local writable
+      overlayKey, writable = next(self.provider.nodes, overlayKey)
+      if overlayKey == nil then
+        return
+      end
+      if writable ~= JSON_NULL and
+         baseNode(self, overlayKey) == nil then
+        return overlayKey, getNode(self, overlayKey)
+      end
+    end
   end
+end
+
+local function addReadonlyProvider(self, provider)
+  if provider == nil then
+    error(BadInternalError)
+  end
+  local providers = {}
+  for index, current in ipairs(self.readonlyProviders) do
+    providers[index] = current
+  end
+  providers[#providers + 1] = provider
+  linkExternalReferences(self, providers)
+  self.readonlyProviders[#self.readonlyProviders + 1] = provider
+  self.typeInfos = {}
 end
 
 function address_space:__index(id)
@@ -533,13 +1084,13 @@ function address_space:__index(id)
 end
 
 function address_space:__newindex(id, node)
-  if not rawget(node.Attrs, "data") then
+  if not node.Attrs then
     error(BadInternalError)
   end
   if id ~= node.Attrs.NodeId then
     error(BadNodeIdInvalid)
   end
-  self.n[id] = node
+  self:saveNodes({node})
 end
 
 local function getSubtypes(self, parent, cont)
@@ -648,12 +1199,315 @@ local function resolvePath(nodes, node, names)
   return node
 end
 
-local function save(self)
-  for key, node in pairs(self.n) do
-    self.ns0[key] = node
+local function attributesIterator(attrs)
+  local data = type(attrs) == "table" and rawget(attrs, "data")
+  return pairs(data or attrs)
+end
+
+local function referenceDelta(space, nodeId, refs)
+  local readonly = {}
+  for _, provider in ipairs(space.readonlyProviders) do
+    local node = readonlyNode(provider, nodeId)
+    if node then
+      for _, ref in iterateNodeReferences(node) do
+        readonly[referenceKey(ref.type, ref.target, ref.isForward)] = true
+      end
+    end
   end
 
-  self.n = {}
+  local delta = {}
+  local present = {}
+  for _, ref in ipairs(refs) do
+    local key = referenceKey(ref.type, ref.target, ref.isForward)
+    if not present[key] then
+      present[key] = true
+      if not readonly[key] then
+        delta[#delta + 1] = tools.copy(ref)
+      end
+    end
+  end
+  for key in pairs(readonly) do
+    if not present[key] then
+      delta[key] = JSON_NULL
+    end
+  end
+  return delta
+end
+
+local function prepareNode(self, node)
+  if type(node) ~= "table" and type(node) ~= "userdata" then
+    error(BadInternalError)
+  end
+  if not node.Attrs then
+    error(BadInternalError)
+  end
+
+  local nodeId = node.Attrs.NodeId
+  if not tools.nodeIdValid(nodeId) then
+    error(BadNodeIdInvalid)
+  end
+
+  local ownProxy = type(node) == "table" and rawget(node, "_space") == self
+  local change = {
+    Node = node,
+    NodeId = nodeId,
+    Attributes = {},
+  }
+
+  if ownProxy then
+    local attrs = node.Attrs
+    for attributeId, value in pairs(rawget(attrs, "_changes")) do
+      if value == JSON_NULL or value == RESET then
+        change.Attributes[attributeId] = value
+      else
+        change.Attributes[attributeId] = tools.copy(value)
+      end
+    end
+
+    local callbackChange = rawget(attrs, "_callbackChange")
+    if callbackChange ~= nil then
+      change.Callback = callbackChange
+    end
+
+    local refs = rawget(node, "_refsProxy")
+    if refs ~= nil then
+      change.Refs = referenceDelta(self, nodeId, refs)
+    end
+
+    local fields = rawget(node, "_fieldChanges")
+    if next(fields) ~= nil then
+      change.Fields = {}
+      for key, value in pairs(fields) do
+        change.Fields[key] = value
+      end
+    end
+  else
+    for attributeId, value in attributesIterator(node.Attrs) do
+      if attributeId == "NodeCallback" then
+        if value ~= nil and type(value) ~= "function" then
+          error(BadAttributeIdInvalid)
+        end
+        change.Callback = value
+      else
+        local normalizedId = getAttributeId(attributeId)
+        value = fromDataValue(normalizedId, value)
+        change.Attributes[normalizedId] = tools.copy(value)
+      end
+    end
+
+    change.Refs = referenceDelta(self, nodeId, node.Refs or {})
+    change.Fields = {}
+    for key, value in pairs(node) do
+      if key ~= "Attrs" and key ~= "Refs" and
+         type(key) == "string" and key:sub(1, 1) ~= "_" then
+        change.Fields[key] = tools.copy(value)
+      end
+    end
+    if next(change.Fields) == nil then
+      change.Fields = nil
+    end
+  end
+
+  return change
+end
+
+local function saveNodes(self, nodes)
+  if type(nodes) ~= "table" then
+    error(BadInternalError)
+  end
+
+  local batch = {}
+  local byNodeId = {}
+  for _, node in ipairs(nodes) do
+    local change = prepareNode(self, node)
+    local previous = byNodeId[change.NodeId]
+    if previous then
+      for attributeId, entry in pairs(change.Attributes) do
+        previous.Attributes[attributeId] = entry
+      end
+      previous.Refs = change.Refs or previous.Refs
+      if change.Fields then
+        previous.Fields = previous.Fields or {}
+        for key, value in pairs(change.Fields) do
+          previous.Fields[key] = value
+        end
+      end
+      if change.Callback ~= nil then
+        previous.Callback = change.Callback
+      end
+    else
+      byNodeId[change.NodeId] = change
+      batch[#batch + 1] = change
+    end
+  end
+
+  self.provider:save(batch)
+  self.typeInfos = {}
+
+  for _, change in ipairs(batch) do
+    if change.Callback ~= nil then
+      self.callbacks[change.NodeId] = change.Callback
+    end
+
+    local node = change.Node
+    if type(node) == "table" and rawget(node, "_space") == self then
+      local attrs = rawget(node, "_attrsProxy")
+      if attrs then
+        rawset(attrs, "_changes", {})
+        rawset(attrs, "_callbackChange", nil)
+      end
+      rawset(node, "_fieldChanges", {})
+      self.dirtyNodes[node] = nil
+    end
+  end
+end
+
+local function save(self)
+  local dirty = {}
+  for node in pairs(self.dirtyNodes) do
+    dirty[#dirty + 1] = node
+  end
+  if #dirty > 0 then
+    self:saveNodes(dirty)
+  end
+
+  local parent = self.base
+  if type(parent) == "table" and parent.provider then
+    local batch = {}
+    for nodeId, writable in pairs(self.provider.nodes) do
+      if writable == JSON_NULL then
+        parent:deleteNode(nodeId)
+      else
+        local attributes = {}
+        for attributeId, stored in pairs(writable.Attrs) do
+          if stored == JSON_NULL then
+            attributes[attributeId] = JSON_NULL
+          else
+            local _, value = writable:getAttribute(attributeId)
+            attributes[attributeId] = value
+          end
+        end
+        batch[#batch + 1] = {
+          NodeId = nodeId,
+          Attributes = attributes,
+          Refs = writable.Refs ~= nil and referenceDelta(
+            parent, nodeId, self[nodeId].Refs) or nil,
+          Fields = writable.Fields,
+        }
+        local callbackChange = self.callbacks[nodeId]
+        if callbackChange ~= nil then
+          parent.callbacks[nodeId] = callbackChange
+        end
+      end
+    end
+    parent.provider:save(batch)
+  else
+    for nodeId, writable in pairs(self.provider.nodes) do
+      if writable == JSON_NULL then
+        parent[nodeId] = nil
+      else
+        parent[nodeId] = self[nodeId]
+      end
+    end
+  end
+
+  self.provider:reset()
+  self.callbacks = {}
+end
+
+local function deleteNode(self, nodeId, deleteTargetReferences)
+  if self[nodeId] == nil then
+    error(BadNodeIdUnknown)
+  end
+
+  local nodesToDelete = {[nodeId] = true}
+  if deleteTargetReferences then
+    local hierarchicalTypes = getSubtypes(
+      self, self[HierarchicalReferences], {})
+    local queue = {nodeId}
+    local queueIndex = 1
+    while queue[queueIndex] ~= nil do
+      local parentId = queue[queueIndex]
+      queueIndex = queueIndex + 1
+
+      for _, ref in ipairs(mergeReferences(self, parentId)) do
+        local childId = ref.target
+        if ref.isForward and hierarchicalTypes[ref.type] and
+          not nodesToDelete[childId]
+        then
+          local orphaned = true
+          for _, childRef in ipairs(mergeReferences(self, childId)) do
+            if not childRef.isForward and
+              hierarchicalTypes[childRef.type] and
+              not nodesToDelete[childRef.target]
+            then
+              orphaned = false
+              break
+            end
+          end
+
+          if orphaned then
+            nodesToDelete[childId] = true
+            queue[#queue + 1] = childId
+          end
+        end
+      end
+    end
+
+    local referencedNodes = {}
+    for deletedNodeId in pairs(nodesToDelete) do
+      for _, ref in ipairs(mergeReferences(self, deletedNodeId)) do
+        if not nodesToDelete[ref.target] then
+          referencedNodes[ref.target] = self[ref.target]
+        end
+      end
+    end
+
+    local modifiedNodes = {}
+    for _, referencedNode in pairs(referencedNodes) do
+      local refs = referencedNode.Refs
+      for index = #refs, 1, -1 do
+        if nodesToDelete[refs[index].target] then
+          table.remove(refs, index)
+        end
+      end
+      modifiedNodes[#modifiedNodes + 1] = referencedNode
+    end
+    self:saveNodes(modifiedNodes)
+  end
+
+  for deletedNodeId in pairs(nodesToDelete) do
+    self.provider:deleteNode(deletedNodeId)
+    self.callbacks[deletedNodeId] = JSON_NULL
+  end
+  self.typeInfos = {}
+end
+
+local function resetNode(self, nodeId)
+  self.provider:resetNode(nodeId)
+  self.typeInfos = {}
+  self.callbacks[nodeId] = nil
+end
+
+local function setModel(self, model)
+  rawset(self, "model", model)
+  self.provider:setModel(model)
+end
+
+local function writableNodes(self)
+  local nodeId
+  return function()
+    local writable
+    while true do
+      nodeId, writable = next(self.provider.nodes, nodeId)
+      if nodeId == nil then
+        return
+      end
+      if writable ~= JSON_NULL then
+        return nodeId, self[nodeId]
+      end
+    end
+  end
 end
 
 local function newNode(self, nodeId, patternAttrs, refs)
@@ -679,23 +1533,55 @@ local function newNode(self, nodeId, patternAttrs, refs)
     Refs = tools.copy(refs) or {}
   }
 
-  node.VAttrs = createVAttrs(node.Attrs, node)
-
-  return node
+  return setmetatable(node, lua_node_mt)
 end
 
 
-local function create(ns)
+local function create(ns, options)
   assert(ns, "ns is required")
+  options = options or {}
+  local readonlyProviders = options.readonlyProviders
+  if readonlyProviders == nil then
+    readonlyProviders = {ns}
+  elseif type(readonlyProviders) ~= "table" then
+    error(BadInternalError)
+  else
+    local configured = readonlyProviders
+    readonlyProviders = {}
+    for index, provider in ipairs(configured) do
+      readonlyProviders[index] = provider
+    end
+    if #readonlyProviders == 0 then
+      readonlyProviders[1] = ns
+    end
+  end
+
   local space ={
-    ns0 = ns, -- base namespace
-    n = {},   -- new namespace is editable
-    saveNode = saveNode, -- save node to the new address space
-    save = save,         -- move nodes from new namespace to the base address space
+    -- Compatibility alias used by existing tests and model code. Lookup and
+    -- iteration use the complete ordered readonlyProviders list.
+    base = readonlyProviders[1],
+    readonlyProviders = readonlyProviders,
+    provider = memoryProvider.new({
+      encodeValues = options.encodeValues,
+    }),
+    callbacks = {},
+    dirtyNodes = {},
+    typeInfos = {},
+    trackMutableReads = options.trackMutableReads == true,
+    saveNodes = saveNodes,
+    save = save,
+    deleteNode = deleteNode,
+    resetNode = resetNode,
+    addReadonlyProvider = addReadonlyProvider,
+    getSubtypes = getSubtypes,
+    getTypeInfo = getTypeInfo,
+    setModel = setModel,
+    writableNodes = writableNodes,
     resolvePath = resolvePath,
     newNode = newNode
   }
   setmetatable(space, address_space)
+  linkExternalReferences(space, readonlyProviders)
   return space
 end
 

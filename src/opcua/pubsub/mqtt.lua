@@ -84,8 +84,8 @@ function C:subscribe(topic, messageCallback)
     return self:onData(messageCallback, ...)
   end
 
-  local function onsubscribe(topic, reason, props)
-    traceI(fmt("mqtt | Subscribed to topic '%s': reason='%s', properties='%s'", topic, reason, ba.json.encode(props)))
+  local function onsubscribe(topic1, reason, props)
+    traceI(fmt("mqtt | Subscribed to topic '%s': reason='%s', properties='%s'", topic1, reason, ba.json.encode(props)))
   end
 
   self.onpub[topic] = onpublish
@@ -373,15 +373,10 @@ local function NewClient(config, uaServer)
   end
 
   local uaConfig = require("opcua.config")
-  local err
   if uaServer then
-    err = uaConfig.server(config)
+    config = uaConfig.server(config)
   else
-    err = uaConfig.client(config)
-  end
-
-  if err ~= nil then
-    error("Configuration error: "..err)
+    config = uaConfig.client(config)
   end
 
   if model == nil then

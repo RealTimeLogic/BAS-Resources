@@ -1,179 +1,92 @@
-local const = require("opcua.const")
 local trace = require("opcua.trace")
 
-local tins = table.insert
-local NodeClass = const.NodeClass
-local HasEncoding <const> = "i=38"
-local HasSubtype <const> = "i=45"
-
 local traceI = trace.inf
+local fmt = string.format
+
+local PACKED_MAGIC = "UAPB"
+local READ_SIZE = 4096
 
 local Model <const> = {}
 
-local encodeTypes = {
-  ["i=1"] = "i=1",
-  ["i=2"] = "i=2",
-  ["i=3"] = "i=3",
-  ["i=4"] = "i=4",
-  ["i=5"] = "i=5",
-  ["i=6"] = "i=6",
-  ["i=7"] = "i=7",
-  ["i=8"] = "i=8",
-  ["i=9"] = "i=9",
-  ["i=10"] = "i=10",
-  ["i=11"] = "i=11",
-  ["i=13"] = "i=13",
-  ["i=12"] = "i=12",
-  ["i=14"] = "i=14",
-  ["i=15"] = "i=15",
-  ["i=16"] = "i=16",
-  ["i=17"] = "i=17",
-  ["i=18"] = "i=18",
-  ["i=19"] = "i=19",
-  ["i=20"] = "i=20",
-  ["i=21"] = "i=21",
-  ["i=22"] = "i=22",
-  ["i=23"] = "i=23",
-  ["i=25"] = "i=25",
-  ["i=29"] = "i=29",
-}
+Model.loadXml = function(self, ...)
+  local provider = self.Nodes.provider
+  local encodeValues = provider.encodeValues
 
-function Model.getBaseDatatype(self, dataTypeId)
-  local nodes = self.Nodes
-  local curDataTypeId = dataTypeId
-  while curDataTypeId do
-    local node <const> = nodes[curDataTypeId]
-    if not node then
-      error("No node for id: " .. curDataTypeId)
-    end
-    if curDataTypeId ~= "i=22" then
-      if node.Attrs.NodeClass ~= NodeClass.DataType then
-        error("Node is not a data type: " .. curDataTypeId)
-      end
-      if node.Attrs.IsAbstract == nil then
-        error("No IsAbstract attribute for node: " .. curDataTypeId)
-      end
-    end
+  -- XML values are static model data and may be much larger than the fixed
+  -- runtime DataValue buffer. Keep them raw during import. Later writes still
+  -- use the provider's normal binary encoding.
+  provider.encodeValues = false
+  local result = table.pack(pcall(
+    require("opcua.model.load_xml"), self, ...))
+  provider.encodeValues = encodeValues
 
-    if encodeTypes[curDataTypeId] then
-      return encodeTypes[curDataTypeId]
-    end
-
-    local parentTypeId = nil
-    for _, ref in pairs(node.Refs) do
-      -- Find reference to base data type
-      if ref.type == HasSubtype and not ref.isForward then
-        parentTypeId = ref.target
-        break
-      end
-    end
-
-    if not parentTypeId then
-      encodeTypes[curDataTypeId] = curDataTypeId
-      return curDataTypeId
-    end
-
-    curDataTypeId = parentTypeId
+  if not result[1] then
+    error(result[2], 0)
   end
+  return table.unpack(result, 2, result.n)
 end
 
-function Model:fillExtensionObjects()
-  local infOn = self.config.logging.services.infOn
-  if infOn then traceI("Filling extension objects") end
-
-  for dataTypeId, node in pairs(self.Nodes) do
-    if node.Attrs.NodeClass ~= NodeClass.DataType then
-      goto continue
-    end
-
-    -- Search function for encoding base type node
-    local baseId = self:getBaseDatatype(dataTypeId)
-
-    node.BaseId = baseId
-
-    -- Search IDs for encoding extention objects: binary, xml etc.
-    -- Each extension object contains body in a some format. Each
-    -- structrue has an ID and corresponsing ID for encoding format
-    -- For example: ServerStatusDataType has own ID i=862 and following encoders:
-    --  * ID i=863 for XML encoding
-    --  * ID i=864 for binary encoding
-    --  * ID i=15367 for JSON encoding
-
-    for _, ref in pairs(node.Refs) do
-      if ref.type == HasEncoding and ref.isForward then
-        local targetId = ref.target
-        local encodingNode = self.Nodes[targetId];
-        if encodingNode == nil then
-          error("No node for id: " .. targetId)
-        end
-        local encoding = encodingNode.Attrs.BrowseName
-        if encoding.Name == "Default Binary" then
-          node.BinaryId = targetId
-          node.DataTypeId = dataTypeId
-          self.Nodes[targetId].BinaryId = targetId
-          self.Nodes[targetId].BaseId = baseId
-          self.Nodes[targetId].DataTypeId = dataTypeId
-        end
-        if encoding.Name == "Default JSON" then
-          node.JsonId = targetId
-          node.DataTypeId = dataTypeId
-          self.Nodes[targetId].JsonId = targetId
-          self.Nodes[targetId].BaseId = baseId
-          self.Nodes[targetId].DataTypeId = dataTypeId
-        end
-      end
-    end
-    ::continue::
+local function createOutput(output)
+  if type(output) == "function" then
+    return output
   end
-end
 
-function Model:fillInheritedDefinitions()
-  local infOn = self.config.logging.services.infOn
-  if infOn then traceI("Expanding inherited data type definitions") end
-
-  for _,node in pairs(self.Nodes) do
-    local definitions = {}
-    local type = node
-    -- Collect all superTypes
-    while type and
-          type.Attrs.NodeClass == NodeClass.DataType and
-          type.Attrs.NodeId ~= "i=24"
-    do
-      -- Every DataType contain part of definition
-      -- To construct full definition we need also collect
-      -- fields from parent types and compose full definition.
-      tins(definitions, type.Attrs.DataTypeDefinition)
-      local superType
-      for _,ref in ipairs(type.Refs) do
-        -- Search HasSubtype reference
-        if ref.type == HasSubtype and ref.isForward == false then
-          superType = self.Nodes[ref.target]
-          break
-        end
-      end
-      type = superType
+  local file = output
+  local owned = false
+  if type(output) == "string" then
+    local err
+    file, err = io.open(output, "wb")
+    if not file then
+      error("could not open output file '" .. output .. "': " ..
+        tostring(err), 0)
     end
+    owned = true
+  elseif io.type(output) ~= "file" then
+    error("output must be a filename, file handle, or function", 0)
+  end
 
-    if #definitions >= 1 then
-      local fullDefinition = {}
-      for i = #definitions, 1, -1 do
-        local definition = definitions[i]
-        for _,field in ipairs(definition) do
-          tins(fullDefinition, field)
-        end
-      end
-
-      node.Attrs.DataTypeDefinition = fullDefinition
+  local function write(chunk)
+    local result, err = file:write(chunk)
+    if result == nil then
+      error(err or "could not write output", 0)
     end
   end
+  return write, owned and file or nil
 end
 
-Model.loadXml = function(...)
-  return require("opcua.model.load_xml")(...)
+local function exportModel(self, exporter, output, namespaceURIs)
+  local write, ownedFile = createOutput(output)
+  local result = table.pack(pcall(
+    exporter, self, write, namespaceURIs))
+
+  if ownedFile then
+    local closed, closeError = ownedFile:close()
+    if result[1] and not closed then
+      result = table.pack(false,
+        closeError or "could not close output file")
+    end
+  end
+
+  if not result[1] then
+    error(result[2], 0)
+  end
+  return table.unpack(result, 2, result.n)
 end
 
-Model.exportXml = function(...)
-  return require("opcua.model.export_xml")(...)
+function Model:exportXml(output, namespaceURIs)
+  return exportModel(
+    self, require("opcua.model.export_xml"), output, namespaceURIs)
+end
+
+function Model:exportPacked(output, namespaceURIs)
+  return exportModel(
+    self, require("opcua.model.export_packed"), output, namespaceURIs)
+end
+
+function Model:loadPacked(source)
+  local provider = require("opcua.model.packed_provider").open(source)
+  self.Nodes:addReadonlyProvider(provider)
+  return provider
 end
 
 Model.validate = function(...)
@@ -199,64 +112,200 @@ function Model:createBinaryEncoder(bta)
   local encoder = require("opcua.binary.encoder")
   local serializer = encoder.new(bta)
 
-  return require("opcua.model.encoding").CreateEncoder(self, serializer)
+  return require("opcua.model.encoding").CreateEncoder(
+    self, serializer, "Binary")
 end
 
 function Model:createBinaryDecoder(bta)
   local decoder = require("opcua.binary.decoder")
   local serializer = decoder.new(bta)
 
-  return require("opcua.model.encoding").CreateDecoder(self, serializer)
+  return require("opcua.model.encoding").CreateDecoder(
+    self, serializer, "Binary")
 end
 
 function Model:createJsonEncoder(bta)
   local encoder = require("opcua.json.encoder")
   local serializer = encoder.new(bta)
 
-  return require("opcua.model.encoding").CreateEncoder(self, serializer)
+  return require("opcua.model.encoding").CreateEncoder(
+    self, serializer, "Json")
 end
 
 function Model:createJsonDecoder(bta)
   local decoder = require("opcua.json.decoder")
   local serializer = decoder.new(bta)
 
-  return require("opcua.model.encoding").CreateDecoder(self, serializer)
+  return require("opcua.model.encoding").CreateDecoder(
+    self, serializer, "Json")
 end
 
 function Model:commit()
-  self:fillInheritedDefinitions()
   self:validate()
-  self:fillExtensionObjects()
 end
 
-function Model:loadXmlModels(modelFiles)
-  for _,path in ipairs(modelFiles) do
-    local f, err,tmp
-    if path:sub(1, 7) == "http://" or path:sub(1, 8) == "https://" then
-      local ok, httpc = pcall(require, "httpc")
-      if ok then
-        f = httpc.create()
-        tmp,err=f:request{url=path, method="GET"}
-      else
-        local socket = require("socket.http")
-        local http = require("socket.http")
-        local code
-        f, code = http.request(path)
-        if code ~= 200 then
-          error("Failed to load model: " .. path .. " (code: " .. code .. ")")
-        end
-      end
-    elseif path:sub(1, 1) == "<?xml" then
-      f = path -- this is the content of the file
-    else
-      f, err = io.open(path, "r")
-    end
+local function streamReader(source)
+  if type(source) == "function" then
+    return source
+  end
+  return function()
+    return source:read(READ_SIZE)
+  end
+end
 
+local function detectFormat(data)
+  if data:sub(1, #PACKED_MAGIC) == PACKED_MAGIC then
+    return "packed"
+  end
+
+  if data:sub(1, 3) == "\239\187\191" then
+    data = data:sub(4)
+  end
+  local first = data:match("^%s*(.)")
+  if first == "<" then
+    return "xml"
+  end
+end
+
+local function formatMayBeIncomplete(data)
+  if #data < #PACKED_MAGIC and
+     PACKED_MAGIC:sub(1, #data) == data then
+    return true
+  end
+
+  local byteOrderMark = "\239\187\191"
+  if #data < #byteOrderMark and
+     byteOrderMark:sub(1, #data) == data then
+    return true
+  end
+  if data:sub(1, #byteOrderMark) == byteOrderMark then
+    data = data:sub(#byteOrderMark + 1)
+  end
+  return data:match("^%s*$") ~= nil
+end
+
+local function loadStream(self, source, modelName)
+  local read = streamReader(source)
+  local chunks = {}
+  local format
+
+  while format == nil do
+    local chunk = read()
+    if chunk == nil or #chunk == 0 then
+      break
+    end
+    chunks[#chunks + 1] = chunk
+    local data = table.concat(chunks)
+    format = detectFormat(data)
+
+    if format == nil and not formatMayBeIncomplete(data) then
+      break
+    end
+  end
+
+  if format == "packed" then
+    while true do
+      local chunk = read()
+      if chunk == nil or #chunk == 0 then
+        break
+      end
+      chunks[#chunks + 1] = chunk
+    end
+    return self:loadPacked(table.concat(chunks))
+  elseif format == "xml" then
+    local initial = table.concat(chunks)
+    return self:loadXml(function()
+      if initial ~= nil then
+        local chunk = initial
+        initial = nil
+        return chunk
+      end
+      return read()
+    end)
+  end
+
+  error("Unsupported model format: " .. modelName)
+end
+
+local function loadUrl(self, path)
+  local ok, httpc = pcall(require, "httpc")
+  if ok then
+    local source = httpc.create()
+    local _, err = source:request{url=path, method="GET"}
     if err then
       error(err)
     end
+    return loadStream(self, source, path)
+  end
 
-    self:loadXml(f)
+  local http = require("socket.http")
+  local content, code = http.request(path)
+  if code ~= 200 then
+    error("Failed to load model: " .. path .. " (code: " .. code .. ")")
+  end
+  return loadStream(self, function()
+    local result = content
+    content = nil
+    return result
+  end, path)
+end
+
+local function loadFile(self, path)
+  local source, err = io.open(path, "rb")
+  if not source then
+    error(err)
+  end
+
+  local result = table.pack(pcall(loadStream, self, source, path))
+  source:close()
+  if not result[1] then
+    error(result[2], 0)
+  end
+  return table.unpack(result, 2, result.n)
+end
+
+function Model:loadModels(modelSources)
+  local infOn = self.config.logging.services.infOn
+
+  for index, source in ipairs(modelSources) do
+    local modelName
+    local load
+    local sourceType = type(source)
+    if sourceType == "string" and
+       (source:sub(1, 7) == "http://" or
+        source:sub(1, 8) == "https://") then
+      modelName = source
+      load = function()
+        return loadUrl(self, source)
+      end
+    elseif sourceType == "string" and detectFormat(source) ~= nil then
+      modelName = fmt("content #%d", index)
+      load = function()
+        return loadStream(self, function()
+          local result = source
+          source = nil
+          return result
+        end, modelName)
+      end
+    elseif sourceType == "string" then
+      modelName = source
+      load = function()
+        return loadFile(self, source)
+      end
+    elseif sourceType == "function" or
+           ((sourceType == "table" or sourceType == "userdata") and
+            type(source.read) == "function") then
+      modelName = fmt("stream #%d", index)
+      load = function()
+        return loadStream(self, source, modelName)
+      end
+    else
+      error(fmt("Invalid model source #%d", index))
+    end
+
+    if infOn then traceI(fmt("Loading model from: %s", modelName)) end
+    load()
+    if infOn then traceI(fmt("Model from %s loaded successfully", modelName)) end
   end
 end
 
@@ -283,7 +332,9 @@ local function createModel(config)
   local infOn = config.logging.services.infOn
   if infOn then traceI("loading address space") end
   local model = {
-    Nodes = require("opcua.model.address_space")({}),
+    Nodes = require("opcua.model.address_space")({}, {
+      encodeValues = config.encodeValues,
+    }),
     Models = {}, -- ModelUri -> model
     Namespaces = {}, -- array of namespaces, index starts from 0, and map namespaceUri to Namespace
     Aliases = {},
@@ -312,6 +363,7 @@ local function createModel(config)
       error("Model is read-only")
     end
   })
+  model.Nodes:setModel(model)
 
   return model
 end
@@ -341,11 +393,13 @@ local function getBaseModel(config)
   }
 
   if infOn then traceI("Loading NS0 namespace") end
-  local ns0 = require("opcua_ns0")
+  local ns0 =
+    require("opcua.model.packed_provider").openBuiltin("ns0")
   if infOn then traceI("Loading address space") end
   local as = require("opcua.model.address_space")
   if infOn then traceI("Creating address space") end
   model.Nodes = as(ns0)
+  model.Nodes:setModel(model)
   if infOn then traceI("Base model loaded") end
 
   return model

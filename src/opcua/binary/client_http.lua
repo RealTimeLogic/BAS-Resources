@@ -125,6 +125,8 @@ local function createSocket(url, transportProfile, config)
 end
 
 function C:coRun(endpointUrl, transportProfile, connectCallback, messageCallback)
+  assert(type(connectCallback) == "function", "connectCallback not a function")
+  assert(type(messageCallback) == "function", "messageCallback not a function")
   self.connectCallback = connectCallback
   self.messageCallback = messageCallback
   self.thread = ba.thread:run(function()
@@ -241,13 +243,6 @@ function C:recvMessage()
 end
 
 function C:createRequest(type, request)
-  -- if not self.sock then
-  --   return nil, BadNotConnected
-  -- end
-  -- if not self.enc.policy then
-  --   return nil, BadSecureChannelIdInvalid
-  -- end
-
   self.requestId = self.requestId + 1
   self.requestHandle = self.requestHandle + 1
   local requestHeader = {

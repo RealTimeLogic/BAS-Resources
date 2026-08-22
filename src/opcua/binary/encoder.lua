@@ -553,7 +553,11 @@ function enc:variant(v, model)
     return
   end
 
-  assert(data ~= nil)
+  local nullableScalar = not v.IsArray and
+    (vt == VariantType.String or
+     vt == VariantType.ByteString or
+     vt == VariantType.XmlElement)
+  assert(data ~= nil or nullableScalar)
   assert(vt ~= nil)
   assert(encFunc ~= nil)
 
@@ -611,7 +615,9 @@ function enc:extensionObject(v, encoder)
     extObject, encF = encoder:getExtObject(typeId)
   end
 
-  self:expandedNodeId(extObject and extObject.BinaryId or typeId)
+  self:expandedNodeId(
+    extObject and
+      extObject:getEncodingNodeId(encoder.CodecType) or typeId)
   self:bit(body ~= nil and 1 or 0, 1)
   self:bit(0, 7)
   if body ~= nil then
@@ -809,14 +815,16 @@ function enc:qualifiedName(v)
 end
 
 function enc:dataValue(v, model)
-  self:bit(v.Value ~= nil and 1 or 0, 1)
+  local valueSpecified =
+    v.Type ~= nil and v.Type ~= VariantType.Null
+  self:bit(valueSpecified and 1 or 0, 1)
   self:bit(v.StatusCode ~= nil and 1 or 0, 1)
   self:bit(v.SourceTimestamp ~= nil and 1 or 0, 1)
   self:bit(v.ServerTimestamp ~= nil and 1 or 0, 1)
   self:bit(v.SourcePicoseconds ~= nil and 1 or 0, 1)
   self:bit(v.ServerPicoseconds ~= nil and 1 or 0, 1)
   self:bit(0, 2)
-  if v.Value ~= nil then
+  if valueSpecified then
     self:variant(v, model)
   end
   if v.StatusCode ~= nil then

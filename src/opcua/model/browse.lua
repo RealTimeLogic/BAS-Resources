@@ -2,6 +2,7 @@ local const = require("opcua.const")
 local StatusCode = require("opcua.status_codes")
 local address_space_create = require("opcua.model.address_space")
 local tools = require("opcua.tools")
+local Null = require("opcua.node_id").Null
 
 local tins = table.insert
 local tremove = table.remove
@@ -47,7 +48,10 @@ local function createQualifiedName(name)
 end
 
 local function createBaseNode(model, nodes, nodeClass, browseName, nodeId)
-  nodeId = nodeId or model:newNodeId()
+  if nodeId == nil or nodeId == Null then
+    nodeId = model:newNodeId()
+  end
+
   browseName = createQualifiedName(browseName)
 
   local node = nodes:newNode(nodeId, nodeClass)
@@ -285,6 +289,37 @@ local function addReference(sourceNode, targetNode, referenceTypeId)
   })
 end
 
+local function collectTypeHierarchy(typeNode, nodes, hierarchy, states)
+  local nodeId = typeNode.Attrs.NodeId
+  local state = states[nodeId]
+  if state == "visiting" then
+    error(BadInternalError)
+  elseif state == "visited" then
+    return
+  end
+  states[nodeId] = "visiting"
+
+  local nodeClass = typeNode.Attrs.NodeClass
+  if nodeClass == NodeClass.ObjectType or
+    nodeClass == NodeClass.VariableType
+  then
+    for _, ref in ipairs(typeNode.Refs) do
+      if not ref.isForward and ref.type == HasSubtype then
+        local baseType = nodes[ref.target]
+        if not baseType then
+          error(BadNodeIdUnknown)
+        end
+        if baseType.Attrs.NodeClass == nodeClass then
+          collectTypeHierarchy(baseType, nodes, hierarchy, states)
+        end
+      end
+    end
+  end
+
+  states[nodeId] = "visited"
+  tins(hierarchy, typeNode)
+end
+
 local function expandHierarchy(startNode, rootNode, model, nodes)
   local newNodes = {}
   local stack = { {type=rootNode, object=startNode} }
@@ -294,33 +329,36 @@ local function expandHierarchy(startNode, rootNode, model, nodes)
     local item = tremove(stack)
     local typeNode = item.type
     local objectNode = item.object
+    local hierarchy = {}
+    collectTypeHierarchy(typeNode, nodes, hierarchy, {})
 
-    for _, ref in ipairs(typeNode.Refs) do
-      if not ref.isForward and ref.target ~= typeNode.Attrs.NodeId then
-        goto continue
+    for _, hierarchyNode in ipairs(hierarchy) do
+      for _, ref in ipairs(hierarchyNode.Refs) do
+        if not ref.isForward then
+          goto continue
+        end
+
+        local refNode = nodes[ref.target]
+        if not refNode then
+          error(BadNodeIdUnknown)
+        end
+
+        if ref.type == HasTypeDefinition then
+          addReference(objectNode, refNode, ref.type)
+          tins(newNodes, refNode)
+        elseif ref.type == HasProperty or ref.type == HasComponent then
+          local objectField = nodes:newNode(model:newNodeId(), refNode.Attrs)
+          addReference(objectNode, objectField, ref.type)
+          tins(newNodes, objectField)
+          tins(stack, {type=refNode, object=objectField})
+        end
+
+        ::continue::
       end
-
-      local refNode = nodes[ref.target]
-      if not refNode then
-        error(BadNodeIdUnknown)
-      end
-
-      if ref.type == HasTypeDefinition then
-        addReference(objectNode, refNode, ref.type)
-      elseif ref.type == HasProperty or ref.type == HasComponent then
-        local objectField = nodes:newNode(model:newNodeId(), refNode.Attrs)
-        addReference(objectNode, objectField, ref.type)
-        tins(newNodes, objectField)
-        tins(stack, {type=refNode, object=objectField})
-      end
-
-      ::continue::
     end
   end
 
-  for _, node in ipairs(newNodes) do
-    nodes:saveNode(node)
-  end
+  nodes:saveNodes(newNodes)
 
 end
 
@@ -385,8 +423,7 @@ addObject = function (self, browseName, objectType, nodeId, refType)
   addReference(self.Node, newObjectNode, refTypeNode.Attrs.NodeId)
   addReference(newObjectNode, objectTypeNode, HasTypeDefinition)
 
-  self.Nodes:saveNode(newObjectNode)
-  self.Nodes:saveNode(self.Node)
+  self.Nodes:saveNodes({newObjectNode, self.Node})
 
   return newObject(newObjectNode, self.Model, self.Nodes)
 end
@@ -404,7 +441,7 @@ addVariable = function (self, browseName, value, variableType, nodeId, refType)
 
   addReference(self.Node, newNode, refTypeNode.Attrs.NodeId)
 
-  self.Nodes:saveNode(newNode)
+  self.Nodes:saveNodes({newNode, self.Node})
 
   return newVariable(newNode, self.Model, self.Nodes)
 end
@@ -420,8 +457,7 @@ addProperty = function (self, browseName, value, variableType, nodeId, refType)
   local refTypeNode = toRefTypeNode(self.Nodes, refType, HasProperty)
   addReference(self.Node, newNode, refTypeNode.Attrs.NodeId)
 
-  self.Nodes:saveNode(newNode)
-  self.Nodes:saveNode(propertyTypeNode)
+  self.Nodes:saveNodes({newNode, propertyTypeNode, self.Node})
 
   return newVariable(newNode, self.Model, self.Nodes)
 end
@@ -478,9 +514,13 @@ addMethod = function(self, browseName, func, inputArguments, outputArguments, no
   addReference(methodNode, outputArgumentsNode, HasProperty)
   addReference(self.Node, methodNode, HasComponent)
 
-  self.Nodes:saveNode(inputArgumentsNode)
-  self.Nodes:saveNode(outputArgumentsNode)
-  self.Nodes:saveNode(methodNode)
+  self.Nodes:saveNodes({
+    inputArgumentsNode,
+    outputArgumentsNode,
+    methodNode,
+    propertyTypeNode,
+    self.Node,
+  })
 
   return newMethod(methodNode, self.Model, self.Nodes)
 end
@@ -489,14 +529,14 @@ function setInputArguments(self, inputArguments)
   local value = newArgumentsValue(self, inputArguments)
   local inputArgumentsNode = self:path{"InputArguments"}
   inputArgumentsNode.Attrs.Value = value
-  self.Nodes:saveNode(inputArgumentsNode)
+  self.Nodes:saveNodes({inputArgumentsNode})
 end
 
 function setOutputArguments(self, outputArguments)
   local value = newArgumentsValue(self, outputArguments)
   local outputArgumentsNode = self:path{"OutputArguments"}
   outputArgumentsNode.Attrs.Value = value
-  self.Nodes:saveNode(outputArgumentsNode)
+  self.Nodes:saveNodes({outputArgumentsNode})
 end
 
 addField = function (self, browseName, dataType, rank, _) -- luacheck: ignore 212
@@ -519,7 +559,7 @@ addField = function (self, browseName, dataType, rank, _) -- luacheck: ignore 21
 
   node.Attrs.DataTypeDefinition = definition
 
-  self.Nodes:saveNode(node)
+  self.Nodes:saveNodes({node})
 end
 
 local function setFields(self, fields)
@@ -528,7 +568,7 @@ local function setFields(self, fields)
     tins(definition, field)
   end
   self.Node.Attrs.DataTypeDefinition = definition
-  self.Nodes:saveNode(self.Node)
+  self.Nodes:saveNodes({self.Node})
 end
 
 local function getField(self, fieldName)
@@ -689,9 +729,11 @@ newEnum = function(node, model, nodes)
 end
 
 newDataType = function(node, model, nodes)
-  if node.BaseId == "i=22" then
+  local info = nodes:getTypeInfo(node.Attrs.NodeId)
+  local baseId = info and info:getBaseId()
+  if baseId == "i=22" then
     return newStructure(node, model, nodes)
-  elseif node.BaseId == "i=29" then
+  elseif baseId == "i=29" then
     return newEnum(node, model, nodes)
   else
     error("Unknown data type")
@@ -700,22 +742,22 @@ end
 
 local editor = {}
 
-function editor:addObjectType(browseName)
+function editor:addObjectType(browseName, baseType)
   assert(type(browseName) == "string", "browseName must be a string")
   local objectTypeNode = createObjectTypeNode(self.Model, self.Nodes, browseName)
-  local baseObjectTypeNode = toObjectTypeNode(self.Nodes, BaseObjectTypeNodeId)
+  local baseObjectTypeNode =
+    toObjectTypeNode(self.Nodes, baseType, BaseObjectTypeNodeId)
   addReference(baseObjectTypeNode, objectTypeNode, HasSubtype)
-  self.Nodes:saveNode(objectTypeNode)
-  self.Nodes:saveNode(baseObjectTypeNode)
+  self.Nodes:saveNodes({objectTypeNode, baseObjectTypeNode})
   return newObjectType(objectTypeNode, self.Model, self.Nodes)
 end
 
-function editor:addVariableType(browseName)
+function editor:addVariableType(browseName, baseType)
   local variableTypeNode = createVariableTypeNode(self.Model, self.Nodes, browseName)
-  local baseVariableTypeNode = toVariableTypeNode(self.Nodes, BaseDataVariableType)
+  local baseVariableTypeNode =
+    toVariableTypeNode(self.Nodes, baseType, BaseDataVariableType)
   addReference(baseVariableTypeNode, variableTypeNode, HasSubtype)
-  self.Nodes:saveNode(variableTypeNode)
-  self.Nodes:saveNode(baseVariableTypeNode)
+  self.Nodes:saveNodes({variableTypeNode, baseVariableTypeNode})
   return newVariableType(variableTypeNode, self.Model, self.Nodes)
 end
 
@@ -726,34 +768,28 @@ function editor:addStructure(browseName, nodeId)
   end
 
   local dataTypeNode = createDataTypeNode(self.Model, self.Nodes, browseName, nodeId)
-  dataTypeNode.BaseId = DataTypeId.Structure
-  dataTypeNode.JsonId = self.Model:newNodeId()
-  dataTypeNode.BinaryId = self.Model:newNodeId()
-  dataTypeNode.DataTypeId = dataTypeNode.Attrs.NodeId
+  local jsonId = self.Model:newNodeId()
+  local binaryId = self.Model:newNodeId()
   addReference(baseDataTypeNode, dataTypeNode, HasSubtype)
 
-  local binaryNode = createObjectNode(self.Model, self.Nodes, "Default Binary", dataTypeNode.BinaryId)
-  binaryNode.BaseId = dataTypeNode.BaseId
-  binaryNode.JsonId = dataTypeNode.JsonId
-  binaryNode.BinaryId = dataTypeNode.BinaryId
-  binaryNode.DataTypeId = dataTypeNode.DataTypeId
+  local binaryNode = createObjectNode(
+    self.Model, self.Nodes, "Default Binary", binaryId)
   addReference(dataTypeNode, binaryNode, HasEncoding)
 
   local baseNodeType = self:getNode('i=76')
   addReference(binaryNode, baseNodeType.Node, HasTypeDefinition)
 
-  local jsonNode = createObjectNode(self.Model, self.Nodes, "Default JSON", dataTypeNode.JsonId)
-  binaryNode.BaseId = dataTypeNode.BaseId
-  binaryNode.JsonId = dataTypeNode.JsonId
-  jsonNode.BinaryId = dataTypeNode.BinaryId
-  jsonNode.DataTypeId = dataTypeNode.DataTypeId
+  local jsonNode = createObjectNode(
+    self.Model, self.Nodes, "Default JSON", jsonId)
   addReference(dataTypeNode, jsonNode, HasEncoding)
   addReference(jsonNode, baseNodeType.Node, HasTypeDefinition)
 
-  self.Nodes:saveNode(dataTypeNode)
-  self.Nodes:saveNode(binaryNode)
-  self.Nodes:saveNode(jsonNode)
-  self.Nodes:saveNode(baseDataTypeNode)
+  self.Nodes:saveNodes({
+    dataTypeNode,
+    binaryNode,
+    jsonNode,
+    baseDataTypeNode,
+  })
 
   return newStructure(dataTypeNode, self.Model, self.Nodes)
 end
@@ -781,8 +817,7 @@ function editor:addEnum(browseName, values, nodeId)
 
   addReference(baseDataTypeNode, dataTypeNode, HasSubtype)
 
-  self.Nodes:saveNode(dataTypeNode)
-  self.Nodes:saveNode(baseDataTypeNode)
+  self.Nodes:saveNodes({dataTypeNode, baseDataTypeNode})
 
   return newEnum(dataTypeNode, self.Model, self.Nodes)
 end
@@ -811,7 +846,7 @@ newEditNode = function(self, node)
   if not factory then
     error(BadNodeIdUnknown)
   end
-  self.Nodes:saveNode(node)
+  self.Nodes:saveNodes({node})
   return factory(node, self.Model, self.Nodes)
 end
 
@@ -844,9 +879,12 @@ end
 return {
   newBrowser = newBrowser,
   newEditor = function(model)
+    local nodes = address_space_create(
+      model.Nodes, {trackMutableReads = true})
+    nodes:setModel(model)
     local newEditor = {
       Model = model,
-      Nodes = address_space_create(model.Nodes),
+      Nodes = nodes,
     }
     setmetatable(newEditor, {__index=editor})
     return newEditor
