@@ -2,22 +2,26 @@
 local hasUserDb,sso=xedge.hasUserDb()
 
 ------------------------------------------------------------
-local function doIdErr(secretErr)
+local function doIdErr(secretErr,recovery)
 ?>
 <div class="center">
    <div class="alert"><p>Login failed: <?lsp=secretErr?></p></div>
-   <form method="post" class="form" style="width:100%;">
+   <form method="post" class="form" style="width:100%;" autocomplete="off">
+     <input name="recovery" type="hidden" value="<?lsp=recovery?>" />
      <div class="frow">
-      <input name="secret" type="text" placeholder="Enter new client secret value" />
+      <input name="secret" type="password" maxlength="512" required placeholder="Enter new client secret value" />
      </div>
-     <div class="frow"><input type="submit" value="Save"/></div>
+     <div class="frow">
+      <input name="expires" type="date" required />
+     </div>
+     <div class="frow"><input type="submit" value="Test and activate secret"/></div>
    </form>
 </div>
 <?lsp
 end
 
 ------------------------------------------------------------
-local function emitLogin(err,ssoErrCodes)
+local function emitLogin(err,ssoErrCodes,recovery)
    local secretErr
    if ssoErrCodes then
       -- https://learn.microsoft.com/en-us/entra/identity-platform/reference-error-codes
@@ -27,7 +31,7 @@ local function emitLogin(err,ssoErrCodes)
       }
       for _,code in ipairs(ssoErrCodes) do
 	 secretErr=idErrs[code]
-	 if secretErr then doIdErr(secretErr) return end
+	 if secretErr and recovery then doIdErr(secretErr,recovery) return end
       end
    end
 ?>
@@ -79,13 +83,17 @@ local trim=xedge.trim
 for k,v in pairs(data) do data[k]=trim(v) end
 
 local action
+local session=request:session()
+local function tooMany() emitLogin("Too many authenticated users") end
 if request:method() == "POST" then
-   local function tooMany() emitLogin("Too many authenticated users") end
-   if data.secret then
-      if xedge.ssoSetSecret(data.secret) then
-	 action=function() emitLogin(nil,{}) end
+   if data.recovery and sso then
+      local ok,err,recovery=sso.rotate(request,data.secret,data.expires,data.recovery)
+      if ok then
+	 action=function() end
+      elseif recovery then
+	 action=function() doIdErr(err,recovery) end
       else
-	 action=function() doIdErr("Invalid secret") end
+	 action=function() emitLogin(err) end
       end
    elseif data.locallogin then
       if hasUserDb then
@@ -104,26 +112,33 @@ if request:method() == "POST" then
       else
 	 action=emitOK -- fail
       end
-   elseif sso then -- SSO resp and we have sso
-      local header,payload,ecodes = sso.login(request)
-      if header then
-	 if request:login(payload.preferred_username,2,false) then
-	    request:session().xadmin=true
-	    action = function() emitOK(payload) end
-	 else
-	    action = tooMany
-	 end
-      else
-	 action = function() emitLogin(payload,ecodes or {}) end -- Payload is now 'err'
-      end
    else
       action=emitOK -- fail
    end
 else
-   if request:user() then
+   if sso and (data.code or data.error) then
+      local header,payload,ecodes,recovery=sso.login(request)
+      session=session or request:session(true)
+      if header then
+	 if request:login(payload.tid..":"..payload.oid,2,false) then
+	    session.xadmin=true
+	 else
+	    session.msSsoResult={err="Too many authenticated users"}
+	 end
+      else
+	 session.msSsoResult={err=payload,codes=ecodes or {},recovery=recovery}
+      end
+      response:sendredirect"/rtl/login/"
+      action=function() end
+   elseif session and session.msSsoResult then
+      local result=session.msSsoResult
+      session.msSsoResult=nil
+      action=function() emitLogin(result.err,result.codes,result.recovery) end
+   elseif request:user() then
       action=(hasUserDb or sso) and not request:session().xadmin and emitLogin or emitOK
    elseif data.sso and sso then
-      sso.sendredirect(request)
+      local ok,err=sso.sendredirect(request)
+      action=ok and function() end or function() emitLogin(err) end
    elseif hasUserDb or sso then
       action=emitLogin
    else

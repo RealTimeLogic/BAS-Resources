@@ -13,6 +13,25 @@ const dp=p=>{
   return`/${a.join("/")}${a.length?"/":""}`;
 };
 
+function authenticationError(open,message,url=location.href){
+  message=message||"Your session has expired. Sign in again to continue.";
+  const b=el("button",{type:"button",textContent:"Sign in again"}),c=el("div");
+  b.dataset.action="sign-in";
+  b.onclick=()=>location.assign(url);
+  c.append(el("p",message),b);
+  open({title:"Sign-in required",content:c});
+  return Object.assign(new Error(message),{name:"UnauthorizedError"});
+}
+
+async function responseError(r,open,url){
+  let m=`${r.status} ${r.statusText}`;
+  try{
+    const t=await r.text();
+    if(t){try{const x=JSON.parse(t);m=x.emsg||x.err||m}catch{m=t}}
+  }catch{}
+  return r.status===401?authenticationError(open,m,url):new Error(m);
+}
+
 export function mount(h,o={}){
   if(!(h instanceof Element))throw new TypeError("Host element required");
 
@@ -58,40 +77,24 @@ export function mount(h,o={}){
     s.r.add(c);
     try{
       const r=await fetch(v,{...o,signal:c.signal});
-      if(!r.ok){
-        let m=`${r.status} ${r.statusText}`;
-        try{
-          const t=await r.text();
-          if(t){try{const x=JSON.parse(t);m=x.emsg||x.err||m}catch{m=t}}
-        }catch{}
-        throw new Error(m);
-      }
+      if(!r.ok)throw await responseError(r,ui,b.href);
       return r;
     }finally{s.r.delete(c)}
   }
 
   async function ls(p){
     p=dp(p);
-    const c=new AbortController;
-    s.r.add(c);
-    try{
-      const r=await fetch(u(p,{cmd:"lj"}),{signal:c.signal});
-      if(!r.ok){
-        let m=`${r.status} ${r.statusText}`;
-        try{const e=await r.json();m=e.emsg||e.err||m}catch{}
-        throw new Error(m);
-      }
-      s.h=r.headers.has("BaWfsSes");
-      const a=await r.json();
-      if(!Array.isArray(a))throw new Error("Bad directory response");
-      return a.map(x=>{
-        if(!x||typeof x.n!=="string"||typeof x.s!=="number"||
-          typeof x.t!=="number"||!x.n||x.n==="."||x.n===".."||
-          x.n.includes("/")||x.n.includes("\\")||x.n.includes("\0"))
-          throw new Error("Bad directory entry");
-        return{...x,path:ep(p,x)};
-      });
-    }finally{s.r.delete(c)}
+    const r=await rq(u(p,{cmd:"lj"}));
+    s.h=r.headers.has("BaWfsSes");
+    const a=await r.json();
+    if(!Array.isArray(a))throw new Error("Bad directory response");
+    return a.map(x=>{
+      if(!x||typeof x.n!=="string"||typeof x.s!=="number"||
+        typeof x.t!=="number"||!x.n||x.n==="."||x.n===".."||
+        x.n.includes("/")||x.n.includes("\\")||x.n.includes("\0"))
+        throw new Error("Bad directory entry");
+      return{...x,path:ep(p,x)};
+    });
   }
 
   async function ll(p,v){
@@ -308,6 +311,7 @@ export function mount(h,o={}){
         rp();rl();rt();
         if(o.history){const v=u(p);if(v.pathname!==location.pathname)history.pushState(0,"",v)}
       }catch(e){
+        if(e.name==="UnauthorizedError"){ms(e.message,1);return}
         if(e.name!=="AbortError")ms(e.message,1);
         throw e;
       }finally{if(n===s.n)r.removeAttribute("aria-busy")}
@@ -359,7 +363,8 @@ export function mount(h,o={}){
       x.onload=()=>{
         let v,m=`${x.status} ${x.statusText}`;
         try{v=JSON.parse(x.responseText);m=v.emsg||v.err||m}catch{}
-        if(x.status>=200&&x.status<300&&!v?.err)ok();else no(new Error(m));
+        if(x.status>=200&&x.status<300&&!v?.err)ok();
+        else no(x.status===401?authenticationError(ui,m,b.href):new Error(m));
       };
       x.onerror=()=>no(new Error("Upload failed"));
       x.onabort=()=>no(new DOMException("Upload canceled","AbortError"));
@@ -483,7 +488,7 @@ export function mount(h,o={}){
     if(!p)return window.open(a.url(x),"_blank","noopener");
     const c=ui({title:x.n});
     try{await p.render(c,x,a)}
-    catch(e){c.textContent=e.message;console.error("WFM preview",p.id,e)}
+    catch(e){c.textContent=e.message;if(e.name!=="UnauthorizedError")console.error("WFM preview",p.id,e)}
   }
 
   s.q.push(on(r,"click","button, tr",async(e,t)=>{
@@ -635,7 +640,7 @@ export function search(a){
 export function text(a){
   return a.add("preview",{id:"text",match:x=>x.n.endsWith(".txt"),async render(c,x){
     const r=await fetch(a.url(x));
-    if(!r.ok)throw new Error(`${r.status} ${r.statusText}`);
+    if(!r.ok)throw await responseError(r,a.ui.open,a.url("/"));
     c.textContent=await r.text();
   }});
 }

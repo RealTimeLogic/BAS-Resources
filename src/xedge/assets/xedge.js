@@ -1136,6 +1136,13 @@ const authenticationFormObj = [
 		placeholder: "Enter Client Secret",
 	    },
 	    {
+		el: "input",
+		type: "date",
+		label: "OpenidClientSecretExpires",
+		name: "Expiration date",
+		description: "The expiration date shown for this client secret in Microsoft Entra ID.",
+	    },
+	    {
 		id: "OpenidSave",
 		el: "input",
 		type: "button",
@@ -1394,6 +1401,7 @@ function ideCfg(e) {
 			elems.OpenidClientId.value=oid.client_id;
 		    if(oid.client_secret)
 			elems.OpenidClientSecret.value=oid.client_secret;
+		    elems.OpenidClientSecretExpires.value=oid.client_secret_expires || new Date().toISOString().slice(0,10);
 		    elems.AuthSave.onclick=()=>{
 			let data={
 			    name:elems.AuthName.value.trim(),
@@ -1411,6 +1419,7 @@ function ideCfg(e) {
 			    tenant:elems.OpenidTenantId.value.trim(),
 			    client_id:elems.OpenidClientId.value.trim(),
 			    client_secret:elems.OpenidClientSecret.value.trim(),
+			    client_secret_expires:elems.OpenidClientSecretExpires.value,
 			};
 			sendCmd("openid",(rsp)=>{
 			    if(rsp) closeEditor(editorId);

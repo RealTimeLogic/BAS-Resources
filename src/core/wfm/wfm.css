@@ -310,6 +310,16 @@
   font-size: 1.25rem;
 }
 
+.wfm-dialog [data-action="sign-in"] {
+  padding: .4rem .65rem;
+  color: #172019;
+  background: var(--wfm-accent);
+  border: 1px solid var(--wfm-accent);
+  border-radius: .2rem;
+  cursor: pointer;
+  font-weight: 650;
+}
+
 .wfm-search {
   display: flex;
   flex-wrap: wrap;

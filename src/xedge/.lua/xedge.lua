@@ -51,7 +51,7 @@ end
 
 local function setSecH(dir)
    dir:header{
-      ["Content-Security-Policy"] = "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net 'unsafe-inline' blob:; connect-src 'self' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; img-src 'self' data:; media-src 'self' https://simplemq.com; font-src 'self' https://cdn.jsdelivr.net; worker-src blob:;",
+      ["Content-Security-Policy"] = "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net 'unsafe-inline' blob:; connect-src 'self' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; img-src 'self' data:; media-src 'self' https://simplemq.com; font-src 'self' data: https://cdn.jsdelivr.net; worker-src blob:;",
       ["X-Content-Type-Options"] = "nosniff",
    }
 end
@@ -778,28 +778,36 @@ end
 
 local function ssoInit()
    local id=xcfg.openid
-   sso=nil
-   if id and #(id.tenant or "") > 0 and #(id.client_id or "") > 0 then
-      sso=require"ms-sso".init(id)
+   if sso then
+      sso.close()
+      sso=nil
    end
-end
-
-function xedge.ssoSetSecret(secret)
-   if xcfg.openid then
-      local oldsec=xcfg.openid.client_secret
-      xcfg.openid.client_secret=secret
-      if require"ms-sso".validate(xcfg.openid) then
-	 saveCfg()
-	 return true
-      end
-      xcfg.openid.client_secret=oldsec
+   if not id then return true end
+   if not id.redirect_uri then return nil,"Save the OpenID settings to set the redirect URI" end
+   local function ssoLog(message)
+      xedge.elog({ts=true},"SSO: %s",message)
    end
+   local function notify(event)
+      ssoLog(event.kind..": "..event.message..
+             (event.expires and " Expiration: "..event.expires or ""))
+   end
+   local function savecredential(secret,metadata)
+      id.client_secret=secret
+      id.client_secret_expires=metadata.expires
+      return saveCfg()
+   end
+   local mod=require"ms-sso"
+   local ok,value=pcall(mod.init,id,{log=ssoLog,notify=notify,
+                                    savecredential=savecredential})
+   if not ok then return nil,value end
+   sso=value
+   return true
 end
 
 local function xinit(aio,rwCfgFile,_tldir,_rtld,onAuth)
    onAuth=onAuth or function() end
    tldir=_tldir
-   saveCfg = rwCfgFile and function() rwCfgFile(xcfg) end or function() end
+   saveCfg = rwCfgFile and function() return rwCfgFile(xcfg) end or function() return true end
    local cfg=rwCfgFile and rwCfgFile() or {apps={}}
    ios=ba.io()
    ios.vm=nil
@@ -837,7 +845,8 @@ local function xinit(aio,rwCfgFile,_tldir,_rtld,onAuth)
    xcfg.openid=cfg.openid
    if "table" == type(cfg.elog) then  xcfg.elog=cfg.elog end
    smtp=xcfg.smtp
-   ssoInit()
+   local ssoOK,ssoErr=ssoInit()
+   if not ssoOK then log("Cannot initialize SSO: %s",ssoErr) end
    rtld:insert(tldir)
    elogInit()
    local lockDir -- Scan and look for writable DAV lock dir.
@@ -1093,22 +1102,24 @@ local commands={
 		  ssoInit()
 		  saveCfg()
 		  installAuth()
-	       elseif #d.tenant > 20 and #d.client_id > 20 and #d.client_secret > 10 then
-		  local ok,err,desc=require"ms-sso".validate(d)
-		  if ok then
+	       elseif #d.tenant > 20 and #d.client_id > 20 and #d.client_secret > 10 and
+		      #(d.client_secret_expires or "") > 0 then
+		  local origin=cmd:url():match"^https?://[^/]+"
+		  if origin then
+		     d.redirect_uri=origin.."/rtl/login/"
+		     local previous=xcfg.openid
 		     xcfg.openid=d
-		     saveCfg()
-		     ssoInit()
-		     installAuth()
+		     local ok,err=ssoInit()
+		     if ok and saveCfg() then
+			installAuth()
+		     else
+			xcfg.openid=previous
+			ssoInit()
+			rsp.ok,rsp.err=false,err or "Cannot save configuration"
+		     end
 		  else
-		     rsp.ok,rsp.err=false,(desc or err)
+		     rsp.ok,rsp.err=false,"Cannot determine the redirect URI"
 		  end
-	       elseif #d.tenant > 20 and #d.client_id > 20 and #d.client_secret==0 then
-		  d.client_secret=nil
-		  xcfg.openid=d
-		  ssoInit()
-		  saveCfg()
-		  installAuth()
 	       else
 		  rsp.ok,rsp.err=false,"Invalid data"
 	       end
@@ -1355,6 +1366,7 @@ loadPlugins=function()
 end
 
 local function onunload()
+   if sso then sso.close() end
    for name,app in pairs(apps) do if(app.running) then stopApp(name) end end
 end
 
