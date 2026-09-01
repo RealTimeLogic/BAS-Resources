@@ -20,29 +20,30 @@ end
 return function(gpkey,upkey)
    assert(nil==ba.tpm)
    local keys={}
-   local function tpmGetKey(kname)
-      local key=keys[kname]
-      if not key then error(sfmt("ECC key %s not found",tostring(kname)),3) end
+   local function makeKey(kname,op)
+      op=op or {}
+      if op.key and op.key ~= "ecc" then error("TPM can only create ECC keys",3) end
+      local newOp={}
+      for k,v in pairs(op) do newOp[k]=v end
+      newOp.rnd=PBKDF2(maxHash,"#$"..kname,upkey,5,1024)
+      local key=createkey(newOp)
+      keys[kname]=key
       return key
    end
+   local function tpmGetKey(kname) return keys[kname] or makeKey(kname) end
    local function tpmSign(h,kname,op) return sign(h,tpmGetKey(kname),op) end
    local function tpmJwtsign(p,kname,op) return jwtsign(p,function(h) return sign(h,tpmGetKey(kname)) end,op) end
    local function tpmKeyparams(kname) return keyparams(tpmGetKey(kname)) end
    local function tpmCreatecsr(kname,...) return createcsr(tpmGetKey(kname),...) end
    local function tpmCreatekey(kname,op)
       if keys[kname] then error(sfmt("ECC key %s exists",kname),2) end
-      op = op or {}
-      if op.key and op.key ~= "ecc" then error("TPM can only create ECC keys",2) end
-      local newOp={}
-      for k,v in pairs(op) do newOp[k]=v end
-      newOp.rnd=PBKDF2(maxHash,"#$"..kname,upkey,5,1024)
-      local key=createkey(newOp)
-      keys[kname]=key
+      makeKey(kname,op)
       return true
    end
    local function tpmHaskey(kname) return keys[kname] and true or false end
    local function tpmSharkcert(kname,certdata) return sharkcert(certdata,tpmGetKey(kname)) end
-   require"acme/engine".setTPM{jwtsign=tpmJwtsign,keyparams=tpmKeyparams,createcsr=tpmCreatecsr,createkey=tpmCreatekey,haskey=tpmHaskey}
+   require"acme/engine".setTPM{jwtsign=tpmJwtsign,keyparams=tpmKeyparams,
+      createcsr=tpmCreatecsr,createkey=tpmCreatekey,haskey=tpmHaskey}
    local t={}
    function t.haskey(k) return tpmHaskey(k) end
    function t.createkey(k,...) return tpmCreatekey(k,...) end

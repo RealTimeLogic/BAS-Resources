@@ -189,7 +189,8 @@ failure. Authentication failures are retried after login.
 Certificate management selected by `acmd`:
 
 - `isreg`: returns registration status, email/name when known, WAN and socket
-  addresses, portal URL, and reverse-connection state.
+  addresses, portal URL, and `reverseStatus` with enabled, connected, native
+  HTTP status, and established-connection count.
 - `available`: requires `name`; returns `available`.
 - `auto`: accepts `revcon` and, for registration, `email` and `name`; returns
   `ok` or an error.

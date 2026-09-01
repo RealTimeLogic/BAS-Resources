@@ -1,6 +1,8 @@
 #!/bin/bash
 
-export PATH=$PWD/../tools/linux:$PATH
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd) || exit 1
+cd "$script_dir" || exit 1
+export PATH="$script_dir/../tools/linux:$PATH"
 chmod +x ../tools/linux/*
 executables="zip curl SharkSSLParseCAList bin2c"
 for i in $executables; do
@@ -10,7 +12,7 @@ for i in $executables; do
     fi
 done
 
-if [ -f "xedge.zip" ]; then rm xedge.zip; fi
+if [ -f "Xedge.zip" ]; then rm Xedge.zip; fi
 if [ -d "XedgeBuild" ]; then rm -rf XedgeBuild; fi
 
 mkdir XedgeBuild || exit 1
@@ -21,14 +23,17 @@ shopt -s dotglob
 
 cp -R ../../src/core/* . || exit 1
 cp -R ../../src/xedge/* . || exit 1
-cp -R ../../src/mako/.lua/acme/* .lua/acme || exit 1
 
 read -p "Do you want to include OPC-UA (y/n)? " userResponse
 if [ "$userResponse" = "y" ]; then
     cp -R ../../src/opcua .lua/ || exit 1
 fi
 
-read -p "Do you want to use the large cacert.shark or do you want to create a new with minimal certs: large/small (l/s)? " userResponse
+if [ -n "$XedgeCaStore" ]; then
+    userResponse=${XedgeCaStore:0:1}
+else
+    read -p "Do you want to use the large cacert.shark or do you want to create a new with minimal certs: large/small (l/s)? " userResponse
+fi
 if [ "$userResponse" = "s" ]; then
     cd .certificate || exit 1
     rm cacert.shark || exit 1

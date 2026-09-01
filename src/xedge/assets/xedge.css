@@ -122,8 +122,23 @@ input[type="button"]:hover {
   background-color: var(--greenhover);
   border-color: var(--greenhover);
 }
+input[type="button"]:disabled,
+input[type="button"]:disabled:hover {
+  background-color: var(--inputbg);
+  border-color: var(--inputbg);
+  color: #bdbdbd;
+  cursor: not-allowed;
+  opacity: .7;
+}
 
 a {color:var(--yellow);}
+
+.connection-status {display:flex;align-items:center;gap:.6em;margin:.8em 0 1.2em}
+.connection-led {width:.9em;height:.9em;border-radius:50%;background:var(--red);box-shadow:0 0 .35em currentColor}
+.connection-led.red {color:var(--red);background:var(--red)}
+.connection-led.yellow {color:var(--yellow);background:var(--yellow)}
+.connection-led.green {color:var(--green);background:var(--green)}
+.certificate-working {color:var(--yellow);font-weight:bold}
 
 
 button, input[type="submit"] {
