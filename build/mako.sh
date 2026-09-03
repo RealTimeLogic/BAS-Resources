@@ -21,6 +21,13 @@ cp -R ../../src/core/* . || exit 1
 cp -R ../../src/mako/* . || exit 1
 cp -R ../../src/opcua .lua/ || exit 1
 
+for required in .lua/acme/runtime.lua .lua/acme/sharktrust.lua .lua/acme/_server.lua; do
+    if [ ! -f "$required" ]; then
+        echo "Required ACME module $required was not packaged."
+        exit 1
+    fi
+done
+
 if [ -d "../../../lua-protobuf" ]; then
     echo "Including lua-protobuf and Sparkplug lib"
     cp ../../../lua-protobuf/protoc.lua .lua/ || exit 1

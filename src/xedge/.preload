@@ -1,8 +1,18 @@
 local secret="See https://github.com/RealTimeLogic/BAS-Resources/tree/main/src/xedge"
 
 -- .preload for the LSP Application Manager
+local modules,env={}
+env=setmetatable({require=function(name)
+   local m=modules[name]
+   if m then return m end
+   local path=".lua/"..name:gsub("%.","/")..".lua"
+   if not io:stat(path) then return require(name) end
+   m=assert(io:loadfile(path,env))()
+   modules[name]=m or true
+   return modules[name]
+end},{__index=_ENV})
 local xinit
-xinit,onunload=io:dofile(".lua/xedge.lua", _ENV)
+xinit,onunload=io:dofile(".lua/xedge.lua",env)
 local symmetric=ba.crypto.symmetric
 
 local function cfgIo(key)
@@ -86,10 +96,9 @@ local function runXedge()
 	    xedge.appsd:setauth(ba.create.authenticator(mako.udb()))
 	 end
       end
-   end,{io=cfgio,install=require"acme/_server"(ba.tpm)})
+   end,{io=cfgio,install=env.require"acme/_server"(ba.tpm)})
    xinit=nil
 end
 dir:unlink()
 dir=nil
-mako.createloader(io)
 runXedge()

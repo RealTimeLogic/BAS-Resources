@@ -1,5 +1,5 @@
 local M={}
-local Engine,Manager,ST,Dns=require"acme/engine",require"acme/manager",require"acme/sharktrust",require"acme/dns"
+local Engine,Manager=require"acme/engine",require"acme/manager"
 
 local function problem(code,message) return {code=code,message=message or code} end
 local function callback(cb,value,err) if cb then cb(value,err) end end
@@ -12,17 +12,28 @@ function M.create(options)
    local deps=options.dependencies or {}
    local timerFactory=deps.timer or function(action) return ba.timer(action) end
    local retryFirst,retryMax=deps.retryDelay or 30000,deps.retryMaxDelay or 300000
-   local engine=Engine.create{tpm=options.tpm,dependencies=options.engineDependencies}
+   local engine,err=Engine.create{tpm=options.tpm,dependencies=options.engineDependencies}
+   if not engine then return nil,err end
    local challenge,st
+   local function fail(problem)
+      if challenge and challenge.close then challenge:close() elseif st then st:close() end
+      engine:close()
+      return nil,problem
+   end
    if options.sharktrust then
-      st=assert(ST.create(options.sharktrust))
-      challenge=assert(Dns.createSharkTrust{client=st,store=options.store,address=options.address,
-         propagationDelay=config.propagationDelay,notify=options.notify,dependencies=options.dnsDependencies})
+      local ST,Dns=require"acme/sharktrust",require"acme/dns"
+      st,err=ST.create(options.sharktrust)
+      if not st then return fail(err) end
+      challenge,err=Dns.createSharkTrust{client=st,store=options.store,address=options.address,
+         propagationDelay=config.propagationDelay,notify=options.notify,dependencies=options.dnsDependencies}
+      if not challenge then return fail(err) end
    elseif config.challenge then
       challenge=config.challenge
    end
-   local manager=assert(Manager.create{io=options.io,engine=engine,install=options.install,
-      notify=options.notify,renewAllowed=options.renewAllowed,path=options.path})
+   local manager
+   manager,err=Manager.create{io=options.io,engine=engine,install=options.install,
+      notify=options.notify,renewAllowed=options.renewAllowed,path=options.path}
+   if not manager then return fail(err) end
    local runtime,started,closed,starting,retryTimer,retryDelay=
       {challenge=challenge},false,false,false,nil,retryFirst
    local startAttempt
@@ -149,18 +160,26 @@ function M.create(options)
       return startAttempt(cb)
    end
 
+   local function noSharkTrust(cb) return callback(cb,nil,problem"sharktrust_not_configured") end
    function runtime:isRegistered(cb)
-      if not challenge or not st then callback(cb,nil,problem"sharktrust_not_configured") return end
+      if not st then return noSharkTrust(cb) end
       return challenge:isRegistered(cb)
    end
    function runtime:isAvailable(name,cb)
-      if not challenge or not st then callback(cb,nil,problem"sharktrust_not_configured") return end
+      if not st then return noSharkTrust(cb) end
       return challenge:isAvailable(name,cb)
    end
-   function runtime:setIpAddress(request,cb) return challenge:setIpAddress(request,cb) end
-   function runtime:rotateCredential(cb) return challenge:rotateCredential(cb) end
-   function runtime:reverseConnection(enable) options.reverse=enable and true or false return st:reverseConnection(enable) end
+   function runtime:setIpAddress(request,cb)
+      if not st then return noSharkTrust(cb) end
+      return challenge:setIpAddress(request,cb)
+   end
+   function runtime:reverseConnection(enable)
+      if not st then return nil,problem"sharktrust_not_configured" end
+      options.reverse=enable and true or false
+      return st:reverseConnection(enable)
+   end
    function runtime:switchService(service,cb) return manager:switchService(service,{rebuild=true},cb) end
+   function runtime:renew(domain,cb) return manager:renew(domain,{force=true},cb) end
    function runtime:status()
       local value=manager:status()
       value.registration=challenge and challenge.status and challenge:status() or nil

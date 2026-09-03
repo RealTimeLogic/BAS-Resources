@@ -4,7 +4,7 @@ local errorTable,copy,safeCallback,isHex,_,_,reject,ipv4=require"acme/_util"()
 local function validClient(client)
    if type(client) ~= "table" then return false end
    for _,name in ipairs{"enroll","isAvailable","isRegistered","setIpAddress","setAcmeRecord",
-      "removeAcmeRecord","getWan","rotateCredential","setCredential","credential","identity","close"} do
+      "removeAcmeRecord","getWan","setCredential","credential","identity","close"} do
       if type(client[name]) ~= "function" then return false end
    end
    return true
@@ -181,19 +181,6 @@ function M.createSharkTrust(options)
    function adapter:isRegistered(callback) return deviceCall("isRegistered",nil,callback) end
    function adapter:setIpAddress(request,callback) return deviceCall("setIpAddress",request,callback) end
    function adapter:getWan(callback) return deviceCall("getWan",nil,callback) end
-
-   function adapter:rotateCredential(callback)
-      if type(callback) ~= "function" then return reject(callback,"invalid_callback") end
-      if not enter("rotateCredential",callback) then return end
-      withState(function(_,problem) if problem then leave(callback,nil,problem) end end,function(saved)
-         client:rotateCredential(function(newCredential,stored)
-            local candidate=copy(saved)
-            candidate.credential,candidate.updatedAt=newCredential,now()
-            saveState(candidate,function(value,saveProblem) stored(value and true or nil,saveProblem) end)
-         end,function(result,problem) leave(callback,result and copy(state),problem) end)
-      end)
-      return true
-   end
 
    function adapter:switchIdentity(value,switchOptions,callback)
       if type(callback) ~= "function" then return reject(callback,"invalid_callback") end

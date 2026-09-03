@@ -948,11 +948,11 @@ local function acmeResponse(data)
    data.revcon=xcfg.revcon and true or false
    data.reverseStatus=status and status.reverse or
       {enabled=data.revcon,connected=false,status=0,connections=0}
-   data.certificateReady=ready
    data.certificateRetrying=status and status.retryPending or false
-   if ready then acmeWorkPending=false end
-   data.certificateWorking=not ready and (not acmeClockReady or acmeWorkPending and not status or
-      status and (status.starting or status.retryPending or status.operation)) and true or false
+   local busy=status and (status.starting or status.retryPending or status.operation)
+   if ready and acmeWorkPending and status and status.started and not busy then acmeWorkPending=false end
+   data.certificateWorking=(not acmeClockReady or acmeWorkPending or busy) and true or false
+   data.certificateReady=ready and not data.certificateWorking
    return data
 end
 

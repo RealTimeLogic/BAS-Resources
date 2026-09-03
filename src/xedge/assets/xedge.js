@@ -1484,7 +1484,7 @@ function ideCfg(e) {
 		    alert(`Cannot connect to SharkTrustX portal ${rsp.portal}`);
 		    return;
 		}
-	let elems={},statusTimer,autoPending=false,formBusy=false;
+	let elems={},statusTimer,autoPending=false,autoRequest=false,formBusy=false;
 	let editorId=createEditor(" Certificate",null,null,mkForm(certificateFormObj,elems),
 	    ()=>clearInterval(statusTimer));
 	elems.SetCertStatus.setAttribute("role","status");
@@ -1517,8 +1517,8 @@ function ideCfg(e) {
 	    connectionError=value.connectionError ?
 		`Cannot connect to ${value.portal}: ${value.connectionError}` : "";
 	    if(autoPending) {
-		if(value.certificateReady) closeEditor(editorId);
-		else if(value.certificateWorking)
+		if(!autoRequest && value.certificateReady) closeEditor(editorId);
+		else if(autoRequest || value.certificateWorking)
 		    working(true,value.certificateRetrying ?
 			"A temporary network problem occurred. Certificate management is retrying in the background..." :
 			"Certificate management is working in the background. This can take a few minutes...");
@@ -1589,9 +1589,10 @@ function ideCfg(e) {
 		      secret:manual ? elems.SetCertSecret.value.trim() : undefined};
 		};
 		function sendAuto(d) {
-		  autoPending=true;
+		  autoPending=autoRequest=true;
 		  working(true,"Applying settings and requesting a certificate. This can take a few minutes. The dialog will close when finished.");
 		  sendAcmeCmd("auto",(rsp)=>{
+		      autoRequest=false;
 		      if(rsp && !rsp.pending) closeEditor(editorId);
 		      else if(!rsp) autoPending=false,working(false);
 		  },d);

@@ -18,6 +18,14 @@ mkdir XedgeBuild || exit 1
 cd XedgeBuild || exit 1
 
 cp -R ../../src/xedge/. . || exit 1 
+mkdir -p .lua/acme || exit 1
+cp -R ../../src/core/.lua/acme/. .lua/acme/ || exit 1
+for required in .lua/acmeconfig.lua .lua/acme/runtime.lua .lua/acme/sharktrust.lua .lua/acme/_server.lua; do
+    if [ ! -f "$required" ]; then
+        echo "Required ACME module $required was not packaged."
+        exit 1
+    fi
+done
 rm -f README.md
 rm -f .config
 rm -rf .certificate

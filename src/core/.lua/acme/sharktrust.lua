@@ -10,8 +10,8 @@ local function normalizePortalUrl(value)
    value=value:gsub("/+$","")
    local authority,path=value:match("^(https://[^/]+)(/.*)$")
    if not authority then authority,path=value,"" end
-   if path == "" then path="/cmdv2.lsp" end
-   if path ~= "/cmdv2.lsp" then return nil,errorTable("invalid_portal_url") end
+   if path == "" then path="/sharktrust.lsp" end
+   if path ~= "/sharktrust.lsp" then return nil,errorTable("invalid_portal_url") end
    return authority..path
 end
 
@@ -54,14 +54,14 @@ function M.create(options)
       credential=string.lower(options.credential)
    end
 
-   local identityOK,identityProof=pcall(proof,"BACME2-IDENTITY\0"..zoneKey)
+   local identityOK,identityProof=pcall(proof,"SHARKTRUST-IDENTITY\0"..zoneKey)
    if not identityOK or type(identityProof) ~= "string" or #identityProof ~= 32 then
       return nil,errorTable("proof_failed")
    end
    local identity={portalUrl=portalUrl,
       zoneIdentity=ba.b64urlencode(ba.crypto.hash"sha256"(zoneKey)(identityProof)(true,"binary"))}
    identityProof=nil
-   local clients,closeCallbacks,client,active,closed,rotating={},{},{},0,false,false
+   local clients,closeCallbacks,client,active,closed={},{},{},0,false
    local reverse,reverseEnabled
 
    local function stopReverse()
@@ -71,7 +71,7 @@ function M.create(options)
    local function startReverse()
       if not isHex(credential,64) then return nil,errorTable("not_enrolled",nil,{status=401}) end
       if not reverseFactory then return nil,errorTable("reverse_connection_unavailable") end
-      local ok,signature=pcall(proof,"BACME2-DEVICE\0"..credential.."\0")
+      local ok,signature=pcall(proof,"SHARKTRUST-DEVICE\0"..credential.."\0")
       if not ok or type(signature) ~= "string" or #signature ~= 32 then
          return nil,errorTable("proof_failed")
       end
@@ -81,7 +81,7 @@ function M.create(options)
       stopReverse()
       reverse=reverseFactory(op)
       reverse:token{Authorization="Bearer "..credential,
-         ["X-BACME-Proof"]=ba.b64urlencode(signature)}
+         ["X-SharkTrust-Proof"]=ba.b64urlencode(signature)}
       return true
    end
 
@@ -116,7 +116,7 @@ function M.create(options)
       end
       header=copy(header or {})
       header["Content-Type"]="application/json"
-      header["X-BACME-Proof"]=ba.b64urlencode(signature)
+      header["X-SharkTrust-Proof"]=ba.b64urlencode(signature)
       local response,requestErr=httpRequest(httpFactory,httpOptions,clients,{
          trusted=true,
          url=portalUrl,
@@ -127,7 +127,7 @@ function M.create(options)
       if not response then return nil,requestErr end
       local status,decodedOK=response.status
       decodedOK,response=pcall(jsonDecode,response.body)
-      if not decodedOK or type(response) ~= "table" or response.version ~= "2.0" then
+      if not decodedOK or type(response) ~= "table" then
          return nil,errorTable("invalid_response","The SharkTrust response is not valid JSON",{status=status})
       end
       if status and status >= 200 and status < 300 and type(response.result) == "table" then
@@ -137,9 +137,7 @@ function M.create(options)
       local code=serverError.code or "http_error"
       return nil,errorTable(code,
          serverError.message or "SharkTrust HTTP status "..tostring(status),{
-            status=status,
-            temporary=status == 429 or status == 409 and code == "rotation_in_progress" or
-               (status and status >= 500) or false
+            status=status,temporary=status == 429 or (status and status >= 500) or false
          })
    end
 
@@ -180,11 +178,11 @@ function M.create(options)
       local body=copy(data or {})
       body.command=command
       return post(body,{Authorization="Bearer "..selectedCredential},
-         "BACME2-DEVICE\0"..selectedCredential.."\0")
+         "SHARKTRUST-DEVICE\0"..selectedCredential.."\0")
    end
 
    local function zonePost(body,purpose)
-      return post(body,{["X-BACME-Zone-Key"]=zoneKey},purpose..zoneKey.."\0")
+      return post(body,{["X-SharkTrust-Zone-Key"]=zoneKey},purpose..zoneKey.."\0")
    end
 
    local function enrollmentError(problem)
@@ -202,7 +200,7 @@ function M.create(options)
          return reject(callback,"invalid_name")
       end
       return begin(callback,function()
-         local result,requestErr=zonePost({command="IsAvailable",name=name},"BACME2-AVAILABLE\0")
+         local result,requestErr=zonePost({command="IsAvailable",name=name},"SHARKTRUST-AVAILABLE\0")
          if not result then return nil,requestErr end
          if type(result.available) ~= "boolean" or type(result.name) ~= "string" then
             return nil,errorTable("invalid_response")
@@ -215,7 +213,7 @@ function M.create(options)
       local body,err=enrollmentBody(request)
       if not body then return reject(callback,err.code,err.message) end
       return begin(callback,function()
-         local result,requestErr=zonePost(body,"BACME2-REGISTER\0")
+         local result,requestErr=zonePost(body,"SHARKTRUST-REGISTER\0")
          if not result then return nil,enrollmentError(requestErr) end
          if type(result.deviceId) ~= "string" or type(result.name) ~= "string" or
             not isHex(result.credential,64) then
@@ -285,52 +283,6 @@ function M.create(options)
       if reverse then status,connections=reverse:status() end
       return {enabled=reverseEnabled == true,connected=status == 202,
          status=status,connections=connections}
-   end
-
-   function client:rotateCredential(saveCredential,callback)
-      if type(saveCredential) ~= "function" then return reject(callback,"invalid_store") end
-      if type(callback) ~= "function" then return reject(callback,"invalid_callback") end
-      if rotating then return reject(callback,"rotation_in_progress",nil,{temporary=true}) end
-      if closed then return reject(callback,"client_closed") end
-      rotating=true
-      active=active+1
-      local oldCredential=credential
-      local function done(result,err) rotating=false finish(callback,result,err) end
-      run(function()
-         local result,requestErr=devicePost("RotateCredential",nil,oldCredential)
-         if not result then
-            if requestErr and requestErr.code == "transport_error" then
-               if requestErr.phase == "request" then return done(nil,requestErr) end
-               local oldResult,oldErr=devicePost("IsRegistered",nil,oldCredential)
-               if oldResult then
-                  return done(nil,errorTable("rotation_not_committed",nil,{temporary=true}))
-               end
-               if oldErr and oldErr.status == 401 then
-                  return done(nil,errorTable("rotation_reenrollment_required"))
-               end
-               return done(nil,errorTable("rotation_state_unknown",nil,{temporary=true}))
-            end
-            return done(nil,requestErr)
-         end
-         if not isHex(result.credential,64) then return done(nil,errorTable("invalid_response")) end
-         local newCredential=result.credential:lower()
-         local saved=false
-         local function savedCallback(ok,saveErr)
-            if saved then return end
-            saved=true
-             if ok then
-                credential=newCredential
-                restartReverse()
-                done({credential=newCredential})
-            else
-               done(nil,errorTable("credential_persistence_failed",
-                  type(saveErr) == "table" and saveErr.message or tostring(saveErr)))
-            end
-         end
-         local saveOK,saveErr=pcall(saveCredential,newCredential,savedCallback)
-         if not saveOK then savedCallback(nil,saveErr) end
-      end)
-      return true
    end
 
    function client:credential() return credential end

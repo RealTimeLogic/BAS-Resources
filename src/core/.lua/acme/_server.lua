@@ -8,6 +8,7 @@ return function(tpm)
                callback(nil,"TPM certificate installer unavailable")
                return
             end
+            if not tpm.haskey(key.name) then tpm.createkey(key.name,key.options) end
             cert,err=tpm.sharkcert(key.name,record.certificate)
          else
             cert,err=ba.create.sharkcert(record.certificate,key)

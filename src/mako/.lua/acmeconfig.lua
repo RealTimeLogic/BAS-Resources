@@ -76,11 +76,11 @@ local function address(portalUrl)
    end
 end
 
-return function(config)
+return function(config,storage)
    assert(type(config.email) == "string" and type(config.domains) == "table" and
       type(config.domains[1]) == "string","Invalid ACME configuration")
-   local home=assert(ba.openio"home")
-   if not home:stat"acme" then assert(home:mkdir"acme") end
+   assert(storage,"Missing ACME storage IO")
+   if not storage:stat"acme" then assert(storage:mkdir"acme") end
    local challenge=config.challenge or {}
    local dns=challenge.type == "dns-01"
    local st=dns and challenge.servername ~= "manual" and identity(challenge) or nil
@@ -94,7 +94,7 @@ return function(config)
       notify=function(event) logger:notify(event) end}
    local tpm=tpmAdapter()
    local runtime,err=Runtime.create{
-      io=home,install=require"acme/_server"(tpm),tpm=tpm,
+      io=storage,install=require"acme/_server"(tpm),tpm=tpm,
       config={email=config.email,domains=config.domains,
          acceptTerms=config.acceptTerms == true or config.acceptterms == true,
          challenge=manual,cleanup=config.cleanup ~= false,
@@ -102,7 +102,7 @@ return function(config)
          service={production=config.production ~= false,productionUrl=config.productionUrl,
             stagingUrl=config.stagingUrl,http=proxyOptions()},
          key={type=config.rsa and "rsa" or config.keyType,bits=config.bits,tpm=config.tpm == true}},
-      sharktrust=st,store=st and fileStore(home,"acme/bacme.json"),
+      sharktrust=st,store=st and fileStore(storage,"acme/sharktrust.json"),
       address=st and address(st.portalUrl),reverse=challenge.revcon == true,
       registration=st and {name=config.domains[1],namePolicy=config.namePolicy or "increment",
          dns=challenge.dns,info=config.info},

@@ -24,6 +24,13 @@ shopt -s dotglob
 cp -R ../../src/core/* . || exit 1
 cp -R ../../src/xedge/* . || exit 1
 
+for required in .lua/acmeconfig.lua .lua/acme/runtime.lua .lua/acme/sharktrust.lua .lua/acme/_server.lua; do
+    if [ ! -f "$required" ]; then
+        echo "Required ACME module $required was not packaged."
+        exit 1
+    fi
+done
+
 read -p "Do you want to include OPC-UA (y/n)? " userResponse
 if [ "$userResponse" = "y" ]; then
     cp -R ../../src/opcua .lua/ || exit 1

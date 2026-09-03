@@ -7,5 +7,4 @@ build/ZipBuild
 *.zip
 node_modules
 .vscode
-tests
-doc
+development
