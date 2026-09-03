@@ -2,10 +2,21 @@ local errorTable,copy=require"acme/_util"()
 
 return function(tpm,jwt)
    local function tpmMethod(name) return tpm and type(tpm[name]) == "function" and tpm[name] or nil end
+   local function restore(key)
+      if type(key) ~= "table" or key.provider ~= "tpm" then return true end
+      local has,create=tpmMethod"hasKey",tpmMethod"createKey"
+      if has and not has(key.name) then
+         if not create then return nil,errorTable("tpm_unavailable") end
+         create(key.name,key.options)
+      end
+      return true
+   end
    local function sign(key,payload,header)
       if type(key) == "table" and key.provider == "tpm" then
          local method=tpmMethod"jwtSign"
          if not method then return nil,errorTable("tpm_unavailable") end
+         local ok,problem=restore(key)
+         if not ok then return nil,problem end
          local a,b=method(key.name,payload,header)
          return b or a
       end
@@ -16,6 +27,8 @@ return function(tpm,jwt)
       if type(key) == "table" and key.provider == "tpm" then
          local method=tpmMethod"keyParams"
          if not method then return nil,errorTable("tpm_unavailable") end
+         local ok,problem=restore(key)
+         if not ok then return nil,problem end
          return method(key.name)
       end
       return ba.crypto.keyparams(key)
@@ -40,6 +53,8 @@ return function(tpm,jwt)
       if type(key) == "table" and key.provider == "tpm" then
          local method=tpmMethod"createCsr"
          if not method then return nil,errorTable("tpm_unavailable") end
+         local ok,problem=restore(key)
+         if not ok then return nil,problem end
          return method(key.name,dn,types,usage)
       end
       return ba.create.csr(key,dn,types,usage)

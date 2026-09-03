@@ -42,7 +42,11 @@ end
 
 -- Called once by the Mako or Xedge TPM bootstrap before it publishes ba.tpm.
 M.setTPM=function(t)
-   trustedTpm={jwtSign=t.jwtSign or t.jwtsign,keyParams=t.keyParams or t.keyparams,
+   local jwtSign=t.jwtSign
+   if not jwtSign and t.jwtsign then
+      jwtSign=function(name,payload,header) return t.jwtsign(payload,name,header) end
+   end
+   trustedTpm={jwtSign=jwtSign,keyParams=t.keyParams or t.keyparams,
       createKey=t.createKey or t.createkey,hasKey=t.hasKey or t.haskey,
       createCsr=t.createCsr or t.createcsr}
    M.setTPM=nil
