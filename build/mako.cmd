@@ -76,17 +76,7 @@ echo Creating the zip file
 zip -D -q -u -r -9 ../mako.zip .
 if ERRORLEVEL 1 goto BuildFailed
 cd ..
-
-set "MAKO_ZIP=%~dp0..\tests\MakoZip"
-powershell.exe -NoProfile -Command "$root=[IO.Path]::GetFullPath('%~dp0..\tests');$target=[IO.Path]::GetFullPath((Join-Path $root 'MakoZip'));if([IO.Path]::GetDirectoryName($target) -ne $root -or [IO.Path]::GetFileName($target) -ne 'MakoZip'){throw 'Invalid MakoZip target'};if(Test-Path -LiteralPath $target){Get-ChildItem -Force -LiteralPath $target|Remove-Item -Recurse -Force}else{New-Item -ItemType Directory -Path $target|Out-Null}"
-if ERRORLEVEL 1 goto BuildFailed
-tar.exe -xf "%~dp0mako.zip" -C "%MAKO_ZIP%"
-if ERRORLEVEL 1 goto BuildFailed
-
-for %%i in ("%MAKO_ZIP%") do set "MAKO_ZIP=%%~fi"
 echo Created %~dp0mako.zip
-echo Refreshed %MAKO_ZIP%
-echo Use call build\mako.cmd to retain MAKO_ZIP in the current cmd.exe session.
 popd
 exit /b 0
 
