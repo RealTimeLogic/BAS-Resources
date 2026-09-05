@@ -1,14 +1,6 @@
 local M={}
-local errorTable,copy,safeCallback,isHex,_,_,reject,ipv4=require"acme/_util"()
-
-local function validClient(client)
-   if type(client) ~= "table" then return false end
-   for _,name in ipairs{"enroll","isAvailable","isRegistered","setIpAddress","setAcmeRecord",
-      "removeAcmeRecord","getWan","setCredential","credential","identity","close"} do
-      if type(client[name]) ~= "function" then return false end
-   end
-   return true
-end
+local errorTable,copy,safeCallback,isHex,_,_,reject,_,_,methods=require"acme/_util"()
+local clientMethods="enroll isAvailable isRegistered setIpAddress setAcmeRecord removeAcmeRecord getWan setCredential credential identity close"
 
 local function validState(state,identity)
    if type(state) ~= "table" or state.version ~= 2 then return nil,errorTable("invalid_saved_state") end
@@ -22,20 +14,14 @@ local function validState(state,identity)
    return state
 end
 
-function M.isPrivateIp(address)
-   local first,second=ipv4(address)
-   return first == 10 or first == 172 and second >= 16 and second <= 31 or
-      first == 192 and second == 168 or false
-end
-
 function M.createSharkTrust(options)
-   if type(options) ~= "table" or not validClient(options.client) then return nil,errorTable("invalid_sharktrust_client") end
+   if type(options) ~= "table" or not methods(options.client,clientMethods) then
+      return nil,errorTable("invalid_sharktrust_client") end
    local store=options.store
    if type(store) ~= "table" or type(store.load) ~= "function" or type(store.save) ~= "function" then
       return nil,errorTable("invalid_store")
    end
-   local client,notify,address=options.client,type(options.notify) == "function" and options.notify or function() end,
-      type(options.address) == "function" and options.address or nil
+   local client,notify=options.client,type(options.notify) == "function" and options.notify or function() end
    local deps=options.dependencies or {}
    local timerFactory,now=deps.timer or function(action) return ba.timer(action) end,deps.now or os.time
    local delay=tonumber(options.propagationDelay) or 30
@@ -122,14 +108,6 @@ function M.createSharkTrust(options)
          action(saved)
       end)
    end
-   local function updateAddress(result,callback)
-      if not address then return safeCallback(callback,copy(result)) end
-      address(function(request,problem)
-         if problem or not request then return safeCallback(callback,nil,problem or errorTable("address_unavailable")) end
-         client:setIpAddress(request,callback)
-      end)
-   end
-
    function adapter:enroll(request,callback)
       if type(callback) ~= "function" then return reject(callback,"invalid_callback") end
       if not enter("enroll",callback) then return end
@@ -164,10 +142,10 @@ function M.createSharkTrust(options)
                saved=copy(saved)
                saved.name,saved.updatedAt=result.name,now()
                return saveState(saved,function(stored,saveProblem)
-                  if stored then updateAddress(result,callback) else safeCallback(callback,nil,saveProblem) end
+                  safeCallback(callback,stored and copy(result),saveProblem)
                end)
             end
-            updateAddress(result,callback)
+            safeCallback(callback,copy(result))
          end)
       end)
       return true
@@ -179,13 +157,14 @@ function M.createSharkTrust(options)
       return true
    end
    function adapter:isRegistered(callback) return deviceCall("isRegistered",nil,callback) end
-   function adapter:setIpAddress(request,callback) return deviceCall("setIpAddress",request,callback) end
+   function adapter:setIpAddress(ipAddress,callback) return deviceCall("setIpAddress",ipAddress,callback) end
    function adapter:getWan(callback) return deviceCall("getWan",nil,callback) end
 
    function adapter:switchIdentity(value,switchOptions,callback)
       if type(callback) ~= "function" then return reject(callback,"invalid_callback") end
       local newClient=type(value) == "table" and value.client
-      if not validClient(newClient) then return reject(callback,"invalid_sharktrust_client") end
+      if not methods(newClient,clientMethods) then
+         return reject(callback,"invalid_sharktrust_client") end
       local newIdentity=newClient:identity()
       if newIdentity.portalUrl == identity.portalUrl and newIdentity.zoneIdentity == identity.zoneIdentity then
          local oldClient=client

@@ -717,7 +717,7 @@ local function acmeNotify(event) acmeLogger:notify(event) end
 
 local function createAcme()
    if not acmePlatform or type(xcfg.acme) ~= "table" then return end
-   local runtime,portal,generated=acmeConfig.create(acmePlatform,xcfg.acme,saveCfg,acmeNotify)
+   local runtime,portal,generated=acmeConfig.create(xcfg.acme,saveCfg,acmeNotify)
    if not runtime then return nil,portal end
    acmeRuntime,xedge.portal,xedge.generatedProof=runtime,portal,generated
    return runtime
@@ -971,12 +971,12 @@ local acmeCmd={
       local send=deferredJson(data.response)
       local status=acmeRuntime and acmeRuntime:status().registration
       if not status or not status.enrolled then
-         send(acmeResponse{ok=true,isreg=false})
+         send(acmeResponse{ok=true,isreg=false,sockname=data.sockname})
          return
       end
       acmeRuntime:isRegistered(function(result,problem)
          local rsp=acmeResponse{ok=true,isreg=result and true or false,
-            name=(result and result.name or status.name or ""):match"^[^%.]+",
+            name=(result and result.name or status.name or ""):match"^[^%.]+",sockname=data.sockname,
             email=xcfg.acme and xcfg.acme.email}
          if problem then rsp.connectionError=problem.message or problem.code end
          send(rsp)
@@ -1068,6 +1068,7 @@ local commands={
       local f=acmeCmd[data.acmd]
       if not f then return cmd:json{err="Unknown acmd"} end
       if not acmePlatform then return cmd:json{err="No IO"} end
+      data.sockname=cmd:sockname()
       return f(cmd,data)
    end,
    getconfig=function(cmd,_)

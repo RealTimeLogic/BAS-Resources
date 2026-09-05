@@ -35,6 +35,12 @@ local function isHex(value,length)
    return type(value) == "string" and #value == length and not value:find("[^%x]")
 end
 
+local function methods(value,names)
+   if type(value) ~= "table" then return false end
+   for name in names:gmatch"%S+" do if type(value[name]) ~= "function" then return false end end
+   return true
+end
+
 local function isHttps(value)
    return type(value) == "string" and value:match("^https://[^/%s]+") and not value:find("[\r\n#]")
 end
@@ -66,4 +72,4 @@ local function resolveService(service)
    return resolved
 end
 
-return function() return err,copy,callback,isHex,isHttps,resolveService,reject,ipv4,schedule end
+return function() return err,copy,callback,isHex,isHttps,resolveService,reject,ipv4,schedule,methods end

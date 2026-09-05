@@ -2,6 +2,16 @@
 
 The Barracuda App Server's resource files. See the [build directory](build/README.md) for build instructions.
 
+## ACME client
+
+The shared Mako Server and Xedge Automatic Certificate Management Environment
+(ACME) client is under `src/core/.lua/acme/`, with host adapters in `src/mako/`
+and `src/xedge/`.
+
+- [ACME client public API](doc/acme-client-public-api.md)
+- [ACME client architecture](doc/acme-client-architecture.md)
+- [Maintainer and session handover](AGENTS.md)
+
 ## Files
 
 - **core**
@@ -87,5 +97,5 @@ The Barracuda App Server's resource files. See the [build directory](build/READM
 # Creates rtl/.certificate/cacert.shark from curl's cacert.pem
 wget https://curl.se/ca/cacert.pem
 SharkSSLParseCAList -b cacert.shark cacert.pem
-rm -f cacert.pem 
+rm -f cacert.pem
 ```

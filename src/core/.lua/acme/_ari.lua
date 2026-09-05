@@ -18,7 +18,7 @@ end
 
 return function(certificate,pemBody)
    if type(certificate) == "table" and type(certificate.ariId) == "string" then return certificate.ariId end
-   local pem=type(certificate) == "table" and (certificate.certificate or certificate.pem) or certificate
+   local pem=type(certificate) == "table" and certificate.certificate or certificate
    local der=pemBody(pem,"CERTIFICATE")
    if not der then return nil,errorTable("invalid_certificate") end
    local outer=tlv(der,1)

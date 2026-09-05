@@ -1,7 +1,6 @@
 -- RFC 8555 ACME client with optional RFC 9773 renewal information.
 local M,encode,decode,trustedTpm={},ba.json.encode,ba.json.decode
 local errorTable,copy,safeCallback,_,validHttpsUrl,resolveService,reject,_,schedule=require"acme/_util"()
-local httpRequest=require"acme/_http"
 
 local function problemError(response,status,headers,operation,url)
    local problem=type(response) == "table" and response or {}
@@ -61,12 +60,13 @@ function M.create(options)
    local now=options.now or deps.now or os.time
    local jsonEncode=deps.jsonEncode or encode
    local jsonDecode=deps.jsonDecode or decode
-   local jwt=deps.jwt or require"jwt"
+   local jwt=deps.jwt
    local tpm=trustedTpm or options.tpm
    local activeClients,closeCallbacks,standalone,closed={},{},0,false
    local queue,engine,nextJobId,current={},{},0
    local jwtSign,keyParams,createKey,createCsr,resume
    local function loadKeys()
+      if not jwt then jwt=require"jwt" end
       if not createKey then jwtSign,keyParams,createKey,createCsr=require"acme/_keys"(tpm,jwt) end
    end
 
@@ -81,7 +81,7 @@ function M.create(options)
       if closed then return nil,errorTable("engine_closed") end
       local request={trusted=true,url=url,method=method,header=copy(headers or {})}
       if body ~= nil then request.size=#body end
-      return httpRequest(httpFactory,service.http,activeClients,request,body)
+      return require"acme/_http"(httpFactory,service.http,activeClients,request,body)
    end
    local function decodeResponse(response,operation,url,allowEmpty)
       if response.body == "" and allowEmpty then return {},nil end

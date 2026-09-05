@@ -96,7 +96,7 @@ local function runXedge()
 	    xedge.appsd:setauth(ba.create.authenticator(mako.udb()))
 	 end
       end
-   end,{io=cfgio,install=env.require"acme/_server"(ba.tpm)})
+   end,{io=cfgio})
    xinit=nil
 end
 dir:unlink()

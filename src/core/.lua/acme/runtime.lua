@@ -1,18 +1,62 @@
 local M={}
-local Engine,Manager=require"acme/engine",require"acme/manager"
 
 local function problem(code,message) return {code=code,message=message or code} end
 local function callback(cb,value,err) if cb then cb(value,err) end end
 
+local function fileStore(io,base)
+   local path=base.."/sharktrust.json"
+   local function load(cb)
+      local fp=io:open(path,"r") or io:open(path..".bak","r")
+      if not fp then cb() return end
+      local raw=fp:read"a"
+      fp:close()
+      local ok,value=pcall(ba.json.decode,raw or "")
+      if ok then cb(value) else cb(nil,problem"invalid_saved_state") end
+   end
+   local function save(value,cb)
+      if not io:stat(base) and not io:mkdir(base) then
+         cb(nil,problem"storage_write_failed") return
+      end
+      local temp,backup=path..".tmp",path..".bak"
+      local fp,message=io:open(temp,"w")
+      if not fp then cb(nil,problem("storage_write_failed",tostring(message))) return end
+      local ok
+      ok,message=fp:write(ba.json.encode(value))
+      fp:flush()
+      fp:close()
+      if ok == nil then io:remove(temp) cb(nil,problem("storage_write_failed",tostring(message))) return end
+      if io:stat(backup) then io:remove(backup) end
+      if io:stat(path) and not io:rename(path,backup) then
+         io:remove(temp) cb(nil,problem"storage_write_failed") return
+      end
+      ok=io:rename(temp,path)
+      if not ok and io:stat(backup) then io:rename(backup,path) end
+      if ok and io:stat(backup) then io:remove(backup) end
+      cb(ok and true or nil,ok and nil or problem"storage_write_failed")
+   end
+   return {load=load,save=save}
+end
+
 function M.create(options)
-   if type(options) ~= "table" or not options.io or type(options.install) ~= "function" or
-      type(options.config) ~= "table" then return nil,problem"invalid_options" end
+   if type(options) ~= "table" or type(options.config) ~= "table" then
+      return nil,problem"invalid_options"
+   end
+   local fileIo=options.io
+   if not fileIo and ba and ba.openio and (mako or xedge) then
+      fileIo=ba.openio(xedge and "disk" or "home")
+   end
+   if not fileIo then return nil,problem"invalid_io" end
+   local install=options.install
+   if install == nil and (mako or xedge) and ba and (ba.slcon or ba.slcon6) then
+      install=require"acme/_server"(options.tpm)
+   end
+   if type(install) ~= "function" then return nil,problem"invalid_installer" end
    local config,registration=options.config,options.registration
    local notify=type(options.notify) == "function" and options.notify or function() end
    local deps=options.dependencies or {}
    local timerFactory=deps.timer or function(action) return ba.timer(action) end
    local retryFirst,retryMax=deps.retryDelay or 30000,deps.retryMaxDelay or 300000
-   local engine,err=Engine.create{tpm=options.tpm,dependencies=options.engineDependencies}
+   local engine,err=require"acme/engine".create{tpm=options.tpm,dependencies=options.engineDependencies}
    if not engine then return nil,err end
    local challenge,st
    local function fail(problem)
@@ -24,14 +68,15 @@ function M.create(options)
       local ST,Dns=require"acme/sharktrust",require"acme/dns"
       st,err=ST.create(options.sharktrust)
       if not st then return fail(err) end
-      challenge,err=Dns.createSharkTrust{client=st,store=options.store,address=options.address,
+      challenge,err=Dns.createSharkTrust{client=st,
+         store=options.store or fileStore(fileIo,options.path or "acme"),
          propagationDelay=config.propagationDelay,notify=options.notify,dependencies=options.dnsDependencies}
       if not challenge then return fail(err) end
    elseif config.challenge then
       challenge=config.challenge
    end
    local manager
-   manager,err=Manager.create{io=options.io,engine=engine,install=options.install,
+   manager,err=require"acme/manager".create{io=fileIo,engine=engine,install=install,
       notify=options.notify,renewAllowed=options.renewAllowed,path=options.path}
    if not manager then return fail(err) end
    local runtime,started,closed,starting,retryTimer,retryDelay=
@@ -65,17 +110,6 @@ function M.create(options)
          timeout=config.timeout,dnsResolveTimeout=config.dnsResolveTimeout,
          fallbackRenewBefore=config.fallbackRenewBefore}
    end
-   local function address(next)
-      if registration and registration.ipAddress then return next(registration) end
-      if type(options.address) ~= "function" then return next(nil,problem"address_unavailable") end
-      options.address(function(value,err)
-         if not value then return next(nil,err or problem"address_unavailable") end
-         local request={}
-         for k,v in pairs(registration or {}) do request[k]=v end
-         for k,v in pairs(value) do request[k]=v end
-         next(request)
-      end)
-   end
    local function activateReverse()
       if st then
          local enable=options.reverse == true
@@ -104,16 +138,13 @@ function M.create(options)
       end)
    end
    local function enroll(cb)
-      address(function(request,addressErr)
-         if not request then return callback(cb,nil,addressErr) end
-         emit{type="registration",phase="enrolling",name=request.name}
-         challenge:enroll(request,function(state,enrollErr)
-            if not state then return callback(cb,nil,enrollErr) end
-            emit{type="registration",phase="enrolled",name=state.name}
-            local ok,reverseErr=activateReverse()
-            if not ok then return callback(cb,nil,reverseErr) end
-            startManager(state.name,cb)
-         end)
+      emit{type="registration",phase="enrolling",name=registration and registration.name}
+      challenge:enroll(registration,function(state,enrollErr)
+         if not state then return callback(cb,nil,enrollErr) end
+         emit{type="registration",phase="enrolled",name=state.name}
+         local ok,reverseErr=activateReverse()
+         if not ok then return callback(cb,nil,reverseErr) end
+         startManager(state.name,cb)
       end)
    end
 
@@ -169,9 +200,9 @@ function M.create(options)
       if not st then return noSharkTrust(cb) end
       return challenge:isAvailable(name,cb)
    end
-   function runtime:setIpAddress(request,cb)
+   function runtime:setIpAddress(ipAddress,cb)
       if not st then return noSharkTrust(cb) end
-      return challenge:setIpAddress(request,cb)
+      return challenge:setIpAddress(ipAddress,cb)
    end
    function runtime:reverseConnection(enable)
       if not st then return nil,problem"sharktrust_not_configured" end

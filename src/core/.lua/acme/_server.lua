@@ -1,14 +1,22 @@
-return function(tpm)
+return function(value)
+   local native=value or ba.tpm
+   local tpm=native and {
+      hasKey=native.hasKey or native.haskey,
+      createKey=native.createKey or native.createkey,
+      sharkcert=native.sharkcert
+   } or nil
    return function(records,callback)
+      if records[1] and not (ba.slcon or ba.slcon6) then callback(nil,"HTTPS listener unavailable") return end
       local shark=ba.create.sharkssl(nil,{server=true})
       for _,record in ipairs(records) do
          local key,cert,err=record.privateKey
          if type(key) == "table" and key.provider == "tpm" then
-            if not tpm or type(tpm.sharkcert) ~= "function" then
+            if not tpm or type(tpm.hasKey) ~= "function" or
+               type(tpm.createKey) ~= "function" or type(tpm.sharkcert) ~= "function" then
                callback(nil,"TPM certificate installer unavailable")
                return
             end
-            if not tpm.haskey(key.name) then tpm.createkey(key.name,key.options) end
+            if not tpm.hasKey(key.name) then tpm.createKey(key.name,key.options) end
             cert,err=tpm.sharkcert(key.name,record.certificate)
          else
             cert,err=ba.create.sharkcert(record.certificate,key)

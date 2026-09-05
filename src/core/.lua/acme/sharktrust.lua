@@ -1,6 +1,5 @@
 local M,encode,decode={},ba.json.encode,ba.json.decode
 local errorTable,copy,safeCallback,isHex,_,_,reject,ipv4,schedule=require"acme/_util"()
-local httpRequest=require"acme/_http"
 
 local function hexToBinary(value) return (value:gsub("%x%x",function(pair) return string.char(tonumber(pair,16)) end)) end
 
@@ -64,6 +63,21 @@ function M.create(options)
    local clients,closeCallbacks,client,active,closed={},{},{},0,false
    local reverse,reverseEnabled
 
+   local function networkAddress()
+      if type(deps.address) == "function" then return deps.address() end
+      local http=httpFactory(copy(httpOptions))
+      if not http then return nil,errorTable("http_create_failed",nil,{url=portalUrl}) end
+      clients[http]=true
+      local ok,message=http:request{trusted=true,url=portalUrl,method="HEAD"}
+      local address=ok and http:sockname()
+      clients[http]=nil
+      http:close()
+      if address and address:find("::ffff:",1,true) == 1 then address=address:sub(8) end
+      if ipv4(address) then return address end
+      message=tostring(message or "Cannot determine the local IPv4 address")
+      return nil,errorTable("address_unavailable",message,{cause=message,temporary=true,retryable=true})
+   end
+
    local function stopReverse()
       if reverse then reverse:close() reverse=nil end
    end
@@ -117,7 +131,7 @@ function M.create(options)
       header=copy(header or {})
       header["Content-Type"]="application/json"
       header["X-SharkTrust-Proof"]=ba.b64urlencode(signature)
-      local response,requestErr=httpRequest(httpFactory,httpOptions,clients,{
+      local response,requestErr=require"acme/_http"(httpFactory,httpOptions,clients,{
          trusted=true,
          url=portalUrl,
          method="POST",
@@ -151,7 +165,6 @@ function M.create(options)
 
    local function enrollmentBody(request)
       if type(request) ~= "table" then return nil,errorTable("invalid_request") end
-      if not ipv4(request.ipAddress) then return nil,errorTable("invalid_ip_address") end
       if request.dns ~= nil and request.dns ~= "local" and request.dns ~= "wan" and request.dns ~= "both" then
          return nil,errorTable("invalid_dns_mode")
       end
@@ -161,7 +174,7 @@ function M.create(options)
       if request.namePolicy ~= nil and request.namePolicy ~= "exact" and request.namePolicy ~= "increment" then
          return nil,errorTable("invalid_name_policy")
       end
-      local body={command="Register",ipAddress=request.ipAddress}
+      local body={command="Register"}
       if request.name ~= nil then body.name=request.name end
       if request.namePolicy ~= nil then body.namePolicy=request.namePolicy end
       if request.dns ~= nil then body.dns=request.dns end
@@ -213,6 +226,9 @@ function M.create(options)
       local body,err=enrollmentBody(request)
       if not body then return reject(callback,err.code,err.message) end
       return begin(callback,function()
+         local address,addressErr=networkAddress()
+         if not address then return nil,addressErr end
+         body.ipAddress=address
          local result,requestErr=zonePost(body,"SHARKTRUST-REGISTER\0")
          if not result then return nil,enrollmentError(requestErr) end
          if type(result.deviceId) ~= "string" or type(result.name) ~= "string" or
@@ -226,26 +242,27 @@ function M.create(options)
    end
 
    function client:isRegistered(callback)
-      return begin(callback,function() return devicePost("IsRegistered") end)
+      return begin(callback,function()
+         local result,requestErr=devicePost("IsRegistered")
+         if not result then return nil,requestErr end
+         local address,addressErr=networkAddress()
+         if not address then return nil,addressErr end
+         local _,updateErr=devicePost("SetIpAddress",{ipAddress=address})
+         if updateErr then return nil,updateErr end
+         return result
+      end)
    end
 
-   function client:setIpAddress(request,callback)
-      if type(request) ~= "table" or not ipv4(request.ipAddress) then
-         return reject(callback,"invalid_ip_address")
-      end
-      if request.dns ~= nil and request.dns ~= "local" and request.dns ~= "wan" and request.dns ~= "both" then
-         return reject(callback,"invalid_dns_mode")
-      end
-      local body={ipAddress=request.ipAddress}
-      if request.dns then body.dns=request.dns end
-      return begin(callback,function() return devicePost("SetIpAddress",body) end)
+   function client:setIpAddress(ipAddress,callback)
+      if not ipv4(ipAddress) then return reject(callback,"invalid_ip_address") end
+      return begin(callback,function() return devicePost("SetIpAddress",{ipAddress=ipAddress}) end)
    end
 
    function client:setAcmeRecord(request,callback)
       request=type(request) == "table" and request or {}
-      local recordName=request.recordName or request.record
-      local recordData=request.recordData or request.data
-      local timeout=request.dnsResolveTimeoutMs or request.timeout
+      local recordName=request.recordName
+      local recordData=request.recordData
+      local timeout=request.dnsResolveTimeoutMs
       if type(recordName) ~= "string" or #recordName == 0 or #recordName > 253 then
          return reject(callback,"invalid_record_name")
       end

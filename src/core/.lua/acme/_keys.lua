@@ -1,4 +1,4 @@
-local errorTable,copy=require"acme/_util"()
+local errorTable=require"acme/_util"()
 
 return function(tpm,jwt)
    local function tpmMethod(name) return tpm and type(tpm[name]) == "function" and tpm[name] or nil end
@@ -34,17 +34,23 @@ return function(tpm,jwt)
       return ba.crypto.keyparams(key)
    end
    local function createKey(name,options)
-      options=copy(options or {})
-      if options.tpm == true or options.type == "tpm" then
-         local create,has=tpmMethod"createKey",tpmMethod"hasKey"
-         if not create then return nil,errorTable("tpm_unavailable") end
+      options=options or {}
+      for field in pairs(options) do
+         if field ~= "type" and field ~= "bits" and field ~= "curve" then
+            return nil,errorTable("invalid_key_option")
+         end
+      end
+      local kind=options.type or "ecc"
+      if kind ~= "ecc" and kind ~= "rsa" then return nil,errorTable("invalid_key_type") end
+      local create,has=tpmMethod"createKey",tpmMethod"hasKey"
+      if kind == "ecc" and create then
+         local keyOptions={key="ecc",curve=options.curve or "SECP384R1"}
          local exists=false
          if has then exists=has(name) end
-         if not exists then create(name,options) end
-         return {provider="tpm",name=name,options=options}
+         if not exists then create(name,keyOptions) end
+         return {provider="tpm",name=name,options=keyOptions}
       end
-      local rsa=options.type == "rsa" or options.key == "rsa"
-      local keyOptions=rsa and
+      local keyOptions=kind == "rsa" and
          {key="rsa",bits=options.bits or 2048} or {key="ecc",curve=options.curve or "SECP384R1"}
       return ba.create.key(keyOptions)
    end

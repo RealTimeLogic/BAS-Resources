@@ -1,5 +1,5 @@
 local M={}
-local errorTable,copy,safeCallback,_,_,resolveService,reject=require"acme/_util"()
+local errorTable,copy,safeCallback,_,_,resolveService,reject,_,_,methods=require"acme/_util"()
 
 local function certificateExpiry(pem)
    local body=type(pem) == "string" and pem:match("%-%-%-%-%-BEGIN CERTIFICATE%-%-%-%-%-%s*(.-)%s*%-%-%-%-%-END CERTIFICATE%-%-%-%-%-")
@@ -7,14 +7,6 @@ local function certificateExpiry(pem)
    local ok,info=pcall(ba.parsecert,ba.b64decode((body:gsub("%s",""))))
    local expires=ok and info and ba.parsecerttime(info.tzto)
    return expires and expires ~= 0 and expires or nil
-end
-
-local function validateEngine(engine)
-   if type(engine) ~= "table" then return false end
-   for _,name in ipairs{"certificate","renewalInfo","revoke","jobs","close"} do
-      if type(engine[name]) ~= "function" then return false end
-   end
-   return true
 end
 
 local function validateConfig(config)
@@ -42,7 +34,8 @@ local function validateConfig(config)
 end
 
 function M.create(options)
-   if type(options) ~= "table" or not validateEngine(options.engine) then return nil,errorTable("invalid_engine") end
+   if type(options) ~= "table" or not methods(options.engine,"certificate renewalInfo revoke jobs close") then
+      return nil,errorTable("invalid_engine") end
    if type(options.install) ~= "function" then return nil,errorTable("invalid_installer") end
    if not options.io then return nil,errorTable("invalid_io") end
 

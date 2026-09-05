@@ -10,28 +10,6 @@ local function generatedIdentity()
    return {portalUrl="https://"..portal,zoneKey=hex(zoneKey),proof=module.proof},portal
 end
 
-local function tpmAdapter()
-   local tpm=ba.tpm
-   if not tpm then return end
-   return {jwtSign=tpm.jwtsign,keyParams=tpm.keyparams,createKey=tpm.createkey,
-      hasKey=tpm.haskey,createCsr=tpm.createcsr,sharkcert=tpm.sharkcert}
-end
-
-local function address(portalUrl)
-   local host=portalUrl:match"^https://([^/:]+)"
-   return function(cb)
-      local socket,err=ba.socket.connect(host,443)
-      if not socket then err=tostring(err) cb(nil,{code="address_unavailable",message=err,
-         cause=err,temporary=true,retryable=true}) return end
-      local ip=socket:sockname()
-      socket:close()
-      if ip and ip:find("::ffff:",1,true) == 1 then ip=ip:sub(8) end
-      if ip then cb{ipAddress=ip} else
-         cb(nil,{code="address_unavailable",temporary=true,retryable=true})
-      end
-   end
-end
-
 local function identity(config)
    local manual=type(config) == "table" and config.manualIdentity == true
    local value,portal=generatedIdentity()
@@ -53,16 +31,14 @@ local function available(config,name,callback)
    end)
 end
 
-local function create(platform,config,save,notify)
+local function create(config,save,notify)
    local st,portal,generated=identity(config)
    if not st then return nil,{code="sharktrust_not_configured"} end
-   local tpm=tpmAdapter()
    local runtime,err=Runtime.create{
-      io=platform.io,install=platform.install,tpm=tpm,
       config={email=config.email,domains={config.name},acceptTerms=true,cleanup=true,
          service={production=config.production ~= false,productionUrl=config.productionUrl,
-            stagingUrl=config.stagingUrl},key={tpm=config.tpm ~= false}},
-      sharktrust=st,address=address(st.portalUrl),reverse=config.revcon == true,
+            stagingUrl=config.stagingUrl},key={type="ecc"}},
+      sharktrust=st,reverse=config.revcon == true,
       registration={name=config.name,namePolicy="exact",info=config.info or "Xedge"},
       store={
          load=function(cb) cb(config.state) end,
