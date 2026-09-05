@@ -22,7 +22,7 @@ mkdir "XedgeBuild" || goto BuildFailed
 cd "XedgeBuild" || goto BuildFailed
 xcopy ..\..\src\core . /eq || goto BuildFailed
 xcopy ..\..\src\xedge . /eq || goto BuildFailed
-for %%i in (.lua\acmeconfig.lua .lua\acme\runtime.lua .lua\acme\sharktrust.lua .lua\acme\_server.lua) do (
+for %%i in (.lua\acme\runtime.lua .lua\acme\dns.lua .lua\acme\_server.lua) do (
    if not exist "%%i" (
       echo Required ACME module %%i was not packaged.
       goto BuildFailed

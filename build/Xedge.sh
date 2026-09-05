@@ -24,7 +24,7 @@ shopt -s dotglob
 cp -R ../../src/core/* . || exit 1
 cp -R ../../src/xedge/* . || exit 1
 
-for required in .lua/acmeconfig.lua .lua/acme/runtime.lua .lua/acme/sharktrust.lua .lua/acme/_server.lua; do
+for required in .lua/acme/runtime.lua .lua/acme/dns.lua .lua/acme/_server.lua; do
     if [ ! -f "$required" ]; then
         echo "Required ACME module $required was not packaged."
         exit 1

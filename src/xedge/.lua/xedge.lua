@@ -33,9 +33,19 @@ G.xedge=xedge
 local apps={}
 local appsCfg=xcfg.apps
 local rw=require"rwfile"
-local acmeConfig,acmeLogger=require"acmeconfig"
+local Acme,Dns=require"acme/runtime",require"acme/dns"
+local function acmeIdentity(config)
+   if not config or not config.manualIdentity then
+      local value=Dns.identity()
+      if value then return value,value.portalUrl:sub(9),true end
+   end
+   if config and config.portalUrl and config.zoneKey and config.secret then
+      return {portalUrl=config.portalUrl,zoneKey=config.zoneKey,secret=config.secret},
+         config.portalUrl:gsub("^https://",""):gsub("/.*$",""),false
+   end
+end
 do
-   local _,portal,generated=acmeConfig.identity()
+   local _,portal,generated=acmeIdentity()
    xedge.portal,xedge.generatedProof,xedge.compiledPortal=portal,generated,portal
 end
 
@@ -706,19 +716,40 @@ xedge.lio=lio
 -- End virtual file system
 ----------------------------------------------------------------
 
-acmeLogger=assert(require"acme/log".create(function(event)
-   local err=event.level == "error"
-   local message=(err and "SharkTrust error: " or "SharkTrust: ")..event.message
+local function acmeLog(err,message)
    tracep(false,err and 0 or 5,"Xedge: "..message)
    xedge.elog({flush=err,ts=true,noTrace=true},"%s",message)
-end))
+end
 
-local function acmeNotify(event) acmeLogger:notify(event) end
+local function acmeNotify(code)
+   -- The embedded host logs only the documented numeric lifecycle code.
+   acmeLog(code == 3,"ACME event "..code)
+end
 
 local function createAcme()
    if not acmePlatform or type(xcfg.acme) ~= "table" then return end
-   local runtime,portal,generated=acmeConfig.create(xcfg.acme,saveCfg,acmeNotify)
-   if not runtime then return nil,portal end
+   local config=xcfg.acme
+   local identity,portal,generated=acmeIdentity(config)
+   if not identity then return nil,{code="sharktrust_not_configured"} end
+   identity.type,identity.reverse="dns-01",config.revcon == true
+   local runtime,err=Acme.create{
+      io=acmePlatform.io,
+      config={email=config.email,domains={config.name},acceptTerms=true,
+         production=config.production,productionUrl=config.productionUrl,stagingUrl=config.stagingUrl,
+         namePolicy="exact",info=config.info or "Xedge",challenge=identity},
+      store={
+         load=function(cb) cb(config.state) end,
+         save=function(state,cb)
+            local previous=config.state
+            config.state=state
+            local ok=saveCfg()
+            if not ok then config.state=previous end
+            cb(ok,not ok and "Cannot save SharkTrust state" or nil)
+         end
+      },
+      notify=acmeNotify
+   }
+   if not runtime then return nil,err end
    acmeRuntime,xedge.portal,xedge.generatedProof=runtime,portal,generated
    return runtime
 end
@@ -731,7 +762,7 @@ startAcmeDns=function()
    acmeClockReady=true
    if acmeRuntime or type(xcfg.acme) ~= "table" then return end
    local runtime,err=createAcme()
-   if not runtime then acmeLogger:error("Cannot configure: "..(err and (err.message or err.code) or "unknown")) return end
+   if not runtime then acmeLog(true,"Cannot configure: "..(err and (err.message or err.code) or "unknown")) return end
    acmeWorkPending=true
    runtime:start(function(_,problem) if not retryable(problem) then acmeWorkPending=false end end)
 end
@@ -867,7 +898,7 @@ local function xinit(aio,rwCfgFile,_tldir,_rtld,onAuth,_acmePlatform)
    xcfg.acme=cfg.acme
    xcfg.revcon=xcfg.acme and xcfg.acme.revcon
    do
-      local _,portal,generated=acmeConfig.identity(xcfg.acme)
+      local _,portal,generated=acmeIdentity(xcfg.acme)
       xedge.portal,xedge.generatedProof=portal or xedge.compiledPortal,generated
    end
    xcfg.smtp=cfg.smtp
@@ -984,7 +1015,12 @@ local acmeCmd={
    end,
    available=function(_,data)
       local send=deferredJson(data.response)
-      acmeConfig.available(acmeSettings(data),data.name,function(result,problem)
+      local identity=acmeIdentity(acmeSettings(data))
+      if not identity then return send{err="SharkTrust is not configured"} end
+      local client,err=Dns.createClient(identity)
+      if not client then return send{err=err.message or err.code} end
+      client:isAvailable(data.name,function(result,problem)
+         client:close()
          if not result then return send{err=problem and (problem.message or problem.code) or "Cannot check name"} end
          send{ok=true,available=result.available,name=result.name}
       end)
@@ -1001,7 +1037,7 @@ local acmeCmd={
          if not runtime then
             acmeWorkPending=false
             local message=err and (err.message or err.code) or "Cannot configure ACME"
-            acmeLogger:error("Cannot configure: "..message)
+            acmeLog(true,"Cannot configure: "..message)
             send{err=message}
             return
          end

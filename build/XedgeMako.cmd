@@ -18,14 +18,7 @@ if exist "XedgeBuild" rmdir /s /q "XedgeBuild"
 mkdir "XedgeBuild" || goto BuildFailed
 cd "XedgeBuild" || goto BuildFailed
 xcopy ..\..\src\xedge . /eq || goto BuildFailed
-xcopy ..\..\src\core\.lua\acme .lua\acme\ /eq || goto BuildFailed
-for %%i in (.lua\acmeconfig.lua .lua\acme\runtime.lua .lua\acme\sharktrust.lua .lua\acme\_server.lua) do (
-   if not exist "%%i" (
-      echo Required ACME module %%i was not packaged.
-      goto BuildFailed
-   )
-)
-
+rem ACME modules are supplied by the matching Mako resource package.
 del /q README.md .config
 rmdir /s /q .certificate
 

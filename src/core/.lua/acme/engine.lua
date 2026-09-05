@@ -1,6 +1,8 @@
 -- RFC 8555 ACME client with optional RFC 9773 renewal information.
 local M,encode,decode,trustedTpm={},ba.json.encode,ba.json.decode
-local errorTable,copy,safeCallback,_,validHttpsUrl,resolveService,reject,_,schedule=require"acme/_util"()
+local U=require"acme/_util"
+local errorTable,copy,safeCallback=U.err,U.copy,U.callback
+local validHttpsUrl,resolveService,reject,schedule=U.isHttps,U.resolveService,U.reject,U.schedule
 
 local function problemError(response,status,headers,operation,url)
    local problem=type(response) == "table" and response or {}
@@ -35,8 +37,65 @@ local function pemBody(pem,label)
    return ba.b64decode((body:gsub("%s", "")))
 end
 
+local function tlv(data,position)
+   local tag,first=data:byte(position,position+1)
+   if not first then return end
+   local length,start=first,position+2
+   if first >= 128 then
+      local count=first-128
+      if count < 1 or count > 4 or start+count-1 > #data then return end
+      length=0
+      for index=0,count-1 do length=length*256+data:byte(start+index) end
+      start=start+count
+   end
+   local nextPosition=start+length
+   if nextPosition-1 > #data then return end
+   return {tag=tag,start=start,next=nextPosition,value=data:sub(start,nextPosition-1)}
+end
+
 local function certificateId(certificate)
-   return require"acme/_ari"(certificate,pemBody)
+   if type(certificate) == "table" and type(certificate.ariId) == "string" then return certificate.ariId end
+   local pem=type(certificate) == "table" and certificate.certificate or certificate
+   local der=pemBody(pem,"CERTIFICATE")
+   if not der then return nil,errorTable("invalid_certificate") end
+   local outer=tlv(der,1)
+   local tbs=outer and outer.tag == 0x30 and tlv(der,outer.start)
+   if not tbs or tbs.tag ~= 0x30 then return nil,errorTable("invalid_certificate") end
+   local field=tlv(der,tbs.start)
+   if field and field.tag == 0xA0 then field=tlv(der,field.next) end
+   if not field or field.tag ~= 0x02 then return nil,errorTable("invalid_certificate") end
+   local serial,position=field.value,field.next
+   while position < tbs.next do
+      field=tlv(der,position)
+      if not field then return nil,errorTable("invalid_certificate") end
+      if field.tag == 0xA3 then break end
+      position=field.next
+   end
+   if not field or field.tag ~= 0xA3 then return nil,errorTable("ari_id_unavailable") end
+   local extensions=tlv(der,field.start)
+   if not extensions or extensions.tag ~= 0x30 then return nil,errorTable("invalid_certificate") end
+   position=extensions.start
+   while position < extensions.next do
+      local extension=tlv(der,position)
+      local item=extension and extension.tag == 0x30 and tlv(der,extension.start)
+      if not item or item.tag ~= 0x06 then return nil,errorTable("invalid_certificate") end
+      local oid=item.value
+      item=tlv(der,item.next)
+      if item and item.tag == 0x01 then item=tlv(der,item.next) end
+      if not item or item.tag ~= 0x04 then return nil,errorTable("invalid_certificate") end
+      if oid == "U\29#" then
+         local sequence=tlv(item.value,1)
+         local aki=sequence and sequence.tag == 0x30 and tlv(item.value,sequence.start)
+         while aki do
+            if aki.tag == 0x80 then return ba.b64urlencode(aki.value).."."..ba.b64urlencode(serial) end
+            if aki.next >= sequence.next then break end
+            aki=tlv(item.value,aki.next)
+         end
+         return nil,errorTable("ari_id_unavailable")
+      end
+      position=extension.next
+   end
+   return nil,errorTable("ari_id_unavailable")
 end
 
 -- Called once by the Mako or Xedge TPM bootstrap before it publishes ba.tpm.
@@ -49,6 +108,99 @@ M.setTPM=function(t)
       createKey=t.createKey or t.createkey,hasKey=t.hasKey or t.haskey,
       createCsr=t.createCsr or t.createcsr}
    M.setTPM=nil
+end
+
+local function keyFunctions(tpm,jwt)
+   local function tpmMethod(name) return tpm and type(tpm[name]) == "function" and tpm[name] or nil end
+   local function restore(key)
+      if type(key) ~= "table" or key.provider ~= "tpm" then return true end
+      local has,create=tpmMethod"hasKey",tpmMethod"createKey"
+      if has and not has(key.name) then
+         if not create then return nil,errorTable("tpm_unavailable") end
+         create(key.name,key.options)
+      end
+      return true
+   end
+   local function sign(key,payload,header)
+      if type(key) == "table" and key.provider == "tpm" then
+         local method=tpmMethod"jwtSign"
+         if not method then return nil,errorTable("tpm_unavailable") end
+         local ok,problem=restore(key)
+         if not ok then return nil,problem end
+         local a,b=method(key.name,payload,header)
+         return b or a
+      end
+      local a,b=jwt.sign(payload,key,header)
+      return b or a
+   end
+   local function params(key)
+      if type(key) == "table" and key.provider == "tpm" then
+         local method=tpmMethod"keyParams"
+         if not method then return nil,errorTable("tpm_unavailable") end
+         local ok,problem=restore(key)
+         if not ok then return nil,problem end
+         return method(key.name)
+      end
+      return ba.crypto.keyparams(key)
+   end
+   local function createKey(name,options)
+      options=options or {}
+      local kind=options.type or "ecc"
+      if kind ~= "ecc" and kind ~= "rsa" then return nil,errorTable("invalid_key_type") end
+      local create,has=tpmMethod"createKey",tpmMethod"hasKey"
+      if kind == "ecc" and create then
+         local keyOptions={key="ecc",curve=options.curve or "SECP384R1"}
+         local exists=false
+         if has then exists=has(name) end
+         if not exists then create(name,keyOptions) end
+         return {provider="tpm",name=name,options=keyOptions}
+      end
+      local keyOptions=kind == "rsa" and
+         {key="rsa",bits=options.bits or 2048} or {key="ecc",curve=options.curve or "SECP384R1"}
+      return ba.create.key(keyOptions)
+   end
+   local function createCsr(key,domain)
+      local dn,types,usage={commonname=domain},{"SSL_CLIENT","SSL_SERVER"},{"DIGITAL_SIGNATURE","KEY_ENCIPHERMENT"}
+      if type(key) == "table" and key.provider == "tpm" then
+         local method=tpmMethod"createCsr"
+         if not method then return nil,errorTable("tpm_unavailable") end
+         local ok,problem=restore(key)
+         if not ok then return nil,problem end
+         return method(key.name,dn,types,usage)
+      end
+      return ba.create.csr(key,dn,types,usage)
+   end
+   return sign,params,createKey,createCsr
+end
+
+local function httpChallenge()
+   local adapter,directory={type="http-01"}
+   local expectedPath,expectedValue
+
+   function adapter:present(context,callback)
+      if directory then return reject(callback,"challenge_in_progress") end
+      expectedPath,expectedValue=context.tokenPath,context.keyAuthorization
+      local function serve(_ENV,relative)
+         if relative ~= expectedPath then return false end
+         response:setcontenttype"application/octet-stream"
+         response:setcontentlength(#expectedValue)
+         response:send(expectedValue)
+         return true
+      end
+      directory=ba.create.dir(".well-known",1)
+      directory:setfunc(serve)
+      directory:insert()
+      safeCallback(callback,true,nil)
+      return true
+   end
+
+   function adapter:cleanup(_,callback)
+      if directory then directory:unlink() end
+      directory,expectedPath,expectedValue=nil,nil,nil
+      safeCallback(callback,true,nil)
+      return true
+   end
+   return adapter
 end
 
 function M.create(options)
@@ -67,7 +219,7 @@ function M.create(options)
    local jwtSign,keyParams,createKey,createCsr,resume
    local function loadKeys()
       if not jwt then jwt=require"jwt" end
-      if not createKey then jwtSign,keyParams,createKey,createCsr=require"acme/_keys"(tpm,jwt) end
+      if not createKey then jwtSign,keyParams,createKey,createCsr=keyFunctions(tpm,jwt) end
    end
 
    local function finishClose()
@@ -79,9 +231,9 @@ function M.create(options)
    end
    local function rawRequest(service,method,url,body,headers)
       if closed then return nil,errorTable("engine_closed") end
-      local request={trusted=true,url=url,method=method,header=copy(headers or {})}
+      local request={trusted=true,url=url,method=method,header=headers}
       if body ~= nil then request.size=#body end
-      return require"acme/_http"(httpFactory,service.http,activeClients,request,body)
+      return U.http(httpFactory,service.http,activeClients,request,body)
    end
    local function decodeResponse(response,operation,url,allowEmpty)
       if response.body == "" and allowEmpty then return {},nil end
@@ -302,16 +454,14 @@ function M.create(options)
          context.dnsResolveTimeoutMs=math.floor((request.dnsResolveTimeout or 30)*1000)
       else context.tokenPath="acme-challenge/"..selected.token end
       job.challengeContext=context
-      job.challengeInstalling=true
-      local presented,presentErr=waitFor(job,function(callback) return request.challenge:present(copy(context),callback) end)
-      job.challengeInstalling=false
+      local presented,presentErr=waitFor(job,function(callback) return request.challenge:present(context,callback) end)
       if not presented then return nil,presentErr or errorTable("challenge_install_failed") end
       job.challengePresented=true
       local _,triggerErr=session:signed(account,selected.url,{},"challenge",false)
       if triggerErr then return nil,triggerErr end
       local valid,validationErr=poll(session,account,selected.url,"challenge",job)
       if not valid then return nil,validationErr end
-      local cleaned,cleanupErr=waitFor(job,function(callback) return request.challenge:cleanup(copy(context),callback) end)
+      local cleaned,cleanupErr=waitFor(job,function(callback) return request.challenge:cleanup(context,callback) end)
       job.challengePresented=false
       if not cleaned then return nil,cleanupErr or errorTable("challenge_cleanup_failed") end
       if job.cancelled then return nil,errorTable("cancelled") end
@@ -332,13 +482,13 @@ function M.create(options)
       local certificate,certificateErr=session:signed(account,finalOrder.certificate,"","certificate",false,true)
       if not certificate then return nil,certificateErr end
       local ariId=certificateId(certificate)
-      return {account=copy(account),privateKey=certificateKey,certificate=certificate,orderUrl=orderUrl,
+      return {account=account,privateKey=certificateKey,certificate=certificate,orderUrl=orderUrl,
          directoryUrl=session.service.directoryUrl,ariId=ariId},nil
    end
    local function certificateFlow(job)
       local result,flowErr=certificateMain(job)
       if job.challengePresented then
-         local cleaned,cleanupErr=waitFor(job,function(callback) return job.request.challenge:cleanup(copy(job.challengeContext),callback) end)
+         local cleaned,cleanupErr=waitFor(job,function(callback) return job.request.challenge:cleanup(job.challengeContext,callback) end)
          job.challengePresented=false
          if not cleaned then if flowErr then flowErr.cleanup=cleanupErr else flowErr=cleanupErr end end
       end
@@ -348,44 +498,52 @@ function M.create(options)
       if job.finished then return end
       job.finished=true
       job.state=err and (err.code == "cancelled" and "cancelled" or "failed") or "completed"
-      job.error=copy(err) job.result=result and copy(result) or nil
+      job.error=err
       if current == job then current=nil end
       safeCallback(job.callback,result,err)
       for _,callback in ipairs(job.cancelCallbacks) do safeCallback(callback,true,nil) end
       if not current and #queue > 0 then local nextJob=table.remove(queue,1) current=nextJob nextJob.state="running" resume(nextJob) end
       finishClose()
    end
+   -- Cancellation and unexpected Lua failures share one cleanup path.
+   local function failJob(job,problem)
+      if job.finished or job.finishing then return end
+      job.finishing=true
+      local function done(_,cleanupErr)
+         if cleanupErr then problem.cleanup=cleanupErr end
+         job.challengePresented=false
+         finishJob(job,nil,problem)
+      end
+      if job.challengeContext then
+         local ok,result,err=pcall(job.request.challenge.cleanup,
+            job.request.challenge,job.challengeContext,done)
+         if not ok then done(nil,errorTable("challenge_cleanup_failed",tostring(result)))
+         elseif result == nil and err then done(nil,err) end
+      else done() end
+   end
    resume=function(job,...)
       local args=table.pack(...)
       run(function()
-         if job.finished then return end
-         if job.cancelled and job.challengeCleanupStarted and not job.challengeCleanupComplete then return end
+         if job.finished or job.finishing then return end
          if job.cancelled and coroutine.status(job.coroutine) == "suspended" and not job.challengePresented then
             return finishJob(job,nil,errorTable("cancelled"))
          end
          local resumed,result,err=coroutine.resume(job.coroutine,table.unpack(args,1,args.n))
-         if not resumed then error(result,0) end
+         if not resumed then return failJob(job,errorTable("operation_failed",tostring(result))) end
          if coroutine.status(job.coroutine) == "dead" then finishJob(job,result,err) end
       end)
    end
    function engine:certificate(service,account,request,callback)
       if closed then return nil,errorTable("engine_closed") end
-      if type(callback) ~= "function" then return nil,errorTable("invalid_callback") end
       local resolved,serviceErr=resolveService(service)
       if not resolved then safeCallback(callback,nil,serviceErr) return nil,serviceErr end
-      if type(account) ~= "table" or type(request) ~= "table" or type(request.domain) ~= "string" or request.domain == "" then
-         local err=errorTable("invalid_request")
-         safeCallback(callback,nil,err) return nil,err
-      end
       local challenge=request.challenge
-      if challenge == nil then challenge=require"acme/_httpchallenge"() end
-      if type(challenge) ~= "table" or (challenge.type ~= "http-01" and challenge.type ~= "dns-01") or
-         type(challenge.present) ~= "function" or type(challenge.cleanup) ~= "function" then
-         local err=errorTable("invalid_challenge")
-         safeCallback(callback,nil,err) return nil,err
-      end
+      if challenge == nil then challenge=httpChallenge() end
       nextJobId=nextJobId+1
-      local job={number=nextJobId,service=resolved,account=copy(account),request=copy(request),callback=callback,
+      -- Snapshot the caller's options without copying the challenge interface.
+      local requestCopy={}
+      for name,value in pairs(request) do requestCopy[name]=name == "challenge" and value or copy(value) end
+      local job={number=nextJobId,service=resolved,account=copy(account),request=requestCopy,callback=callback,
          state="queued",cancelCallbacks={}}
       job.request.challenge=challenge
       job.coroutine=coroutine.create(function() return certificateFlow(job) end)
@@ -393,33 +551,14 @@ function M.create(options)
       function publicJob:id() return job.number end
       function publicJob:status() return {id=job.number,state=job.state,domain=job.request.domain,error=copy(job.error)} end
       function publicJob:cancel(cancelCallback)
-         if cancelCallback ~= nil and type(cancelCallback) ~= "function" then return nil,errorTable("invalid_callback") end
          if job.finished then safeCallback(cancelCallback,true,nil) return true end
          job.cancelled=true
          if cancelCallback then job.cancelCallbacks[#job.cancelCallbacks+1]=cancelCallback end
          if job.state == "queued" then
             for index,queued in ipairs(queue) do if queued == job then table.remove(queue,index) break end end
             finishJob(job,nil,errorTable("cancelled"))
-         elseif job.challengeContext and not job.challengeCleanupStarted then
-            job.challengeCleanupStarted=true
-            local completed=false
-            local function cleanupComplete(_,cleanupErr)
-               if completed or job.finished then return end
-               completed=true
-               job.challengeCleanupComplete=true
-               job.challengePresented=false
-               local err=errorTable("cancelled")
-               if cleanupErr then err.cleanup=cleanupErr end
-               finishJob(job,nil,err)
-            end
-            local ok,result,cleanupErr=pcall(function()
-               return job.request.challenge:cleanup(copy(job.challengeContext),cleanupComplete)
-            end)
-            if not ok then
-               cleanupComplete(nil,errorTable("challenge_cleanup_failed",tostring(result)))
-            elseif result == nil and cleanupErr ~= nil then
-               cleanupComplete(nil,cleanupErr)
-            end
+         elseif job.challengeContext then
+            failJob(job,errorTable("cancelled"))
          elseif coroutine.status(job.coroutine) == "suspended" and not job.challengePresented then
             finishJob(job,nil,errorTable("cancelled"))
          end
@@ -430,7 +569,6 @@ function M.create(options)
       return publicJob
    end
    local function standaloneOperation(service,callback,action)
-      if type(callback) ~= "function" then return nil,errorTable("invalid_callback") end
       if closed then return reject(callback,"engine_closed") end
       local resolved,serviceErr=resolveService(service)
       if not resolved then safeCallback(callback,nil,serviceErr) return nil,serviceErr end
@@ -496,7 +634,6 @@ function M.create(options)
       return result
    end
    function engine:close(callback)
-      if callback ~= nil and type(callback) ~= "function" then return nil,errorTable("invalid_callback") end
       closed=true
       local queued=queue queue={}
       if current then current.public:cancel() end
