@@ -9,7 +9,7 @@ The Lua XML-RPC implementation replaces the original C implementation.
 
 
 local fmt,strmatch,sfind = string.format, string.match,string.find
-local gsub, strchar = string.gsub, string.char
+local gsub = string.gsub
 local tconcat, tinsert = table.concat, table.insert
 
 local assert,error,type,pairs,ipairs,next,pcall,setmetatable =
@@ -24,8 +24,6 @@ ba.xmlrpc=nil
 
 local trace=trace
 local tonumber=tonumber
-
-local mfloor = math and math.floor or nil
 
 local xparser =require"xparser"	    -- xml parser engine
 local xml2table =require"xml2table" -- standard parser callback function
@@ -50,22 +48,26 @@ local function checkArg(arg, expected, msg)
    doError(fmt("%s expected a %s, not a %s.",msg or "",expected,type(arg)),3)
 end
 
+local function xmltext(s)
+   return gsub(s,"[<>&\r]",{["<"]="&lt;",[">"]="&gt;",["&"]="&amp;",["\r"]="&#13;"})
+end
+
 
 local decodeParams
 do -- Param decoding
    local function getVal(v)
-      if v.type == "CDATA" then return v.value end
-      if v.text then return v.text end
-      if v[1] then
-	 v=v[1]
-	 if v.value then return v.value end
+      local text={}
+      for _,part in ipairs(v) do
+         if part.type=="TEXT" or part.type=="CDATA" then
+            text[#text+1]=part.value
+         end
       end
-      return ""
+      return tconcat(text)
    end
    local xparam
    local function xstruct(v)
       local t = {}
-      for k,v in ipairs(v) do
+      for k,v in ipairs(v.elements or {}) do
 	 local el=v.elements
 	 t[getVal(el.name)]=xparam(el.value)
       end
@@ -73,13 +75,15 @@ do -- Param decoding
    end
    local function xarray(v)
       local t={}
-      for k,v in ipairs(v.elements.data) do
+      for k,v in ipairs(v.elements.data.elements or {}) do
 	 tinsert(t, xparam(v))
       end
       return t
    end
 
-   local function xnumber(v) return tonumber(getVal(v)) end
+   local function xnumber(v)
+      return (assert(tonumber(getVal(v)),"Invalid XML-RPC number"))
+   end
    local xfuncs = {
       base64 = function(v) return b64decode(getVal(v)) end,
       boolean = function(v)
@@ -100,23 +104,26 @@ do -- Param decoding
    xfuncs.value=xfuncs.string
 
    xparam = function(v)
-      val=v.value and (v.value[1].tag_name and v.value[1] or v.value) or v[1] -- Val optional for strings
-      if val.tag_name then
-	 return xfuncs[val.tag_name](val)
-      end
-      return xfuncs[v.tag_name](v)
+      local val=v.value or v
+      val=val.elements and val.elements[1] or val -- Type optional for strings.
+      return xfuncs[val.tag_name](val)
    end
 
    decodeParams = function(doc)
       local args={}
       local mCallEl = doc.elements.methodCall.elements
       local methodName=getVal(mCallEl.methodName)
-      for k,v in ipairs(mCallEl.params) do
-	 tinsert(args, xparam(v.elements))
+      if mCallEl.params then
+         for k,v in ipairs(mCallEl.params.elements or {}) do
+            tinsert(args, xparam(v.elements))
+         end
       end
       local ok, _, intf, method = sfind(methodName, "^([^.]+)%.(.+)$")
-      if not intf or not method then
-	 doError(fmt("Invalid method name: %s",methodName))
+      if not intf then
+         if methodName=="" or sfind(methodName,".",1,true) then
+            doError(fmt("Invalid method name: %s",methodName))
+         end
+         method=methodName
       end
       return intf, method, args
    end
@@ -129,29 +136,16 @@ do  -- Response encoding
    local encodeNum
    local encodeString
 
-   if mfloor then
-      encodeNum = function(x)
-	 if x > 0xFFFF or x ~= mfloor(x) then
-	    return fmt("<double>%f</double>",x)
-	 end
-	 return fmt("<i4>%d</i4>",x)
+   encodeNum = function(x)
+      assert(x-x==0,"Invalid XML-RPC number")
+      if x < -2147483648 or x >= 2147483648 or x % 1 ~= 0 then
+         return fmt("<double>%.17g</double>",x)
       end
-   else
-      encodeNum = function(x) return fmt("<i4>%d</i4>",x) end
+      return fmt("<i4>%d</i4>",x)
    end
 
-   do
-      local xrepl={["<"]="&lt;",[">"]="&gt;",["&"]="&amp;"}
-      local i
-      for i=1,31 do xrepl[strchar(i)] = "&#"..i..";" end
-      local xpatt = "([\001-\031<>&])"
-      encodeString = function(s)
-	 if sfind(s,xpatt) then
-	    return fmt("<string><![CDATA[%s]]></string>",s)
-	 end
-	 return fmt("<string>%s</string>",s)
-	 --return fmt("<string>%s</string>",gsub(s,xpatt,xrepl))
-      end
+   encodeString = function(s)
+      return fmt("<string>%s</string>",xmltext(s))
    end
 
    local function tabIsArray(t)
@@ -185,10 +179,11 @@ do  -- Response encoding
 	    tinsert(t,"<struct>")
 	    for k,v in pairs(x) do
 	       tinsert(t,fmt("<member><name>%s</name>%s</member>",
-			     k,encodeX(v,rt)))
+			     xmltext(k),encodeX(v,rt)))
 	    end
 	    tinsert(t,"</struct>")
 	 end
+	 rt[x]=nil
 	 return tconcat(t)
       end,
       ["function"] = function(x)
@@ -216,10 +211,11 @@ end -- Response encoding
 
 
 local function read(request)
-   local lxp = xparser.create(xml2table,{},"SKIPBLANK")
+   local lxp = xparser.create(xml2table,{},"PRESERVE")
    local f = request:rawrdr()
    local doc,ret,err
-   for a in f do -- default read size is LUAL_BUFFERSIZE (512 ?)
+   local a,readerr=f()
+   while a do
       if not doc then
 	 ret,err = lxp:parse(a)
 	 if (ret == "DONE") then
@@ -228,8 +224,10 @@ local function read(request)
 	    doError(fmt("XML syntax error: %s",err))
 	 end
       end
+      a,readerr=f()
    end
    lxp:destroy()
+   if readerr then doError(readerr) end
    if not doc then doError"Premature end of XML" end
    return doc
 end
@@ -240,8 +238,8 @@ local metat = { __index = {} }
 function metat.__index:execute(request, response)
    assert(request)
    assert(response)
-   self.request=request
-   self.response=response
+   self=setmetatable({request=request,response=response,
+                      intf=self.intf,name=self.name},metat)
    local ok, doc = pcall(read, request)
    if ok then
       local ok, intfn, methn, args = pcall(decodeParams,doc)
@@ -249,12 +247,13 @@ function metat.__index:execute(request, response)
       doc=nil
       if ok then
 	 -- Lookup interface object
-	 local intf = intfn and self.intf[intfn] or self.intf
+	 local intf = self.intf
+	 if intfn then intf=intf[intfn] end
 	 local method
-	 if intf then
+	 if type(intf)=="table" then
 	    method = intf[methn] -- Lookup method
 	 end
-	 if method then
+	 if type(method)=="function" then
 	    local result,errno,emsg
 	    -- execute method
 	    ok,result,errno,emsg = pcall(method, unpack(args))
@@ -285,7 +284,7 @@ function metat.__index:execute(request, response)
 	       found=false
 	    end
 	    if not found then
-	       methn=fmt("%s.%s",intfn,methn)
+	       methn=intfn and fmt("%s.%s",intfn,methn) or methn
 	       local msg=fmt("Cannot find method: %s", methn)
 	       self:sendError(0,msg)
 	    end
@@ -338,7 +337,7 @@ function metat.__index:sendError(err, msg)
       msg="(unknown)"
    end
    trace("XML-RPC",msg)
-   sendResp(self.request,self.response,fmt(fmtFault,err,msg))
+   sendResp(self.request,self.response,fmt(fmtFault,err,xmltext(msg)))
 end
 
 function metat.__index:sendResp(obj)

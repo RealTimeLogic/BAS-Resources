@@ -44,13 +44,13 @@ function metat.__index:greet(domain)
 
 
 function metat.__index:upgrade(shark)
-   self.tp:upgrade(shark or base.ba.sharkclient())
+   self.try(self.tp:upgrade(shark or base.ba.sharkclient()))
 end
 
 function metat.__index:starttls(domain,shark)
    self.try(self.tp:command("STARTTLS"))
    socket.skip(1, self.try(self.tp:check("2..")))
-   self.tp:upgrade(shark)
+   self.try(self.tp:upgrade(shark))
    self.try(self.tp:command("EHLO", domain or DOMAIN))
    return socket.skip(1, self.try(self.tp:check("2..")))
 end
@@ -233,7 +233,7 @@ local function adjust_headers(mesgt)
     for i,v in base.pairs(mesgt.headers or {}) do
        t[string.lower(i)] = v
     end
-    t["mime-version"] = "Mime-version","1.0"   -- this can't be overriden
+    t["mime-version"] = "1.0"   -- this can't be overriden
     mesgt.headers = t
 end
 
@@ -256,7 +256,7 @@ end
 ---------------------------------------------------------------------------
 -- High level SMTP API
 -----------------------------------------------------------------------------
-send = socket.protect(function(mailt)
+local sendmail = socket.protect(function(mailt)
     local s = open(mailt.server, mailt.port, mailt.create)
     if mailt.shark and not mailt.starttls then s:upgrade(mailt.shark) end
     local ext = s:greet(mailt.domain)
@@ -268,13 +268,14 @@ send = socket.protect(function(mailt)
        s.ext = sext
     end
     mkext(ext)
-    if mailt.starttls and s.ext["STARTTLS"] then
+    if mailt.starttls then
+       s.try(s.ext["STARTTLS"], "STARTTLS not supported")
        ext=s:starttls(mailt.domain,mailt.shark)
        mkext(ext)
     end
 
-    socket.try(mailt.from, "Sender (from) is required")
-    socket.try(mailt.rcpt, "Recipient (rcpt) is required")
+
+
 
     s.fromext=""
     s.rcptext=""
@@ -312,6 +313,12 @@ send = socket.protect(function(mailt)
     s:quit()
     return s:close()
 end)
+
+function send(mailt)
+    base.assert(mailt.from, "Sender (from) is required")
+    base.assert(mailt.rcpt, "Recipient (rcpt) is required")
+    return sendmail(mailt)
+end
 
 help = socket.protect(function(mailt)
     local s = open(mailt.server, mailt.port)

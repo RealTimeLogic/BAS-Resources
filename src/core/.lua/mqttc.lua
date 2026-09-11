@@ -569,9 +569,10 @@ local function recPingresp(self)
 end
 
 local function recDisconnect(_,bta)
-   local propT=decodePropT(bta,decVBInt(bta,2))
+   local len=bta and #bta or 0
+   local propT=len < 2 and {} or decodePropT(bta,decVBInt(bta,2))
    if propT then
-      local statusT={reasoncode=bta[1],properties=propT}
+      local statusT={reasoncode=len > 0 and bta[1] or 0,properties=propT}
       return nil,"mqtt","disconnect",statusT
    end
    return nil,"mqtt","protocolerror"
@@ -627,8 +628,8 @@ local function restoreQueues(self,session)
    self.savedT=nil
 end
 
-local function onErrStatus(self,etype,code)
-   local reconn=self.onstatus(etype,code)
+local function onErrStatus(self,etype,code,details)
+   local reconn=self.onstatus(etype,code,details)
    if reconn then
       self.reconTimeout="number" == type(reconn) and reconn
    end
@@ -636,13 +637,13 @@ local function onErrStatus(self,etype,code)
 end
 
 local function coMqttRun(self)
-   local ok,etype,status
+   local ok,etype,status,details
    while self.connected do
       local cpt,bta=mqttRec(self)
       if not cpt then status=bta break end
       local func=recCpT[cpt&0xF0]
       if not func then etype,status="mqtt","protocolerror" break end
-      ok,etype,status=func(self,bta,cpt)
+      ok,etype,status,details=func(self,bta,cpt)
       if not ok then break end
       etype,status=nil,nil
    end
@@ -658,7 +659,7 @@ local function coMqttRun(self)
 	 etype="sock"
       end
    end
-   if not self.disconnected and onErrStatus(self,etype,status) then
+   if not self.disconnected and onErrStatus(self,etype,status,details) then
       self.connectTime=nil
       if "sysshutdown" ~= status then
 	 startMQTT(self,encConnect(self,false))
@@ -668,17 +669,18 @@ end
 
 local function coMqttConnect(sock,self,conbta)
    local reconnect
-   sock:write(conbta)
-   local cpt,bta=mqttRec(self)
+   local sent,err=sock:write(conbta)
+   local cpt,bta
+   if sent then cpt,bta=mqttRec(self) else bta=err end
    if cpt then
       local perr=true
       if (cpt&0xF0) == MQTT_CONNACK then
-	 local ackProp=#bta > 2 and decodePropT(bta,decVBInt(bta,3))
+	 local ackProp=bta and #bta > 2 and decodePropT(bta,decVBInt(bta,3))
 	 if ackProp then
 	    perr=false
 	    local session=(bta[1] & 1) == 1 and true or false
 	    local reason=bta[2]
-	    reconnect=self.onstatus("mqtt","connect",{
+	    reconnect=onErrStatus(self,"mqtt","connect",{
 	       sessionpresent=session,reasoncode=reason,properties=ackProp})
 	    if reason < 128 and reconnect then
 	       local opt=self.opt
@@ -802,7 +804,7 @@ function C:subscribe(topic,onsuback,opt,prop)
       prop.zz_subid=getSubscriptionId(self)
    end
    local retain=opt.retainaspublished==true and 8 or 0
-   local retainhandling=0~=retain and ((opt.retainhandling or 0)<<4) or 0
+   local retainhandling=(opt.retainhandling or 0)<<4
    local nolocal=opt.nolocal and 4 or 0
    local qos=opt.qos or 0
    qos=qos&3
@@ -877,7 +879,7 @@ local function connect2addr(self,opt)
    if not sock then return nil,err end
    if opt.shark and not opt.nocheck then
       local trusted,status=sock:trusted(self.addr)
-      if not trusted then return nil,status end
+      if not trusted then sock:close() return nil,status end
    end
    return sock
 end

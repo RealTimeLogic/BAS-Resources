@@ -100,9 +100,10 @@ local encMetrics,encPropertySet -- forward decl. functions
 local function encPropVal(pT,level)
    if "table" ~= type(pT) then error("property value not a table",level) end
    local dt=DataTypes[slower(pT.type or "")]
-   if not pT.value then error("Property missing value",level) end
    if not dt then error("Unknown Property type",level) end
-   if DataTypes.propertyset==dt then
+   if nil == pT.value then
+      if not pT.is_null then error("Property missing value",level) end
+   elseif DataTypes.propertyset==dt then
       encPropertySet(pT.value,level+1)
    elseif DataTypes.propertysetlist==dt then
       if "table" ~= type(pT.value) then error("PropertySetList not a table",level) end
@@ -129,7 +130,7 @@ local function encParameters(psT,name,level)
    if "table" ~= type(psT) then error(fmt("Template %s missing parameters",name),level) end
    for ix,pT in ipairs(psT) do
       local dt=DataTypes[slower(pT.type or "")]
-      if not pT.value then paramErr("missing",ix,name,level) end
+      if nil == pT.value then paramErr("missing",ix,name,level) end
       if not dt then paramErr("unknown type",ix,name,level) end
       pT.type,pT[DataTypeNames[dt]]=dt,pT.value
       pT.value=nil
@@ -189,8 +190,9 @@ local function encMetricVal(dt,mT,level)
    mT.value=nil
    local name=mT.name
    if not name then error("Metric missing name",level) end
-   if nil == v then error(fmt("Metric %s missing value",name),level) end
-   if DataTypes.template==dt then
+   if nil == v then
+      if not mT.is_null then error(fmt("Metric %s missing value",name),level) end
+   elseif DataTypes.template==dt then
       encTemplate(name,v,level+1)
    elseif DataTypes.dataset==dt then
       encDataset(name,v,level+1)
@@ -228,40 +230,60 @@ end
 
 local decMetrics -- forward decl.
 
+local function decType(dt)
+   local name=RDataTypes[dt]
+   if not name then error("unsupported datatype",0) end
+   return name
+end
+
+local function decSigned(v,dt)
+   if v and dt and dt >= 1 and dt <= 3 then
+      local range=2^(8*2^(dt-1))
+      v=v%range
+      if v >= range/2 then v=v-range end
+      return math.tointeger(v) or v
+   end
+   return v
+end
+
 local function decPropertySet(psT)
+   psT.keys,psT.values=psT.keys or {},psT.values or {}
    for _,p in ipairs(psT.values) do
       local v,dt=p.value,p.type
-      p.value,p[v]=p[v],nil
-      if DataTypes.propertyset==dt then
+      if v then p.value,p[v]=decSigned(p[v],dt),nil end
+      if p.value and DataTypes.propertyset==dt then
 	 decPropertySet(p.value)
-      elseif DataTypes.propertysetlist==dt then
+      elseif p.value and DataTypes.propertysetlist==dt then
+	 p.value.propertyset=p.value.propertyset or {}
 	 for _, p in ipairs(p.value.propertyset) do decPropertySet(p) end
       end
-      p.type = RDataTypes[dt]
+      p.type = decType(dt)
    end
 end
 
 local function decTemplate(vT)
    vT.isDefinition,vT.is_definition=vT.is_definition,nil
+   vT.templateRef,vT.template_ref=vT.template_ref,nil
+   vT.metrics,vT.parameters=vT.metrics or {},vT.parameters or {}
    decMetrics(vT.metrics)
    if vT.parameters then
       for _,p in ipairs(vT.parameters) do
-	 p.type,p.value,p[p.value]=RDataTypes[p.type],p[p.value],nil
+	 p.type,p.value,p[p.value]=decType(p.type),decSigned(p[p.value],p.type),nil
       end
    end
 end
 local function decDataset(dsT)
-   for ix,dt in ipairs(dsT.types) do
-      dsT.types[ix] = RDataTypes[dt]
-   end
+   dsT.columns,dsT.types=dsT.columns or {},dsT.types or {}
    local rows={}
-   for rix,row in ipairs(dsT.rows) do
-      for _,v in ipairs(row.elements) do
-	 v.value,v[v.value]=v[v.value],nil
+   for rix,row in ipairs(dsT.rows or {}) do
+      row.elements=row.elements or {}
+      for ix,v in ipairs(row.elements) do
+	 row.elements[ix]=decSigned(v[v.value],dsT.types[ix])
       end
       rows[rix]=row.elements
    end
    dsT.rows=rows
+   for ix,dt in ipairs(dsT.types) do dsT.types[ix]=decType(dt) end
 end
 
 
@@ -270,10 +292,11 @@ decMetrics=function(msT)
       local v=m.value
       if v then m.value,m[v]=m[v],nil end
       local dt=m.datatype
-      m.type,m.datatype=RDataTypes[dt],nil
-      if DataTypes.template==dt then
+      m.value=decSigned(m.value,dt)
+      m.type,m.datatype=decType(dt),nil
+      if m.value and DataTypes.template==dt then
 	 decTemplate(m.value)
-      elseif DataTypes.dataset==dt then
+      elseif m.value and DataTypes.dataset==dt then
 	 decDataset(m.value)
       end
       if m.properties then decPropertySet(m.properties) end
@@ -283,6 +306,22 @@ end
 ------------------------------------------------------------------------
 -- The Sparkplug protocol stack extends: https://realtimelogic.com/ba/doc/?url=MQTT.html
 ------------------------------------------------------------------------
+
+local function decodePayload(pl)
+   local t,err=pb.decode(PayloadNS,pl)
+   if t then
+      t.metrics=t.metrics or {}
+      decMetrics(t.metrics)
+   end
+   return t,err
+end
+
+local function decode(pl)
+   assert(type(pl)=="string","string expected")
+   local ok,t,err=pcall(decodePayload,pl)
+   if not ok then return nil,t end
+   return t,err
+end
 
 local createMqtt -- func, forward decl.
 
@@ -335,8 +374,8 @@ SP.__index = SP
 function SP:stop()
    -- Implementation
    if self._running then
-      self._running=false
-      self._mqtt.sock:close()
+      self._running,self._subscribeCntr=false,nil
+      if self._mqtt.sock then self._mqtt.sock:close() end
       self._ev:emit"close"
       return true
    end
@@ -346,6 +385,7 @@ SP.close=SP.stop
 
 -- Publishes Node Birth Certificate (NBIRTH)
 function SP:publishNodeBirth(pl)
+   assert(self._running,"client stopped")
    self._nextSeq=0 -- Reset sequence number
    pl=cloneT(pl)
    tinsert(pl.metrics,bdSeqMetric(self))
@@ -354,21 +394,25 @@ end
 
 -- Publishes Device Birth Certificate (DBIRTH)
 function SP:publishDeviceBirth(devId, pl)
+   assert(self._running,"client stopped")
    self._mqtt:publish(self._fmtDTopic("DBIRTH",devId),encode(addSeq(self,cloneT(pl))))
 end
 
 -- Publishes Node Data (NDATA)
 function SP:publishNodeData(pl)
+   assert(self._running,"client stopped")
    self._mqtt:publish(self._fmtNTopic"NDATA",encode(addSeq(self,cloneT(pl))))
 end
 
 -- Publishes Device Data (DDATA)
 function SP:publishDeviceData(devId, pl)
+   assert(self._running,"client stopped")
    self._mqtt:publish(self._fmtDTopic("DDATA",devId),encode(addSeq(self,cloneT(pl))))
 end
 
 -- Publishes Device Death Certificate (DDEATH)
 function SP:publishDeviceDeath(devId, pl)
+   assert(self._running,"client stopped")
    pl=cloneT(pl)
    pl.metrics={}
    self._mqtt:publish(self._fmtDTopic("DDEATH",devId),encode(addSeq(self,pl)))
@@ -381,10 +425,8 @@ end
 
 -- NCMD or DCMD
 local function decodePl(self,pl,type)
-   local t,err=pb.decode(PayloadNS, pl)
-   if t then
-      decMetrics(t.metrics)
-   else
+   local t,err=decode(pl)
+   if not t then
       self._ev:emit("error",fmt("Cannot decode %s: %s",type,err))
    end
    return t
@@ -400,12 +442,12 @@ local function manageNCmd(self,_,pl)
    pl=decodePl(self,pl,"NCMD")
    if pl then
       local ms={}
-      for k,m in pairs(pl.metrics) do
+      for _,m in ipairs(pl.metrics) do
 	 local evn=nodeCtrl[m.name]
 	 if evn then
-	    self._ev:emit(evn,m)
+	    if m.type=="boolean" and m.value==true then self._ev:emit(evn,m) end
 	 else
-	    ms[k]=m
+	    tinsert(ms,m)
 	 end
       end
       pl.metrics=ms
@@ -442,7 +484,7 @@ local function onPub(self,topic,pl)
    iter() -- Skip ver
    local state=iter() -- STATE or groupID
    local groupID=iter() -- Only for STATE
-   local manage=messageTypesT[groupID or state]
+   local manage=messageTypesT[state == "STATE" and state or groupID]
    if manage then
       manage(self,iter,pl,groupID)
    else
@@ -451,8 +493,12 @@ local function onPub(self,topic,pl)
 end
 
 local function onsuback(self,topic,reason) -- Check the MQTT subscribe status
+   if not self._subscribeCntr then return end
    if reason and 0x80 <= reason then
+      self._subscribeCntr=nil
+      self._mqtt.sock:close() -- Let the MQTT receive loop reconnect.
       self._ev:emit("error",fmt("Subscribe failed for %s, reasons: %d", topic, reason),reason)
+      return
    end
    self._subscribeCntr=self._subscribeCntr+1
    if 3 == self._subscribeCntr then
@@ -472,12 +518,12 @@ local function onstatus(self,type,code,status)
       end
       if "connect" == code and 0 == status.reasoncode then
 	 self._connected,self._subscribeCntr=true,0
-	 mqtt:subscribe(self._fmtNTopic"NCMD",
-			function(t,p) onsuback(self,t,p) end,{qos=1})
-	 mqtt:subscribe(self._fmtNTopic"DCMD".."/#",
-			function(t,p) onsuback(self,t,p) end,{qos=1})
-	 mqtt:subscribe("spBv1.0/STATE/#",
-			function(t,p) onsuback(self,t,p) end,{qos=1})
+	 local function subscribe(topic)
+	    mqtt:subscribe(topic,function(t,p) onsuback(self,topic,p or t) end,{qos=1})
+	 end
+	 subscribe(self._fmtNTopic"NCMD")
+	 subscribe(self._fmtNTopic"DCMD".."/#")
+	 subscribe("spBv1.0/STATE/#")
 	 return self._running
       end
    end
@@ -541,9 +587,5 @@ return {
       encMetrics(pl.metrics,"metrics",3)
       return pl,pb.encode(PayloadNS,pl)
    end,
-   decode=function(pl)
-      local t,err=pb.decode(PayloadNS, pl)
-      if t and t.metrics then decMetrics(t.metrics) end
-      return t,err
-   end
+   decode=decode
 }

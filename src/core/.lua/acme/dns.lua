@@ -4,8 +4,6 @@ local errorTable,copy,safeCallback,isHex,reject=U.err,U.copy,U.callback,U.isHex,
 local ipv4,schedule=U.ipv4,U.schedule
 local encode,decode=ba.json.encode,ba.json.decode
 
-local function hexToBinary(value) return (value:gsub("%x%x",function(pair) return string.char(tonumber(pair,16)) end)) end
-
 local function normalizePortalUrl(value)
    if type(value) ~= "string" or not value:match("^https://") or value:find("[#?%s]") then
       return nil,errorTable("invalid_portal_url") end
@@ -21,7 +19,7 @@ end
 function M.identity(options)
    options=options or {}
    if options.portalUrl ~= nil or options.zoneKey ~= nil or
-      options.secret ~= nil or options.proof ~= nil then return options end
+      options.proof ~= nil then return options end
    local ok,module=pcall(require,"etokengen")
    if not ok then ok,module=pcall(require,"tokengen") end
    if not ok or type(module.proof) ~= "function" then
@@ -42,24 +40,8 @@ function M.createClient(options)
    local portalUrl,urlErr=normalizePortalUrl(options.portalUrl)
    if not portalUrl then return nil,urlErr end
    if not isHex(options.zoneKey,64) then return nil,errorTable("invalid_zone_key") end
-   local zoneKey,suppliedSecret,suppliedProof=string.lower(options.zoneKey),options.secret,options.proof
-   if (suppliedSecret == nil) == (suppliedProof == nil) then
-      return nil,errorTable("invalid_proof_source")
-   end
-
-   local proof,proofKey
-   if suppliedSecret ~= nil then
-      if not isHex(suppliedSecret,64) then return nil,errorTable("invalid_zone_secret") end
-      proofKey=ba.crypto.PBKDF2("sha256",string.upper(suppliedSecret),
-         hexToBinary(zoneKey),1000,32)
-      proof=function(message)
-         return ba.crypto.hash("hmac","sha256",proofKey)(message)(true,"binary")
-      end
-   elseif type(suppliedProof) == "function" then
-      proof=suppliedProof
-   else
-      return nil,errorTable("invalid_proof_source")
-   end
+   local zoneKey,proof=string.lower(options.zoneKey),options.proof
+   if type(proof) ~= "function" then return nil,errorTable("invalid_proof_source") end
 
    local deps=options.dependencies or {}
    local httpFactory=deps.httpFactory or function(httpOptions)
@@ -68,7 +50,7 @@ function M.createClient(options)
    local reverseFactory=deps.reverse or ba.revcon
    local run=deps.run or function(action) ba.thread.run(action) end
    local jsonEncode,jsonDecode=deps.jsonEncode or encode,deps.jsonDecode or decode
-   local httpOptions=copy(options.http or {})
+   local httpOptions,reverseOptions=copy(options.http or {}),options.reverse
    local credential
    if options.credential ~= nil then
       if not isHex(options.credential,64) then return nil,errorTable("invalid_device_credential") end
@@ -111,7 +93,7 @@ function M.createClient(options)
       if not ok or type(signature) ~= "string" or #signature ~= 32 then
          return nil,errorTable("proof_failed")
       end
-      local op=copy(options.reverse or {})
+      local op=copy(reverseOptions or {})
       op.url=portalUrl
       if op.shark == nil and ba.sharkclient then op.shark=ba.sharkclient() end
       stopReverse()
@@ -247,6 +229,7 @@ function M.createClient(options)
          if not address then return nil,addressErr end
          local _,updateErr=devicePost("SetIpAddress",{ipAddress=address})
          if updateErr then return nil,updateErr end
+         result.sockname=address -- Local endpoint of the portal connection.
          return result
       end)
    end
@@ -299,7 +282,7 @@ function M.createClient(options)
    function client:identity() return copy(identity) end
 
    function client:close(callback)
-      closed,credential,proofKey,suppliedSecret,suppliedProof=true,nil,nil,nil,nil
+      closed,credential,proof=true,nil,nil
       stopReverse()
       for http in pairs(clients) do http:close() end
       clients={}
@@ -529,7 +512,7 @@ function M.createSharkTrust(options)
       if not state then return safeCallback(callback,true) end
       client:removeAcmeRecord(function(result,problem)
          if result and not problem then emit(31) end
-         safeCallback(callback,result or not problem,problem)
+         safeCallback(callback,result or not problem or nil,problem)
       end)
       return true
    end
@@ -538,16 +521,22 @@ function M.createSharkTrust(options)
       return {type="sharktrust",loaded=loaded,enrolled=state ~= nil,name=state and state.name,
          deviceId=state and state.deviceId,portalUrl=identity.portalUrl,operation=busy,
          challenge=challenge and {recordName=challenge.context.recordName,ready=challenge.ready},
-         pendingSave=pendingState ~= nil}
+         pendingSave=pendingState ~= nil,busy=busy ~= nil or loading or saving or #saveQueue > 0}
    end
    function adapter:close(callback)
       if closed then return safeCallback(callback,true) end
+      if busy or loading or saving or saveQueue[1] then return nil,"busy" end
       closed=true
       local active=challenge
       challenge=nil
       if active and active.timer then active.timer:cancel() end
       if active and active.callback then safeCallback(active.callback,nil,errorTable("adapter_closed")) end
-      local function done() client:close(function(_,problem) safeCallback(callback,not problem,problem) end) end
+      local function done(_,removeError)
+         client:close(function(_,problem)
+            problem=removeError or problem
+            safeCallback(callback,not problem or nil,problem)
+         end)
+      end
       if state and active then client:removeAcmeRecord(done) else done() end
       return true
    end
@@ -585,8 +574,9 @@ function M.createManual(options)
    end
 
    function adapter:cancel(callback)
-      if pending then safeCallback(pending,nil,errorTable("challenge_cancelled")) end
+      local operation=pending
       phase,context,pending="idle",nil,nil
+      if operation then safeCallback(operation,nil,errorTable("challenge_cancelled")) end
       safeCallback(callback,true,nil)
       return true
    end

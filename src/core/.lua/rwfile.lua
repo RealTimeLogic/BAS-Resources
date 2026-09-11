@@ -9,15 +9,20 @@ local function file(io,name,data)
       if fp then ret,err = fp:write(data) end
    else
       fp,err=io:open(name)
-      if fp then ret=fp:read"*a" end
+      if fp then ret,err=fp:read"*a" end
    end
-   if fp then fp:close() end
+   if fp then
+      local ok,closeErr=fp:close()
+      if not ok and not err then ret,err=nil,closeErr end
+   end
    return ret,err
 end
 
 local function json(io,name,tab)
    if tab then
-      return file(io,name,ba.json.encode(tab))
+      local data,err=ba.json.encode(tab)
+      if not data then return nil,err end
+      return file(io,name,data)
    end
    local ret,err=file(io,name)
    if ret then

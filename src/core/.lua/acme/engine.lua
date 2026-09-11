@@ -128,9 +128,11 @@ local function keyFunctions(tpm,jwt)
          local ok,problem=restore(key)
          if not ok then return nil,problem end
          local a,b=method(key.name,payload,header)
+         if not a then return nil,type(b) == "table" and b or errorTable("sign_failed",b) end
          return b or a
       end
       local a,b=jwt.sign(payload,key,header)
+      if not a then return nil,type(b) == "table" and b or errorTable("sign_failed",b) end
       return b or a
    end
    local function params(key)
@@ -216,6 +218,7 @@ function M.create(options)
    local tpm=trustedTpm or options.tpm
    local activeClients,closeCallbacks,standalone,closed={},{},0,false
    local queue,engine,nextJobId,current={},{},0
+   local closeError
    local jwtSign,keyParams,createKey,createCsr,resume
    local function loadKeys()
       if not jwt then jwt=require"jwt" end
@@ -226,7 +229,7 @@ function M.create(options)
       if closed and standalone == 0 and not current and #queue == 0 then
          local callbacks=closeCallbacks
          closeCallbacks={}
-         for _,callback in ipairs(callbacks) do safeCallback(callback,true,nil) end
+         for _,callback in ipairs(callbacks) do safeCallback(callback,not closeError or nil,closeError) end
       end
    end
    local function rawRequest(service,method,url,body,headers)
@@ -319,7 +322,7 @@ function M.create(options)
             self.nonce=response.headers["replay-nonce"]
             if response.status == 200 or response.status == 201 or response.status == 204 then
                if rawResult then return response.body,nil,response end
-               local value,decodeErr=decodeResponse(response,operation,url,response.status == 204)
+               local value,decodeErr=decodeResponse(response,operation,url,response.status == 204 or operation == "revokeCert")
                if not value then return nil,decodeErr end
                return value,nil,response
             end
@@ -496,12 +499,15 @@ function M.create(options)
    end
    local function finishJob(job,result,err)
       if job.finished then return end
+      if err and type(err) ~= "table" then err=errorTable("operation_failed",tostring(err)) end
       job.finished=true
       job.state=err and (err.code == "cancelled" and "cancelled" or "failed") or "completed"
       job.error=err
+      local cleanupErr=err and err.cleanup
+      if closed then closeError=closeError or cleanupErr end
       if current == job then current=nil end
       safeCallback(job.callback,result,err)
-      for _,callback in ipairs(job.cancelCallbacks) do safeCallback(callback,true,nil) end
+      for _,callback in ipairs(job.cancelCallbacks) do safeCallback(callback,not cleanupErr or nil,cleanupErr) end
       if not current and #queue > 0 then local nextJob=table.remove(queue,1) current=nextJob nextJob.state="running" resume(nextJob) end
       finishClose()
    end
@@ -601,8 +607,9 @@ function M.create(options)
          local url=directory.renewalInfo:gsub("/+$","").."/"..identifier
          local response,requestErr=rawRequest(resolved,"GET",url,nil,{Accept="application/json"})
          if not response then return nil,requestErr end
-         local value=select(1,decodeResponse(response,"renewalInfo",url,true))
+         local value,decodeErr=decodeResponse(response,"renewalInfo",url,true)
          if response.status ~= 200 then return nil,problemError(value,response.status,response.headers,"renewalInfo",url) end
+         if not value then return nil,decodeErr end
          if type(value.suggestedWindow) ~= "table" or type(value.suggestedWindow.start) ~= "string" or type(value.suggestedWindow["end"]) ~= "string" then
             return nil,errorTable("invalid_renewal_info","The renewalInfo response has no suggested window",{url=url})
          end

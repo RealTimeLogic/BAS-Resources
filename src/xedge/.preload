@@ -58,17 +58,11 @@ local function cfgIo(key)
    return function(cfg)
       if cfg then return rwCfgFile(enc(cfg)) end
       return dec(rwCfgFile())
-   end
+   end,cfgio
 end
 
 local function runXedge()
-   local rw=require"rwfile"
-   local log=xedge.log
-   -- Fetch Xedge Config (xc) from mako.conf
-   local xc = require"loadconf".xedge or {}
-   local cfgio = xc.ioname and ba.openio(xc.ioname) or ba.openio"home"
-   assert(cfgio)
-   local cfgname = xc.cfgname or "xcfg.bin"
+   local rwCfgFile,cfgio=cfgIo(ba.crypto.hash("sha256")(ba.tpm.uniquekey(secret,64))(true))
    local tldir
    if mako.tldir then
       tldir=mako.tldir
@@ -78,7 +72,7 @@ local function runXedge()
       tldir:configure{priority=9}
    end
    tldir:unlink()
-   xinit(io,cfgIo(ba.crypto.hash("sha256")(ba.tpm.uniquekey(secret,64))(true)),tldir,mako.rtldir,function(setUser)
+   xinit(io,rwCfgFile,tldir,mako.rtldir,function(setUser)
       if not xedge.authenticator then
 	 for ix,arg in ipairs(mako.argv) do
 	    if "-credentials" == arg then
@@ -96,7 +90,7 @@ local function runXedge()
 	    xedge.appsd:setauth(ba.create.authenticator(mako.udb()))
 	 end
       end
-   end,{io=cfgio})
+   end,cfgio)
    xinit=nil
 end
 dir:unlink()

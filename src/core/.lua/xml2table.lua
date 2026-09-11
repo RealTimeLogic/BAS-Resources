@@ -179,7 +179,7 @@ END_ELEMENT=function(_ENV,tagname)
   node.text = node.text and tconcat(node.text," ")
 
   if namestack[#namestack] == node then
-    namespace_t = rawget(getmetatable(namespace_t),__index) --pop namespaces
+    namespace_t = rawget(getmetatable(namespace_t),"__index") --pop namespaces
     namestack[#namestack] = nil
   end
   node,stack[#stack] = stack[#stack],nil --  node = pop(stack)
@@ -225,5 +225,4 @@ PI=function(context,name,value)
 end
 
 return _ENV -- return module table
-
 

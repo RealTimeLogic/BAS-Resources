@@ -65,6 +65,8 @@ function M.createManager(options)
    local profiles,manager,loaded,started,closed={},{},false,false,false
    local config,activeProfile,busy,timer,lastError,scheduledCheck,retryAt
    local retryDelay=retryFirst
+   local stopCount=0
+   local installing=0
 
    local function emit(code) safeCallback(notify,code) end
    local function ensureDirectories()
@@ -110,16 +112,19 @@ function M.createManager(options)
    end
 
    local function installProfile(profile,callback)
+      local records=certificateList(profile)
+      installing=installing+1
       local called=false
       local function done(ok,message)
          if called then return end
          called=true
+         installing=installing-1
          if ok then safeCallback(callback,true) else
             safeCallback(callback,nil,errorTable("certificate_install_failed",
                type(message) == "table" and message.message or tostring(message)))
          end
       end
-      local ok,message=pcall(install,certificateList(profile),done)
+      local ok,message=pcall(install,records,done)
       if not ok then done(nil,message) end
    end
 
@@ -248,7 +253,8 @@ function M.createManager(options)
       end
       if not nextTime then return end
       timer=timerFactory(function() timer=nil scheduledCheck() return false end)
-      timer:set(math.max(1000,math.floor((nextTime-now())*1000)),true)
+      -- Long renewal delays need another due-date check before they expire.
+      timer:set(math.min(4294967295,math.max(1000,math.floor((nextTime-now())*1000))),true)
    end
 
    scheduledCheck=function()
@@ -261,16 +267,20 @@ function M.createManager(options)
          elseif record.ariCheckAt and record.ariCheckAt <= current then refresh[#refresh+1]=domain end
       end
       local function finish(problem)
-         busy=nil
-         if problem then
-            lastError=copy(problem)
-            if problem.temporary == true and problem.retryable ~= false then
-               retryAt=now()+retryDelay
-               retryDelay=math.min(retryDelay*2,retryMax)
-            else retryAt=now()+21600 end
-         elseif deferred then retryAt=now()+3600
-         else retryDelay,retryAt=retryFirst,nil end
-         installProfile(activeProfile,function() scheduleTimer() end)
+         installProfile(activeProfile,function(_,installProblem)
+            busy=nil
+            if problem and installProblem then problem.install=installProblem end
+            problem=problem or installProblem
+            if problem then
+               lastError=copy(problem)
+               if problem.temporary == true and problem.retryable ~= false then
+                  retryAt=now()+retryDelay
+                  retryDelay=math.min(retryDelay*2,retryMax)
+               else retryAt=now()+21600 end
+            elseif deferred then retryAt=now()+3600
+            else retryDelay,retryAt=retryFirst,nil end
+            scheduleTimer()
+         end)
       end
       each(refresh,function(domain,done) refreshRenewal(activeProfile,domain,done) end,function(_,refreshProblem)
          if refreshProblem then return finish(refreshProblem) end
@@ -307,7 +317,10 @@ function M.createManager(options)
    end
 
    function manager:load(callback)
-      if loaded then return activeProfile and installProfile(activeProfile,callback) or safeCallback(callback,true) end
+      if loaded then
+         if activeProfile then return installProfile(activeProfile,callback) end
+         return safeCallback(callback,true)
+      end
       run(function()
          local ready,problem=ensureDirectories()
          if not ready then return safeCallback(callback,nil,problem) end
@@ -360,9 +373,13 @@ function M.createManager(options)
    end
 
    function manager:start(callback)
+      if closed then return reject(callback,"manager_closed") end
       if not config then return reject(callback,"not_configured") end
       if started then safeCallback(callback,{started=false}) return true end
+      local startedAt=stopCount
       local function begin()
+         if closed then return reject(callback,"manager_closed") end
+         if startedAt ~= stopCount then return reject(callback,"manager_stopped") end
          started=true
          if not activeProfile or activeProfile.directoryUrl ~= config.service.directoryUrl then
             return self:switchService(config.service,{rebuild=true},function(result,problem)
@@ -389,6 +406,7 @@ function M.createManager(options)
    end
 
    function manager:stop(callback)
+      stopCount=stopCount+1
       started=false
       cancelTimer()
       safeCallback(callback,true)
@@ -441,9 +459,10 @@ function M.createManager(options)
    function manager:account() return copy(activeProfile and activeProfile.account) end
    function manager:close(callback)
       if closed then return safeCallback(callback,true) end
+      if installing > 0 then return nil,"busy" end
       closed,started=true,false
       cancelTimer()
-      engine:close(function(_,problem) safeCallback(callback,not problem,problem) end)
+      engine:close(function(_,problem) safeCallback(callback,not problem or nil,problem) end)
       return true
    end
    return manager
@@ -488,7 +507,7 @@ function M.create(options)
    if dnsConfig.type == "dns-01" and dnsConfig.mode ~= "manual" then
       local Dns=require"acme/dns"
       st,err=Dns.createClient{portalUrl=dnsConfig.portalUrl,zoneKey=dnsConfig.zoneKey,
-         secret=dnsConfig.secret,proof=dnsConfig.proof,http=options.http}
+         proof=dnsConfig.proof,http=options.http}
       if not st then return fail(err) end
       challenge,err=Dns.createSharkTrust{client=st,
          store=options.store or fileStore(fileIo,options.path or "acme"),
@@ -644,13 +663,16 @@ function M.create(options)
    end
    function runtime:close(cb)
       if closed then callback(cb,true) return true end
+      if st and challenge:status().busy then return nil,"busy" end
+      local wasStarted=started
       closed,started=true,false
-      cancelRetry()
-      manager:close(function(_,managerErr)
+      local _,err=manager:close(function(_,managerErr)
          if challenge and challenge.close then
-            challenge:close(function(_,challengeErr) callback(cb,not (managerErr or challengeErr),managerErr or challengeErr) end)
-         else callback(cb,not managerErr,managerErr) end
+            challenge:close(function(_,challengeErr) callback(cb,not (managerErr or challengeErr) or nil,managerErr or challengeErr) end)
+         else callback(cb,not managerErr or nil,managerErr) end
       end)
+      if err == "busy" then closed,started=false,wasStarted return nil,err end
+      cancelRetry()
       return true
    end
    return runtime

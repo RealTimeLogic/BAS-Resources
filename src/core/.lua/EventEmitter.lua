@@ -18,7 +18,7 @@ function E:on(event,cb)
    if not ev then ev={} self._evs[event]=ev end
    ev[cb]=true
    local payload = self._retained and self._retained[event]
-   if payload then trun(function() runCb(self,cb,tunpack(payload)) end) end
+   if payload then trun(function() runCb(self,cb,tunpack(payload,1,payload.n)) end) end
    return true
 end
 
@@ -28,7 +28,7 @@ function E:emit(event,...)
       evName=event.name
       if evName and event.retain then
 	 self._retained=self._retained or {}
-	 self._retained[evName] = {...}
+	 self._retained[evName] = table.pack(...)
       end
    else
       evName=event

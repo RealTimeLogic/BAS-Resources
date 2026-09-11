@@ -11,7 +11,7 @@ end
 -- h=http-client-instance, data=query-tab, op=options-tab
 local function sendUrlEncodedData(self, data, op)
    local ok,e1,e2,e3
-   op.header = op.header or {}
+   op.header = self:mkop({},op.header or {})
    op.header["x-requested-with"]="XMLHttpRequest"
    if op.method == "POST" then
       op.header["Content-Type"]="application/x-www-form-urlencoded"
@@ -34,8 +34,8 @@ local function sendUrlEncodedData(self, data, op)
       s,e1,e2,e3 = self:status()
       if s then
 	 data,e1,e2,e3 = self:read"*a"
-	 if data then
-	    return s,data
+	 if data or not e1 then
+	    return s,data or ""
 	 end
       end
    end
@@ -46,14 +46,12 @@ end
 local H=setmetatable({},{__index=http.getmetatable()})
 
 function H:post(url,tab,op)
-   self.op.query=nil
    op=self:mkop(self:mkop({method="POST"},op))
    op.url=url
    return sendUrlEncodedData(self, tab, op)
 end
 
 function H:json(url,tab,op)
-   self.op.query=nil
    op=self:mkop(self:mkop({method="GET"},op))
    op.url=url
    local status,e1,e2,e3=sendUrlEncodedData(self, tab, op)
@@ -65,13 +63,16 @@ function H:json(url,tab,op)
       end
       return nil,"invalidresponse", "Response empty"
    end
+   if status then return nil,status,e1 end
    return nil,e1,e2,e3
 end
 
 
 local function mkstat(self)
+   local headers,e1,e2,e3=self:header()
+   if not headers then return nil,e1,e2,e3 end
    local h={}
-   for k,v in pairs(self:header()) do h[k:lower()]=v end
+   for k,v in pairs(headers) do h[k:lower()]=v end
    local r={}
    local x = h["last-modified"]
    if not x then x = h["expires"] end
@@ -82,7 +83,6 @@ local function mkstat(self)
 end
 
 function H:stat(url ,op)
-   self.op.query=nil
    op=self:mkop(self:mkop({method="HEAD"},op))
    op.url=url
    local ok,e1,e2,e3=self:request(op)
@@ -103,7 +103,6 @@ end
 -- Upload Download Config
 local function udconf(self,conf,op,method,doUpload)
    local ok,func,st,size,fp,e1,e2,e3
-   self.op.query=nil
    op=self:mkop(self:mkop({method=method, url=conf.url},op))
    checkAttr(op.url, "URL")
    if conf.io and conf.name then
@@ -125,6 +124,7 @@ local function udconf(self,conf,op,method,doUpload)
    op.size = size or conf.size or op.size -- Only used if uploading
    ok,e1,e2,e3=self:request(op)
    if ok then return true,fp,func,size end
+   fp:close()
    return nil,e1,e2,e3
 end
 
@@ -143,8 +143,12 @@ function H:upload(conf,op)
       if e1 then break end
       func(size,upsize)
    end
-   fp:close()
+   local closed,c1,c2,c3=fp:close()
    if e1 then return nil,e1,e2,e3 end
+   if not closed then return nil,c1,c2,c3 end
+   ok,e1,e2,e3=self:status()
+   if not ok then return nil,e1,e2,e3 end
+   if ok < 200 or ok >= 300 then return nil,ok end
    return true
 end
 
@@ -152,14 +156,21 @@ end
 function H:download(conf,op)
    local data,e1,e2,e3
    local rsize=0
-   local ok,fp,func=udconf(self,conf,op,"GET",false)
-   if not ok then return nil,fp,func end
+   local ok,fp,func,detail=udconf(self,conf,op,"GET",false)
+   if not ok then return nil,fp,func,detail end
    ok,e1,e2,e3=self:status()
    if ok ~= 200 then
+      fp:close()
       if ok then return nil, ok end
       return nil,e1,e2,e3
    end
-   local size = mkstat(self).size
+   local st
+   st,e1,e2,e3=mkstat(self)
+   if not st then
+      fp:close()
+      return nil,e1,e2,e3
+   end
+   local size = st.size
    while true do
       data,e1,e2,e3 = self:read(1024)
       if e1 or not data or #data == 0 then break end
@@ -168,15 +179,17 @@ function H:download(conf,op)
       rsize = rsize+#data
       func(size,rsize)
    end
-   fp:close()
+   local closed,c1,c2,c3=fp:close()
    if e1 then return nil,e1,e2,e3 end
+   if not closed then return nil,c1,c2,c3 end
    return true
 end
 
 
 local env={}
 function env.create(op)
-   local h=http.create(op)
+   local h,err=http.create(op)
+   if not h then return nil,err end
    return setmetatable(h, {__index=H})
 end
 

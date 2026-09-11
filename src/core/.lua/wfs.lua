@@ -125,8 +125,10 @@ local nolist={["."]=true,[".."]=true,[".DAV"]=true,[".LOCK"]=true}
 
 local function newWFS(name,priority,io,lockdir,maxuploads,maxlocks,lspfunc)
    local authenticate,authorize=doNothing,doNothing  -- Default
-   local dav,resrdr,sesTmo,hasAuth,hasSesUri,pageaccessdenied
-   local uploader=ba.create.upload(io)
+   local dav,resrdr,sesTmo,hasAuth,hasSesUri,pageaccessdenied,filterservice
+   -- Match WebDAV's minimum of one concurrent upload.
+   if maxuploads < 1 then maxuploads=1 end
+   local uploader=ba.create.upload(io,maxuploads)
 
    local function sessionuri(_ENV,rel)
       local id
@@ -441,6 +443,7 @@ local function newWFS(name,priority,io,lockdir,maxuploads,maxlocks,lspfunc)
    }
 
    local function service(_ENV,rel,session)
+      if filterservice then rel=filterservice(_ENV,rel,session) end
       cmd=request
       _ENV.dav=dav
       local ua,site = request:header"User-Agent",request:header"Sec-Fetch-Site"
@@ -484,26 +487,9 @@ local function newWFS(name,priority,io,lockdir,maxuploads,maxlocks,lspfunc)
    resrdr:setfunc(service)
    dav=ba.create.dav(name,priority,io,lockdir,maxuploads,maxlocks)
 
-   local function setService(filterfunc)
+   local function setService()
       hasSesUri = hasAuth and sesTmo and true or false
-      if filterfunc then
-	 G.assert(type(filterfunc) == "function")
-	 if hasSesUri then
-	    local orgservice=service
-	    service=
-	       function(_ENV,rel,s)
-		  return orgservice(_ENV,filterfunc(_ENV,rel,s))
-	       end
-	    resrdr:setfunc(authService)
-	 else
-	    local function filtserv(_ENV,rel)
-	       return service(_ENV,filterfunc(_ENV,rel))
-	    end
-	    resrdr:setfunc(filtserv)
-	 end
-      else
-	 resrdr:setfunc(hasSesUri and authService or service)
-      end
+      resrdr:setfunc(hasSesUri and authService or service)
    end
 
    local function setauth(authenticator, authorizer)
@@ -540,6 +526,8 @@ local function newWFS(name,priority,io,lockdir,maxuploads,maxlocks,lspfunc)
    end
 
    local function configure(t)
+      local filter=t.filterservice
+      if filter then G.assert(type(filter)=="function") end
       if t.pageaccessdenied ~= nil and type(t.pageaccessdenied) ~= "function" then
 	 error("pageaccessdenied must be a function",2)
       end
@@ -549,7 +537,8 @@ local function newWFS(name,priority,io,lockdir,maxuploads,maxlocks,lspfunc)
       else
 	 sesTmo=t.tmo
       end
-      setService(t.filterservice)
+      filterservice=filter
+      setService()
       return {authorize=authorize,io=io}
    end
 

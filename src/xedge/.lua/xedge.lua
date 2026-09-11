@@ -6,7 +6,7 @@ local tinsert=table.insert
 local dtraceback=debug and debug.traceback or function(e) return e end
 local jencode,jdecode=ba.json.encode,ba.json.decode
 local startAcmeDns -- func
-local acmeRuntime,acmePlatform,acmeClockReady,acmeWorkPending
+local acmeRuntime,acmeIo,acmeClockReady
 local xedgeEvent -- = _XedgeEvent
 local smtp -- smtp settings, a table, used by sendmail
 local authRealm="Xedge"
@@ -37,16 +37,23 @@ local Acme,Dns=require"acme/runtime",require"acme/dns"
 local function acmeIdentity(config)
    if not config or not config.manualIdentity then
       local value=Dns.identity()
-      if value then return value,value.portalUrl:sub(9),true end
+      if value then return value,value.portalUrl:sub(9) end
    end
    if config and config.portalUrl and config.zoneKey and config.secret then
-      return {portalUrl=config.portalUrl,zoneKey=config.zoneKey,secret=config.secret},
-         config.portalUrl:gsub("^https://",""):gsub("/.*$",""),false
+      local zoneKey,secret=config.zoneKey,config.secret
+      if type(secret) ~= "string" or #secret ~= 64 or secret:find("[^%x]") then return end
+      local function proof(message)
+         local salt=zoneKey:gsub("%x%x",function(pair) return string.char(tonumber(pair,16)) end)
+         local key=ba.crypto.PBKDF2("sha256",secret:upper(),salt,1000,32)
+         return ba.crypto.hash("hmac","sha256",key)(message)(true,"binary")
+      end
+      return {portalUrl=config.portalUrl,zoneKey=config.zoneKey,proof=proof},
+         config.portalUrl:gsub("^https://",""):gsub("/.*$","")
    end
 end
 do
-   local _,portal,generated=acmeIdentity()
-   xedge.portal,xedge.generatedProof,xedge.compiledPortal=portal,generated,portal
+   local _,portal=acmeIdentity()
+   xedge.portal,xedge.compiledPortal=portal,portal
 end
 
 local fakeTime=(function()
@@ -114,7 +121,9 @@ end
 
 -- Returns app's config table or default if not set
 local function getJsonAppCfg(ion)
-   return app2json(appsCfg[ion] or {running=false})
+   local app=appsCfg[ion] or {}
+   app.running=apps[ion] and apps[ion].running or false
+   return app2json(app)
 end
 
 local function sendmail(m,s)
@@ -281,7 +290,7 @@ end -- elog
 
 do
    local ev=require"EventEmitter".create()
-   ev.reporterr=function(event,cb,err) sendErr("Event CB err: %s %s %s",event,tostring(cb),err) end
+   ev.reporterr=function(cb,err) sendErr("Event CB err: %s %s",tostring(cb),err) end
    if dio then ev:on("sntp",function() startAcmeDns() end) end
    function xedge.event(event,cb,remove)
       assert("string" == type(event))
@@ -727,13 +736,13 @@ local function acmeNotify(code)
 end
 
 local function createAcme()
-   if not acmePlatform or type(xcfg.acme) ~= "table" then return end
+   if not acmeIo or not xcfg.acme then return end
    local config=xcfg.acme
-   local identity,portal,generated=acmeIdentity(config)
+   local identity,portal=acmeIdentity(config)
    if not identity then return nil,{code="sharktrust_not_configured"} end
    identity.type,identity.reverse="dns-01",config.revcon == true
    local runtime,err=Acme.create{
-      io=acmePlatform.io,
+      io=acmeIo,
       config={email=config.email,domains={config.name},acceptTerms=true,
          production=config.production,productionUrl=config.productionUrl,stagingUrl=config.stagingUrl,
          namePolicy="exact",info=config.info or "Xedge",challenge=identity},
@@ -750,21 +759,17 @@ local function createAcme()
       notify=acmeNotify
    }
    if not runtime then return nil,err end
-   acmeRuntime,xedge.portal,xedge.generatedProof=runtime,portal,generated
+   acmeRuntime,xedge.portal=runtime,portal
+   xedge.acmeRuntime=runtime
    return runtime
-end
-
-local function retryable(problem)
-   return problem and problem.temporary == true and problem.retryable ~= false
 end
 
 startAcmeDns=function()
    acmeClockReady=true
-   if acmeRuntime or type(xcfg.acme) ~= "table" then return end
+   if acmeRuntime or not xcfg.acme then return end
    local runtime,err=createAcme()
    if not runtime then acmeLog(true,"Cannot configure: "..(err and (err.message or err.code) or "unknown")) return end
-   acmeWorkPending=true
-   runtime:start(function(_,problem) if not retryable(problem) then acmeWorkPending=false end end)
+   runtime:start()
 end
 
 local installAuth -- function is: installOrSetAuth() or setdb()
@@ -858,10 +863,10 @@ local function ssoInit()
    return true
 end
 
-local function xinit(aio,rwCfgFile,_tldir,_rtld,onAuth,_acmePlatform)
+local function xinit(aio,rwCfgFile,_tldir,_rtld,onAuth,_acmeIo)
    onAuth=onAuth or function() end
    tldir=_tldir
-   acmePlatform=_acmePlatform
+   acmeIo=_acmeIo
    saveCfg = rwCfgFile and function() return rwCfgFile(xcfg) end or function() return true end
    local cfg=rwCfgFile and rwCfgFile() or {apps={}}
    ios=ba.io()
@@ -898,8 +903,8 @@ local function xinit(aio,rwCfgFile,_tldir,_rtld,onAuth,_acmePlatform)
    xcfg.acme=cfg.acme
    xcfg.revcon=xcfg.acme and xcfg.acme.revcon
    do
-      local _,portal,generated=acmeIdentity(xcfg.acme)
-      xedge.portal,xedge.generatedProof=portal or xedge.compiledPortal,generated
+      local _,portal=acmeIdentity(xcfg.acme)
+      xedge.portal=portal or xedge.compiledPortal
    end
    xcfg.smtp=cfg.smtp
    xcfg.openid=cfg.openid
@@ -973,16 +978,14 @@ local function acmeResponse(data)
    data.portal=current and current.manualIdentity and current.portalUrl or
       xedge.portal or current and current.portalUrl or xedge.compiledPortal or ""
    data.compiledPortal,data.compiledIdentity=xedge.compiledPortal or "",xedge.compiledPortal and true or false
-   data.manualIdentity,data.generatedProof=current and current.manualIdentity and true or false,
-      xedge.generatedProof and true or false
+   data.manualIdentity=current and current.manualIdentity and true or false
    data.staging=current and current.production == false or false
    data.revcon=xcfg.revcon and true or false
    data.reverseStatus=status and status.reverse or
       {enabled=data.revcon,connected=false,status=0,connections=0}
    data.certificateRetrying=status and status.retryPending or false
    local busy=status and (status.starting or status.retryPending or status.operation)
-   if ready and acmeWorkPending and status and status.started and not busy then acmeWorkPending=false end
-   data.certificateWorking=(not acmeClockReady or acmeWorkPending or busy) and true or false
+   data.certificateWorking=(not acmeClockReady or busy) and true or false
    data.certificateReady=ready and not data.certificateWorking
    return data
 end
@@ -1000,17 +1003,22 @@ end
 local acmeCmd={
    isreg=function(_,data)
       local send=deferredJson(data.response)
-      local status=acmeRuntime and acmeRuntime:status().registration
+      local status=acmeRuntime and acmeRuntime.challenge:status()
       if not status or not status.enrolled then
-         send(acmeResponse{ok=true,isreg=false,sockname=data.sockname})
+         send(acmeResponse{ok=true,isreg=false})
          return
       end
       acmeRuntime:isRegistered(function(result,problem)
          local rsp=acmeResponse{ok=true,isreg=result and true or false,
-            name=(result and result.name or status.name or ""):match"^[^%.]+",sockname=data.sockname,
+            name=(result and result.name or status.name or ""):match"^[^%.]+",sockname=result and result.sockname,
             email=xcfg.acme and xcfg.acme.email}
          if problem then rsp.connectionError=problem.message or problem.code end
-         send(rsp)
+         if not result then send(rsp) return end
+         acmeRuntime.challenge:getWan(function(value,wanProblem)
+            rsp.wan=value and value.ipAddress
+            if wanProblem then rsp.connectionError=wanProblem.message or wanProblem.code end
+            send(rsp)
+         end)
       end)
    end,
    available=function(_,data)
@@ -1031,29 +1039,29 @@ local acmeCmd={
       if type(config.email) ~= "string" or type(config.name) ~= "string" then send{err="Invalid settings"} return end
       xcfg.acme,xcfg.revcon=config,config.revcon
       if not saveCfg() then send{err="Cannot save ACME settings"} return end
-      acmeWorkPending=true
       local function launch()
          local runtime,err=createAcme()
          if not runtime then
-            acmeWorkPending=false
             local message=err and (err.message or err.code) or "Cannot configure ACME"
             acmeLog(true,"Cannot configure: "..message)
             send{err=message}
             return
          end
          runtime:start(function(_,problem)
-            if retryable(problem) then
+            if problem and problem.temporary == true and problem.retryable ~= false then
                send{ok=true,pending=true}
             else
-               acmeWorkPending=false
                send(problem and {err=problem.message or problem.code} or {ok=true})
             end
          end)
       end
       if acmeRuntime then
          local old=acmeRuntime
-         acmeRuntime=nil
-         old:close(function() if acmeClockReady then launch() else send{ok=true,pending=true} end end)
+         acmeRuntime,xedge.acmeRuntime=nil,nil
+         old:close(function(_,err)
+            if err then acmeLog(true,"ACME cleanup: "..(err.message or err.code)) end
+            if acmeClockReady then launch() else send{ok=true,pending=true} end
+         end)
       elseif acmeClockReady then launch() else send{ok=true,pending=true} end
    end
 }
@@ -1103,8 +1111,7 @@ local commands={
    acme=function(cmd,data)
       local f=acmeCmd[data.acmd]
       if not f then return cmd:json{err="Unknown acmd"} end
-      if not acmePlatform then return cmd:json{err="No IO"} end
-      data.sockname=cmd:sockname()
+      if not acmeIo then return cmd:json{err="No IO"} end
       return f(cmd,data)
    end,
    getconfig=function(cmd,_)
@@ -1507,7 +1514,11 @@ end
 
 local function onunload()
    if sso then sso.close() end
-   if acmeRuntime then acmeRuntime:close() acmeRuntime=nil end
+   if acmeRuntime then
+      local runtime=acmeRuntime
+      acmeRuntime,xedge.acmeRuntime=nil,nil
+      runtime:close()
+   end
    for name,app in pairs(apps) do if(app.running) then stopApp(name) end end
 end
 

@@ -25,12 +25,12 @@ local function tpm(gpkey,upkey)
    local function tpmJwtsign(p,kname,op) return jwtsign(p,function(h) return sign(h,tpmGetKey(kname)) end,op) end
    local function tpmKeyparams(kname) return keyparams(tpmGetKey(kname)) end
    local function tpmCreatecsr(kname,...) return createcsr(tpmGetKey(kname),...) end
-   local function tpmCreatecertificate(kname,csr,certOrValidFrom,validFromOrValidTo,validToOrSerial,serialOrHash,hash)
+   local function tpmCreatecertificate(kname,csr,certOrValidFrom,...)
       local key=tpmGetKey(kname)
       if type(certOrValidFrom) == "string" then
-	 return createcertificate(csr,certOrValidFrom,key,validFromOrValidTo,validToOrSerial,serialOrHash,hash)
+         return createcertificate(csr,certOrValidFrom,key,...)
       end
-      return createcertificate(csr,key,certOrValidFrom,validFromOrValidTo,validToOrSerial,serialOrHash)
+      return createcertificate(csr,key,certOrValidFrom,...)
    end
    local function tpmCreatekey(kname,op)
       if keys[kname] then error(sfmt("ECC key %s exists",kname),2) end

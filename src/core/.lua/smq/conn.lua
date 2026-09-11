@@ -28,7 +28,12 @@ local function commence(_ENV, sock)
 end
 
 local function connect(sock,_ENV,ipaddr,port)
+   if terminated then return end
    local sock,err=ba.socket.connect(ipaddr,port,op)
+   if terminated then
+      if sock then sock:close() end
+      return
+   end
    if sock then
       if op and op.shark and not sock:trusted(nameT[ipaddr]) then
 	 ipaddrT[ipaddr] = nil -- remove

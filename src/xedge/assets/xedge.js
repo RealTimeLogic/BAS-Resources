@@ -1501,6 +1501,8 @@ function ideCfg(e) {
 	}
 	function connectionStatus(value) {
 	    let reverse=value.reverseStatus || {},state,text;
+	    if(value.sockname !== undefined) elems.SetCertIp.value=value.sockname || "";
+	    if(value.wan !== undefined) elems.SetCertWan.value=value.wan || "";
 	    if(value.connectionError || undefined == value.isreg)
 		state="red",text="Disconnected";
 	    else if(reverse.enabled)
@@ -1662,10 +1664,8 @@ function ideCfg(e) {
 	    };
 	});
     }
-    add("Xedge Documentation",()=>{
-	diaHide();
-	window.open('https://realtimelogic.com/ba/doc/?url=Xedge.html', '_blank')
-    });
+    add("File Server",()=>{diaHide();window.open('apps/', '_blank')});
+    add("Xedge Documentation",()=>{diaHide();window.open('https://realtimelogic.com/ba/doc/?url=Xedge.html', '_blank')});
     ideCfgCB.forEach(cb=>cb(m,nodisk));
     diaShow(e).replaceChildren(m);
 };

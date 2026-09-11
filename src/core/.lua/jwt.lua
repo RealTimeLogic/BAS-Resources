@@ -63,9 +63,10 @@ local function verify(jwt, secret, kid)
    local data = headerB64 .. "." .. payloadB64
    local signature = b64dec(signatureB64)
    local alg,htype=header.alg:sub(1,2),header.alg:sub(3)
+   local isValid
    if "HS" == alg then
       local expectedSig = ba.crypto.hash("hmac", "sha"..htype, secret)(data)(true)
-      return expectedSig == signature, jdec(b64dec(payloadB64))
+      isValid = expectedSig == signature
    else
       local hash = ba.crypto.hash("sha"..htype)(data)(true)
       if "ES" == alg then
@@ -74,18 +75,21 @@ local function verify(jwt, secret, kid)
 	 signature=ba.crypto.sigparams(r,s)
 	 if not signature then return nil,"Invalid signature" end
       end
-      local isValid
+      local err
       if "table" == type(secret) then
 	 local op=secret
 	 if not ((op.x and op.y) or (op.n and op.e)) then
 	    error("Missing keyparams",2)
 	 end
-	 isValid=ba.crypto.verify(signature, hash, op)
+	 isValid,err=ba.crypto.verify(signature, hash, op)
       else
-	 isValid=ba.crypto.verify(signature, secret, hash)
+	 isValid,err=ba.crypto.verify(signature, secret, hash)
       end
-      return isValid, header, jdec(b64dec(payloadB64))
+      if isValid == nil then return nil,err end
    end
+   local payload,err = jdec(b64dec(payloadB64))
+   if not payload then return nil,err end
+   return isValid, header, payload
 end
 
 return {
