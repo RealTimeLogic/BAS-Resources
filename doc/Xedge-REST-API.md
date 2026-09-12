@@ -1,7 +1,5 @@
 # Xedge REST and Browser Plugin API
 
-Status: Draft
-
 This document describes the Xedge interface. The implementation is split
 between:
 
@@ -11,17 +9,19 @@ between:
 - the browser and Lua plugin APIs, used to extend Xedge without modifying its
   core UI or command dispatcher.
 
-The relevant implementation files are `src/core/.lua/wfs.lua`,
-`src/xedge/.lua/xedge.lua`, `src/xedge/private/command.lsp`, and
-`src/xedge/assets/xedge.js`.
+The implementation is defined by [wfs.lua](../src/core/.lua/wfs.lua),
+[xedge.lua](../src/xedge/.lua/xedge.lua), [command.lsp](../src/xedge/private/command.lsp),
+and [xedge.js](../src/xedge/assets/xedge.js). This reference covers the shared
+Xedge management interface; platform plugins extend it separately.
 
 ## Common request conventions
 
 - Clients authenticate the same way as the Xedge UI: a session cookie or HTTP
-  authentication.
+  authentication when configured. An unconfigured installation may allow access
+  without credentials; these endpoints do not provide a separate API-token scheme.
 - Requests to `private/command.lsp` must include
   `X-Requested-With: XMLHttpRequest`. A request without this header receives
-  `404 Not Found`.
+  `404 Not Found`. The handler checks header presence, not its value.
 - WFS mutation requests should include the same header to select JSON success
   and error responses.
 - The Xedge browser client uses `fetch()` and `URLSearchParams`. Normal command
@@ -30,7 +30,7 @@ The relevant implementation files are `src/core/.lua/wfs.lua`,
 - A `401 Unauthorized` response causes the Xedge client to open its login UI and
   retry the original request after successful authentication.
 - `private/command.lsp` rejects requests whose `Sec-Fetch-Site` header is
-  `cross-site`.
+  `cross-site`, returning `404 Not Found`.
 
 ## Xedge file API
 
@@ -42,7 +42,7 @@ File requests use this form:
 /rtl/apps/{io-or-app-name}/{path}
 ```
 
-The first path segment selects an Xedge I/O root or installed application. The
+The first path segment is a string selecting an Xedge I/O root or installed application. The
 remaining segments identify a resource inside that root. Encode individual path
 segments when constructing a URL; do not encode `/` separators.
 
@@ -93,8 +93,10 @@ checked for each affected resource.
 
 ### Directory commands
 
-Commands are supplied through the `cmd` parameter. Directory URLs should end in
-`/`.
+Commands are supplied through the string `cmd` parameter. Directory URLs should end in
+`/`. The methods below are client conventions: the directory dispatcher accepts
+these commands through either GET or non-multipart POST. Parameters are strings
+unless specified otherwise; repeated `n` parameters select multiple resources.
 
 | Command | Method | Parameters | Response |
 | --- | --- | --- | --- |
@@ -125,22 +127,30 @@ The `lj` response is an array with one object per resource:
 
 The compatibility fields are:
 
-- `n`: resource name;
-- `s`: file size in bytes, or `-1` for a directory; and
-- `t`: modification time.
+- **string n**: resource name;
+- **number s**: file size in bytes, or `-1` for a directory; and
+- **number t**: modification time as Unix seconds.
 
 These fields must not change because other clients, including NetIo, consume
-them. Future versions may add fields. If session URLs are available, the `lj`
+them. If session URLs are available, the `lj`
 response also includes `BaWfsSes: 1`. For a file session URL, request `sesuri`
 from its parent directory and append the encoded file name to the returned URI.
 
 `getlocks` returns entries shaped as `{"n":"name","l":false}` or
 `{"n":"name","l":"owner"}`. `getlock` returns
-`{"owner":"name","time":unixTime}` when locked.
+`{"owner":"name","time":unixTime}` when locked. Here `owner`, `n`, and a
+locked `l` are strings; `time` is a number of Unix seconds; `notlocked` and an
+unlocked `l` are booleans. `getlocks` omits directories and missing files.
+
+`lock` ignores missing files, directories, already locked files, and expiration
+times that are not in the future. Its `ok: true` does not confirm that every
+requested file was locked. `unlock` also succeeds for files without a lock.
+The `sesuri` result contains **string uri** and **number tmo** (seconds); `tmo`
+is zero when no session URL was created.
 
 ### WFS errors
 
-JSON errors use this shape:
+JSON errors contain **string err** (error code) and **string emsg** (description):
 
 ```json
 {"err":"noaccess","emsg":"Cannot delete file: No file system access."}
@@ -155,10 +165,44 @@ Common status mappings are:
 - `409`: missing path or non-empty directory;
 - `503`: storage or capacity failure.
 
+### Application Configuration Resources
+
+Application configuration is exposed as a virtual `.appcfg` JSON resource
+through WFS. GET `/rtl/apps/{app}/.appcfg` returns configuration with the live
+**boolean running** state. This is distinct from **boolean autostart**, which
+controls startup after a host restart.
+
+PUT replaces the configuration, rather than merging individual fields. Read
+the configuration first and retain settings that are not being changed. To
+create an application, write `.appcfg` beneath its source directory in an I/O
+root. The directory path supplies the default source URL.
+
+- **string name**: application name; required for a complete configuration.
+- **string url**: source path or NET IO URL; defaults to the containing source
+  path when omitted.
+- **boolean running**: requested running state; defaults to false.
+- **boolean autostart**: optional; false prevents automatic launch at startup.
+- **number startprio**: optional startup ordering value; lower values start
+  first, and omission sorts as 100.
+- **string dirname**: optional LSP mount path; omission disables LSP, and an
+  empty string selects the server root.
+- **string domainname**: optional virtual host name for an LSP application.
+- **number priority**: optional LSP mount priority; defaults to zero.
+
+Changing the running state starts or stops the application. Updating other
+settings while retaining the same name and running state does not force a
+restart. Stop and start the application to apply settings that require one.
+A successful PUT acknowledges configuration processing; check `getappsstat`
+and TraceLogger for application startup results. DELETE of an installed
+application's `.appcfg` removes its registration and stops it; it does not
+delete the source files.
+
 ### `.xlua` hot reload
 
 When a running application's `.xlua` file is replaced through WFS, closing the
 write handle invokes Xedge's `manageXLuaFile` flow so the program is reloaded.
+The upload response does not report the Lua program's execution result; errors
+are reported through TraceLogger.
 
 ## Xedge command API
 
@@ -180,30 +224,82 @@ An unknown command returns:
 
 The native Xedge request wrapper treats a non-2xx HTTP response, `err`, or
 `emsg` as failure. Its callback receives the response on success and `false` on
-failure. Authentication failures are retried after login.
+failure. For a JSON application error it calls `callback(false, response)`;
+transport or JSON decoding failures call `callback(false)`. An `ok: false`
+value alone is passed to the callback as a normal response, so callers must
+check it. Authentication failures are retried after login.
 
 ### Built-in commands
 
 #### `acme`
 
-Certificate management selected by `acmd`:
+Certificate management uses the required **string acmd** selector. These
+commands require writable ACME I/O. They complete asynchronously through a
+deferred HTTP response.
 
-- `isreg`: returns registration status, email/name when known, WAN and socket
-  addresses, portal URL, and `reverseStatus` with enabled, connected, native
-  HTTP status, and established-connection count.
-- `available`: requires `name`; returns `available`.
-- `auto`: accepts `revcon` and, for registration, `email` and `name`; returns
-  `ok` or an error.
+**Parameters for `available` and `auto`**
+
+- **string name**: requested device name; required for `available`. For `auto`,
+  omission retains the saved name, which must exist.
+- **string email**: account email for `auto`; omission retains the saved value,
+  which must exist.
+- **string manualIdentity**: `"true"` selects custom portal credentials;
+  omission or another value selects the compiled identity.
+- **string portalUrl**: custom portal URL; omission retains the saved value.
+- **string zoneKey**, **string secret**: custom portal credentials; omitted or
+  empty values retain the saved values. These are not returned by `isreg`.
+- **string revcon**: `"true"` enables reverse connections for `auto`;
+  omission or another value disables them.
+- **string staging**: `"true"` selects the staging certificate authority;
+  another supplied value selects production. Omission retains the selection.
+
+`available` returns **boolean ok**, **boolean available**, and **string name**
+on success, or **string err** on failure.
+
+`auto` saves settings, closes the preceding runtime, and starts the selected
+configuration. It returns `{"ok":true}` or `{"ok":true,"pending":true}` when
+activation awaits clock readiness or a scheduled retry. **boolean pending**
+does not mean that a certificate is installed. Failure returns **string err**.
+Use `isreg` to retrieve subsequent state.
+
+**Return values for `isreg`**
+
+- **boolean ok**: true for the status response.
+- **boolean isreg**: whether the portal confirmed registration; false also
+  covers an unavailable confirmation and does not alone prove deletion.
+- **string name**, **string email**: optional saved/confirmed device name
+  (first DNS label) and configured email.
+- **string sockname**: optional local address of the connection to the portal.
+  It is not the local address of the browser connection.
+- **string wan**: optional public address observed by the portal.
+- **string connectionError**: optional registration or WAN lookup error.
+- **string portal**, **string compiledPortal**: selected and compiled portal
+  identities; empty when unavailable.
+- **boolean compiledIdentity**, **boolean manualIdentity**: availability of a
+  compiled identity and selection of custom credentials, respectively.
+- **boolean staging**, **boolean revcon**: selected staging and reverse modes.
+- **object reverseStatus**: **boolean enabled**, **boolean connected**,
+  **number status** (native connection status), and **number connections**
+  (established-connection count).
+- **boolean certificateRetrying**: a runtime startup retry is scheduled.
+- **boolean certificateWorking**: clock readiness or runtime work is pending.
+- **boolean certificateReady**: at least one reported certificate has a future
+  expiration time and `certificateWorking` is false. This is not a browser
+  trust check; a staging certificate can also satisfy it.
 
 #### `getconfig`
 
 Returns `config`, a base64url-encoded JSON object containing application
-configuration. This supports browser persistence when disk configuration is
+configuration (`{"apps":{...}}`). This supports browser persistence when disk configuration is
 unavailable.
 
 #### `getionames`
 
-Accepts optional `xedgeconfig`. Returns:
+Accepts optional **string xedgeconfig**, the encoded configuration from
+`getconfig`. It is used only when disk configuration is unavailable and no
+application configuration has been loaded. Returns **boolean ok**, **array of
+strings ios**, and **boolean nodisk**. I/O names are not sorted:
+
 
 ```json
 {"ok":true,"ios":["disk","home","net"],"nodisk":false}
@@ -214,95 +310,140 @@ the client creates its tree and loads plugins.
 
 #### `getappsstat`
 
-Returns `apps`, an object mapping application names to running booleans.
+Returns **boolean ok** and **object apps**, mapping application names to live
+running values. A stopped application whose internal state is nil is omitted
+from this object. Read its `.appcfg` to obtain an explicit boolean state.
 
 #### `gethost`
 
-Returns the request host address as `ip` for NET IO application setup.
+Returns **boolean ok** and **string ip**, the request domain from
+`cmd:domain()` for NET IO setup. Despite the field name, this can be a host
+name and is not an interface-address discovery operation.
 
 #### `getintro`
 
-Returns the welcome-page HTML in `intro`.
+Returns **boolean ok** and **string intro**, containing welcome-page HTML.
 
 #### `getmac`
 
-The default implementation returns `{"ok":false}`. A platform plugin may
-override it and return `{"ok":true,"mac":"..."}`.
+The default implementation returns **boolean ok** false. A platform plugin may
+override it and return **boolean ok** true and **string mac**.
 
 #### `gettemplate`
 
-Requires `ext`. Returns the matching new-file template as `data`, or a newline
+Accepts optional **string ext**. Returns **boolean ok** and **string data**,
+the matching new-file template, or a newline
 when no template exists.
 
 #### `credentials`
 
-- With no `name`, returns `data.name`, the first configured user or an empty
+- With no `name`, returns **boolean ok** and **object data** with **string name**,
+  one configured user or an empty
   string.
-- With `name` and `pwd`, creates or updates the user's digest credential. An
+- With required **string name** and **string pwd**, creates or updates the user's digest credential. An
   empty password removes the user. The update response is `{"ok":true}`.
 
 #### `pn2url`
 
-Requires `fn`. Returns the launch URL for a running LSP-enabled application, or
-`err` when the application is missing, stopped, or not LSP-enabled.
+Requires **string fn**. Returns **boolean ok** and **string url**, the launch URL for a running LSP-enabled application, or
+**string err** when the application is missing, stopped, or not LSP-enabled.
 
 #### `pn2info`
 
-Requires `fn`. For application resources, returns `isapp`, `running`, `lsp`,
-and an optional `url`. For non-application resources it returns `{"ok":true}`.
+Requires **string fn**. For application resources, returns **boolean ok**,
+**boolean isapp**, **boolean lsp**, optional **boolean running**, and optional
+**string url**. A nil internal running state is omitted; treat an absent
+`running` as stopped. The URL is omitted for `.xlua` resources. For non-application resources it returns `{"ok":true}`.
 
 #### `run`
 
-Requires `fn`. Runs a selected `.xlua` resource when its owning application is
-running and returns `{"ok":true}`.
+Requires **string fn**. Runs a selected `.xlua` resource when its owning
+application is running. The `{"ok":true}` response is also returned if the
+application is missing or stopped; it does not report execution success.
+Execution errors are reported through TraceLogger.
 
 #### `smtp`
 
 - With no fields other than `cmd`, returns SMTP and email-log configuration.
-- With `email`, `server`, `port`, `user`, `password`, and `connsec`, validates
+- With string fields **email**, **server**, **port**, **user**, **password**,
+  and **connsec**, validates
   and stores SMTP settings. Complete settings trigger a test email; incomplete
-  settings disable SMTP.
+  settings disable SMTP. `connsec="tls"` selects implicit TLS;
+  `connsec="starttls"` selects STARTTLS. Other nonempty values leave both
+  options disabled. `port` must be numeric text for the completeness check.
+  Send all six fields when updating. Unchanged enabled settings do not send
+  another test email. A failed test returns **boolean ok** false and optional
+  **string err**, retaining the previous settings.
+
+The read response places SMTP settings and email-log fields directly in the
+response object alongside **boolean ok**, including the configured password.
+`enablelog` and `smtp` are booleans; `maxbuf` and `maxtime` are numbers;
+`subject` and the SMTP fields are strings.
 
 #### `openid`
 
-- With no fields other than `cmd`, returns stored OpenID configuration in
-  `data`.
-- With `tenant`, `client_id`, and `client_secret`, validates and stores the
-  configuration. An empty `client_secret` removes the secret.
+With no fields other than `cmd`, returns **boolean ok** and **object data**,
+containing stored Microsoft Entra OpenID settings or an empty object. This is
+an administrative response that includes the configured secret.
+
+To configure SSO, supply these strings:
+
+- **string tenant** and **string client_id**: required, each longer than
+  20 characters.
+- **string client_secret**: required, longer than 10 characters.
+- **string client_secret_expires**: required valid expiration date. A
+  `YYYY-MM-DD` date means the end of that day in UTC.
+
+The server derives `redirect_uri` from the request origin plus `/rtl/login/`.
+HTTPS is required except for `http://localhost` development. The redirect URI
+must also be registered in Microsoft Entra. Initialization or save failure
+returns **boolean ok** false and **string err**, restoring the prior in-memory
+configuration. Success returns `{"ok":true}`.
+
+To disable SSO, send `tenant`, `client_id`, and `client_secret` together as
+empty strings. An empty secret by itself does not remove the configuration.
+Login-page credential recovery is handled separately by
+[ms-sso.lua](../src/xedge/.lua/ms-sso.lua) and
+[login/index.lsp](../src/xedge/login/index.lsp).
 
 #### `elog`
 
-Requires integer `maxbuf` and `maxtime`, `enablelog`, and optional `subject`.
+Requires integer-form strings **maxbuf** (buffer size in bytes) and
+**maxtime** (hours), **string enablelog** (`"true"` enables logging), and
+**string subject** (empty selects `"Xedge Log"`).
 Stores email-log settings and returns `{"ok":true}`.
 
 #### `execLua`
 
-Requires `code`. Compiles the Lua source and schedules it asynchronously. A
-compile failure returns `{"ok":false,"err":"..."}`.
+Accepts **string code**, defaulting to empty source. Compiles the Lua source and schedules it asynchronously. A
+compile failure returns `{"ok":false,"err":"..."}`. Success returns
+`{"ok":true}` after scheduling; runtime errors appear in TraceLogger and
+are not returned in this response.
 
 #### `lsPlugins`
 
-Returns an alphabetically sorted JSON array containing client plugin paths.
+Returns an alphabetically sorted JSON **array of strings** containing client
+plugin paths.
 
 #### `getPlugin`
 
-Requires a `.js` `name` returned by `lsPlugins`. Streams JavaScript rather than
+Requires a **string name**, ending in `.js`, returned by `lsPlugins`. Streams JavaScript rather than
 JSON and returns 404 when the plugin is unavailable. The native client requests
 plugins with `cache: "no-store"` and executes them sequentially in the returned
 order.
 
 #### `startApp`
 
-Requires `name`, the uploaded ZIP name under `home` on Mako or `disk` on
-standalone Xedge. `deploy=false` unpacks the ZIP into developer mode; other
+Requires **string name**, the uploaded ZIP name under `home` on Mako or `disk` on
+standalone Xedge. The optional **string deploy** selects the mode: `deploy=false` unpacks the ZIP into developer mode; other
 values retain deployed ZIP mode.
 
 The response contains:
 
-- `ok`: installation success;
-- `upgrade`: whether an existing deployed application was replaced;
-- `info`: optional text returned by an install or upgrade hook; and
-- `err`: failure details when `ok` is false.
+- **boolean ok**: installation success;
+- **boolean upgrade**: whether an existing deployed application was replaced;
+- **string info**: optional text returned by an install or upgrade hook; and
+- **string err**: failure details when `ok` is false.
 
 ### Plugin-defined commands
 
@@ -317,8 +458,8 @@ parameters, and for sending or aborting the response.
 ## Browser plugin API
 
 Client plugins are classic scripts loaded after authentication, I/O discovery,
-and tree initialization. The Xedge shell itself is an ES module, but it exposes
-only this deliberate API on `window`:
+and tree initialization. The Xedge shell itself is an ES module. Its supported plugin functions are
+exposed on `window` (the shell also exposes login integration hooks):
 
 | Name | Purpose |
 | --- | --- |
@@ -341,6 +482,7 @@ private variables inside the Xedge ES module.
 Configuration plugins normally append a callback:
 
 ```js
+// Add a configuration-menu entry after Xedge has initialized its UI.
 ideCfgCB.push((menu, nodisk) => {
   const item = el("li", {text: "My Plugin"});
   item.onclick = () => createEditor("My Plugin", null, null, el("div", {text: "Ready"}));
@@ -348,10 +490,39 @@ ideCfgCB.push((menu, nodisk) => {
 });
 ```
 
-The callback receives the configuration-menu `<ul>` and the `nodisk` flag.
+The callback receives an **HTMLUListElement menu** and **boolean nodisk**. Its
+return value is ignored.
 Plugins that mutate applications or files should call `createTree()` after the
 server operation succeeds.
 
 Browser and Lua plugins execute with Xedge management privileges. Treat plugin
 files as trusted code, validate all external input on the server, and do not
 expose secrets to browser plugins.
+
+### Browser Function Contracts
+
+- `el(string tag, object properties, ...children)` returns an **HTMLElement**.
+  Children are DOM nodes or text; `html` is trusted HTML, not escaped text.
+- `mkForm(array description, object elements?, HTMLElement parent?)` returns
+  the parent **HTMLElement** (a new form container by default). The supplied
+  `elements` object is populated by element ID, not by name. Description
+  objects use `el` for the tag, `children` for nested descriptions, and `html`
+  for trusted HTML. Form entries can use `label` as the element ID, `name` as
+  display text, and `description` as tooltip text.
+- `createEditor(string name, string|null value, function|null saveCallback,
+  HTMLElement content?, function closeCallback?)` returns a **string editor ID**,
+  or **undefined** if that editor already has unsaved changes. Use `value=null`
+  with `content` to open a plugin panel. The optional save callback receives
+  the data and a completion function; call completion with `{ok:true}` on
+  success. A boolean `true` alone does not clear the modified indicator.
+  The optional close callback takes no arguments and releases plugin resources.
+- `closeEditor(string id)` returns **undefined** and invokes the registered
+  close callback. It closes directly without the tab button's unsaved-change
+  confirmation.
+- `sendCmd(string command, function callback, object data?)` returns
+  **undefined**, adds `cmd` to the supplied data object, and performs a GET.
+  Its callback receives the JSON response or the failure arguments described
+  under the command API. This function does not return a Promise.
+- `createTree()` returns **undefined** and starts an asynchronous tree rebuild.
+  `log(...)`, `logR(...)`, and `alertErr(...)` report output and return
+  **undefined**; their return values do not indicate server-operation success.

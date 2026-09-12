@@ -2,16 +2,6 @@
 
 The Barracuda App Server's resource files. See the [build directory](build/README.md) for build instructions.
 
-## ACME client
-
-The shared Mako Server and Xedge Automatic Certificate Management Environment
-(ACME) client is under `src/core/.lua/acme/`, with host adapters in `src/mako/`
-and `src/xedge/`.
-
-- [ACME client public API](doc/acme-client-public-api.md)
-- [ACME client architecture](doc/acme-client-architecture.md)
-- [Maintainer and session handover](AGENTS.md)
-
 ## Files
 
 - **core**
@@ -87,6 +77,26 @@ and `src/xedge/`.
         - command.lsp
     - templates
         - Various templates
+
+
+## Documents
+
+[doc](doc/)
+
+
+### Xedge REST API
+
+[Xedge REST API](doc/Xedge-REST-API.md)
+
+### ACME client
+
+The shared Mako Server and Xedge Automatic Certificate Management Environment
+(ACME) client is under `src/core/.lua/acme/`, with host adapters in `src/mako/`
+and `src/xedge/`.
+
+- [ACME client public API](https://realtimelogic.com/ba/doc/en/lua/acme.html)
+- [ACME client architecture](doc/acme-client-architecture.md)
+- [Maintainer and session handover](AGENTS.md)
 
 
 

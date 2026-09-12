@@ -4,9 +4,15 @@
 - mako.cmd - Build mako.zip (Windows)
 - mako.sh - Build mako.zip (Linux)
 
-- Xedge.cmd - Build Xedge (Windows)
-- Xedge.sh - Build Xedge (Linux)
-- XedgeMako.cmd/XedgeMako.sh - Build the Xedge Mako Server app
+- Xedge.cmd - Build standalone Xedge.zip and XedgeZip.c (Windows)
+- Xedge.sh - Build standalone Xedge.zip and XedgeZip.c (Linux)
+- XedgeMako.cmd/XedgeMako.sh - Build Xedge.zip for loading as a Mako Server app
+
+Run shell scripts from this `build/` directory. Both Xedge builders write
+`Xedge.zip`, but the packages serve different hosts. The standalone package
+includes shared core resources; the Mako application uses those resources,
+including ACME, from the matching `mako.zip`. Building ZIP resources does not
+compile the Mako or Xedge native executable.
 
 ## Download Pre-Built Packages
 
@@ -20,6 +26,8 @@ The following is a list of required and optional tools the build
 scripts use. Make sure the following tools are available in your
 system's PATH.
 
+- **curl and SharkSSLParseCAList:** Required by the standalone Xedge builder
+  for certificate-store generation. The Windows script checks both at startup.
 - **zip:** Required for the build scripts to package resources into a
   zip file.
 - **bin2c:** The
@@ -35,9 +43,16 @@ system's PATH.
 
 ## Build Script Options
 
-You will be prompted to select several options when you run the build
-scripts. Below is a detailed explanation of each option to help you
-make an informed decision.
+The standalone Xedge builder prompts for OPC UA, the certificate store, and
+minification. The Mako and Xedge-on-Mako builders prompt for minification; they
+do not offer all standalone options. The Mako package includes the OPC UA Lua
+resources. Native support still depends on the executable.
+
+For unattended Windows builds, set `MinifyMakoZip=yes|no` for `mako.cmd` or
+`MinifyXedgeZip=yes|no` for either Xedge builder. `Xedge.cmd` also accepts
+`IncludeOpcUa=yes|no`, `XedgeCaStore=large|small`, and `NO_BIN2C` (any nonempty
+value skips C-array generation). These are Windows batch options; consult the
+shell scripts for their supported environment variables.
 
 ---
 
@@ -70,12 +85,16 @@ make an informed decision.
 
 ---
 
-### 4. **Include Optional Components?**
+### 4. Optional Lua Resources
 
-- **What It Does**: The build process can include additional Lua modules if they are available on your system.
+- The Mako and standalone Xedge scripts detect sibling source directories
+  automatically; there is no optional-component prompt. These steps copy Lua
+  support files and do not build or enable native modules.
 - **Optional Plugins**:
-  - **lua-protobuf**: Adds Protocol Buffers support. This module is required when using MQTT Sparkplug.
-  - **LPeg**: Adds pattern matching support for Lua.
+  - **lua-protobuf**: Copies `protoc.lua`, `serpent.lua`, and the Sparkplug Lua
+    resources when the directory is present. Protocol Buffers also requires
+    the native module in the executable.
+  - **LPeg**: Copies `re.lua`; the executable must provide native LPeg support.
 - **Details**: These optional components are included by default in the pre-compiled binaries we provide.
 
 ---
