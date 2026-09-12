@@ -41,6 +41,7 @@ local tcpM = { __index = ix }
 local function initSock(self)
    if self.s then self.s:close() end
    self.s=nil
+   self.recData=nil
    self.received=0
    self.sent=0
    self.recDataIx=1
@@ -49,9 +50,7 @@ end
 
 
 local function bas2SockErr(err)
-   if err then
-      return err == "timeout" and err or "closed"
-   end
+   return err == "timeout" and err or "closed"
 end
 
 
@@ -107,15 +106,16 @@ end
 
 function ix:upgrade(shark)
    if not self.s then return nil,bas2SockErr() end
-   return self.s:upgrade(shark)
+   return self.s:upgrade(shark or G.ba.sharkclient())
 end
 
 function ix:dohandshake(op)
    local s=self.s
-   if not s then return nil,bas2SockErr() end
+   if not self:connected() then return nil,"closed" end
+   if s:isresumed() ~= nil then return true end
    op = op or self.op
    local shark = op and op.shark or G.ba.sharkclient()
-   return s:isresumed() or s:upgrade(shark)
+   return s:upgrade(shark)
 end
 
 function ix:sslhandshake() return self:dohandshake() end
@@ -142,7 +142,7 @@ end
 function ix:listen(backlog)
    local e
    initSock(self)
-   self.s,e=ba.socket.bind(self.op.port, self.op)
+   self.s,e=s.bind(self.op.port, self.op)
    if self.s then return true end
    return nil,e
 end
@@ -153,15 +153,15 @@ function ix:settimeout(value, mode)
    else
       self.timeout=value*1000
    end
-   return self.s and true or bas2SockErr()
+   return true
 end
 
 function ix:gettimeout()
-   return self.timeout or math.maxinteger
+   return self.timeout or G.math.maxinteger
 end
 
 function ix:receive(pattern, prefix)
-   if not self.s then return nil,bas2SockErr() end
+   if not self.s then return nil,"closed",prefix or "" end
    local d,e,t
    local recData=self.recData
    pattern = pattern or "l"
@@ -174,6 +174,7 @@ function ix:receive(pattern, prefix)
 	 if not d then break end
 	 tinsert(t,d)
       end
+      if e == "timeout" then return nil,e,tconcat(t) end
       if (pattern and #t > 1) or #t > 0 then return tconcat(t) end
       return nil, bas2SockErr(e)
    end
@@ -194,8 +195,8 @@ function ix:receive(pattern, prefix)
 	    end
 	 end
 	 d,e = self.s:read(self.timeout)
-	 if not d and not self.recData then
-	    return nil,bas2SockErr(e)
+	 if not d then
+	    return nil,bas2SockErr(e),(prefix or "")..(ix_pruneRecData(self) or "")
 	 end
 	 recData = ix_pruneRecData(self, d)
 	 self.recData=recData
@@ -203,12 +204,14 @@ function ix:receive(pattern, prefix)
    end
    local recLen
    local len = G.tonumber(pattern)
-   G.assert(len, "Invalid pattern")
-   if len <= 0 then return "" end
+   G.assert(len and len >= 0 and len % 1 == 0, "Invalid pattern")
+   prefix = prefix or ""
+   len = len - #prefix
+   if len <= 0 then return prefix end
    ::L_recData::
    if recData then
       local left = #recData + 1 - self.recDataIx
-      if len == left then return ix_pruneRecData(self) end
+      if len == left then return prefix..ix_pruneRecData(self) end
       if len < left then
 	 recData = recData:sub(self.recDataIx,self.recDataIx+len-1)
 	 self.recDataIx = self.recDataIx + len
@@ -225,7 +228,7 @@ function ix:receive(pattern, prefix)
    while recLen < len do
       d,e = self.s:read(self.timeout)
       if not d then
-	 return nil,bas2SockErr(e),tconcat(t)
+	 return nil,bas2SockErr(e),prefix..tconcat(t)
       end
       tinsert(t,d)
       recLen = recLen + #d
@@ -245,7 +248,7 @@ function ix:send(data,i,j)
       data = tconcat(data)
    end
    local ok,err=self.s:write(data,i,j)
-   if ok then return ok end
+   if ok ~= nil then return true end
    return nil,err
 end
 
@@ -265,8 +268,11 @@ function ix:shutdown()
 end
 
 function ix:connected()
-   if self.s then return true end
-   return nil,bas2SockErr()
+   if self.s then
+      local _,valid = self.s:state()
+      if valid then return true end
+   end
+   return nil,"closed"
 end
 
 function tcp()

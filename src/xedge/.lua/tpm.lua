@@ -1,7 +1,7 @@
 local maxHash=pcall(function() ba.crypto.hash("sha512") end) and "sha512" or "sha256"
-local sfmt,jencode,jdecode,symmetric,PBKDF2,keyparams,sign,jwtsign,createkey,createcsr,sharkcert=
+local sfmt,jencode,jdecode,symmetric,PBKDF2,keyparams,sign,jwtsign,createkey,createcsr,createcertificate,sharkcert=
 string.format,ba.json.encode,ba.json.decode,ba.crypto.symmetric,ba.crypto.PBKDF2,ba.crypto.keyparams,
-ba.crypto.sign,require"jwt".sign,ba.create.key,ba.create.csr,ba.create.sharkcert
+ba.crypto.sign,require"jwt".sign,ba.create.key,ba.create.csr,ba.create.certificate,ba.create.sharkcert
 
 local function setuser(ju,db,name,pwd)
    if pwd then
@@ -20,6 +20,16 @@ end
 return function(gpkey,upkey)
    assert(nil==ba.tpm)
    local keys={}
+   local function makeKey(kname,op)
+      op=op or {}
+      if op.key and op.key ~= "ecc" then error("TPM can only create ECC keys",3) end
+      local newOp={}
+      for k,v in pairs(op) do newOp[k]=v end
+      newOp.rnd=PBKDF2(maxHash,"#$"..kname,upkey,5,1024)
+      local key=createkey(newOp)
+      keys[kname]=key
+      return key
+   end
    local function tpmGetKey(kname)
       local key=keys[kname]
       if not key then error(sfmt("ECC key %s not found",tostring(kname)),3) end
@@ -29,24 +39,27 @@ return function(gpkey,upkey)
    local function tpmJwtsign(p,kname,op) return jwtsign(p,function(h) return sign(h,tpmGetKey(kname)) end,op) end
    local function tpmKeyparams(kname) return keyparams(tpmGetKey(kname)) end
    local function tpmCreatecsr(kname,...) return createcsr(tpmGetKey(kname),...) end
+   local function tpmCreatecertificate(kname,csr,certOrValidFrom,...)
+      local key=tpmGetKey(kname)
+      if type(certOrValidFrom) == "string" then
+         return createcertificate(csr,certOrValidFrom,key,...)
+      end
+      return createcertificate(csr,key,certOrValidFrom,...)
+   end
    local function tpmCreatekey(kname,op)
       if keys[kname] then error(sfmt("ECC key %s exists",kname),2) end
-      op = op or {}
-      if op.key and op.key ~= "ecc" then error("TPM can only create ECC keys",2) end
-      local newOp={}
-      for k,v in pairs(op) do newOp[k]=v end
-      newOp.rnd=PBKDF2(maxHash,"#$"..kname,upkey,5,1024)
-      local key=createkey(newOp)
-      keys[kname]=key
+      makeKey(kname,op)
       return true
    end
    local function tpmHaskey(kname) return keys[kname] and true or false end
    local function tpmSharkcert(kname,certdata) return sharkcert(certdata,tpmGetKey(kname)) end
-   require"acme/engine".setTPM{jwtsign=tpmJwtsign,keyparams=tpmKeyparams,createcsr=tpmCreatecsr,createkey=tpmCreatekey,haskey=tpmHaskey}
+   require"acme/engine".setTPM{jwtsign=tpmJwtsign,keyparams=tpmKeyparams,
+      createcsr=tpmCreatecsr,createkey=tpmCreatekey,haskey=tpmHaskey}
    local t={}
    function t.haskey(k) return tpmHaskey(k) end
    function t.createkey(k,...) return tpmCreatekey(k,...) end
    function t.createcsr(k,...) return tpmCreatecsr(k,...) end
+   function t.createcertificate(k,...) return tpmCreatecertificate(k,...) end
    function t.sign(h,k,o) return tpmSign(h,k,o) end
    function t.jwtsign(k,...) return tpmJwtsign(k,...) end
    function t.keyparams(k,...) return tpmKeyparams(k,...) end

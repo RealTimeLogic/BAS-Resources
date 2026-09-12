@@ -203,7 +203,7 @@ local function unobserve(_ENV, peerT, tid)
 	 observeT[tid] = nil
       end
    elseif x == sock then
-      tidT[tid] = nil
+      observeT[tid] = nil
    end
 end
 
@@ -355,17 +355,17 @@ end
 
 
 local function lShutdown(_ENV,msg,etid)
-   if msg then
-      if etid then
-	 local sock=tidT[etid]
-	 if sock then
-	    if type(sock) == "userdata" then
-	       sendFrame(sock,{rd=schar(MsgDisconnect)..msg})
-	       terminatePeerT(_ENV,sock)
-	    end
+   if etid then
+      local sock=tidT[etid]
+      if sock then
+	 if type(sock) == "userdata" then
+	    if msg then sendFrame(sock,{rd=schar(MsgDisconnect)..msg}) end
+	    terminatePeerT(_ENV,sock)
 	 end
-	 return
       end
+      return
+   end
+   if msg then
       for sock in pairs(sockT) do
 	 if type(sock) == "userdata" then
 	    sendFrame(sock,{rd=schar(MsgDisconnect)..msg})
@@ -488,7 +488,7 @@ end
 
 
 local function managePubFrag(_ENV,peerT,frame,hasFL)
-   if not hasFL then return end -- Not available to WebSocket
+   if not hasFL or #frame < 15 then return end -- Raw protocol only; complete header required.
    local data = frame:sub(16)
    if peerT.fragment then
       peerT.fragsize=peerT.fragsize + #data
@@ -507,7 +507,7 @@ local function managePubFrag(_ENV,peerT,frame,hasFL)
       peerT.fragment=nil
       t[2] = frame:sub(4, 15)
       data = tconcat(t)
-      if #data <= 0xFFF0 then -- 0xF=frame size
+      if peerT.fragsize <= 0xFFF0 then -- Limit payload bytes, excluding the header.
 	 return managePublish(_ENV,peerT,data)
       end
       prepLog(_ENV,peerT.sock,"PubFrag above max payload: %d", #data)
@@ -639,8 +639,9 @@ end
 
 
 --args: sock, self
-local function rawSockThread(sock,env)
-   local data,err
+local function rawSockThread(sock,env,data)
+   local ready,err=sock:disable() -- Wait for onconnect; closure must discard buffered input.
+   if not ready then terminatePeerT(env,sock,err) return end
    while true do
       data,err = getRawSockFrame(sock, data)
       if not data then break end
@@ -655,7 +656,9 @@ end
 
 
 local function webSockThread(sock,env)
-   local data,err
+   local ready,err=sock:disable()
+   if not ready then terminatePeerT(env,sock,err) return end
+   local data
    while true do
       data,err=getWebSockFrame(sock)
       if not data then break end
@@ -674,20 +677,25 @@ local function connect(_ENV,cmd,arg)
    if cmd:header"SendSmqHttpResponse" == "true" then cmd:flush() end
    local url = cmd:uri()
    local uname = cmd:user()
-   local sock = ba.socket.req2sock(cmd)
+   local sock,initialData = ba.socket.req2sock(cmd)
    if sock then
       local ws = sock:websocket()
-      local ecode,uid,info,reason=6
+      local ecode,uid,info,reason,remaining=6
       local seed=ba.rnds(4)
       if sendFrame(sock,{rd=
 	 schar(MsgInit,1)..sh2n(4,seed)..rmIPv6pf(sock:peername() or "")})
       then
-	 local data = ws and
-	    getWebSockFrame(sock, readtmo) or
-	    stripFL(getRawSockFrame(sock, nil, readtmo))
+         local data
+         if ws then
+            data=getWebSockFrame(sock, readtmo)
+         else
+            data,remaining=getRawSockFrame(sock, initialData, readtmo)
+            data=stripFL(data)
+         end
 	 if data then -- Extract data from Connect
 	    local msg,ver = data:byte(1,2)
-	    if msg == MsgConnect and (ver == 1 or ver == 2) then
+	    if msg == MsgConnect and (ver == 1 or ver == 2) and
+               #data >= (ver == 1 and 3 or 5) then
 	       local idlen,crlen,credentials
 	       if ver == 1 then
 		  idlen = data:byte(3)
@@ -704,7 +712,7 @@ local function connect(_ENV,cmd,arg)
 		  credentials=data:sub(idlen+7,idlen+6+crlen)
 		  info=data:sub(idlen+7+crlen)
 	       end
-	       if idlen > 5 then
+	       if idlen > 5 and #data >= idlen+crlen+(ver == 1 and 4 or 6) then
 		  xinfo = {
 		     arg=arg,
 		     seed=seed,
@@ -760,8 +768,9 @@ local function connect(_ENV,cmd,arg)
 	    sockT[sock]=peerT
 	    sock:setoption("keepalive",true,keepidle,keepintv)
 	    -- Start socket thread and convert socket to non blocking.
-	    sock:event(ws and webSockThread or rawSockThread, "s", _ENV)
+	    sock:event(ws and webSockThread or rawSockThread, "s", _ENV, remaining)
 	    onconnect(tid, xinfo, peerT)
+	    sock:enable(true)
 	    return
 	 end
       end
@@ -850,10 +859,11 @@ local function onJsonMsg(ps,onmsg,data,ptid,tid,stid)
    if t then
       onmsg(t,ptid,tid,stid)
    else
-      pcall(function() data=tconcat({data:byte()}," ") end)
+      local logdata=data
+      pcall(function() logdata=tconcat({data:byte()}," ") end)
       prepLog(ps.env,nil,"JSON parse err for: ptid=%d, tid=%d, subtid=%d, data='%s'",
-	      ptid,tid,stid, data)
-      ps.onmsg(data,ptid,tid,stid)
+	      ptid,tid,stid, logdata)
+      onmsg(data,ptid,tid,stid)
    end
 end
 
@@ -957,6 +967,7 @@ local function lPublish(_ENV, data, topic, subtopic)
 	    qElems = qElems + 1
 	 else
 	    prepLog(_ENV,nil,pfmt("Queue full: dropping tid %X",tid))
+	    return nil,"full"
 	 end
       end
    end
@@ -967,9 +978,9 @@ end
 local function lObserve(_ENV,topic,func)
    local tid = getTid(_ENV, topic)
    chktype(func, "function", "arg 2 must be a function")
-   if tid and tid ~= serverT.tid and observe(_ENV, serverT, tid) then
+   if tid and tid ~= serverT.tid and tidT[tid] then
       serverT.sock.observeT[tid]=func
-      return true
+      return observe(_ENV, serverT, tid)
    end
 end
 
@@ -1082,7 +1093,7 @@ function B:onmsg(cbfunc)
 	       assertfunc(cbfunc)
 	       self.serverT.sock.onmsg = cbfunc
 	    end
-function B:queuesize() return self.qSize - self.qElems, self.qElems end
+function B:queuesize() return self.qSize - 1 - self.qElems, self.qElems end
 function B:etid2peer(tid)
 	 local x=self.tidT[tid]
 	 if x then return self.sockT[x] end
@@ -1094,13 +1105,15 @@ function B:setkeepalive(idle,intv)
 end
 
 function B:pubon(data, totid, fromtid, stid)
+   if #data > 0xFFF0 then error("Max payload: 0xFFF0", 2) end
    local to=self.tidT[totid]
    local from=self.tidT[fromtid]
    if type(to) == "userdata" and type(from) == "userdata" then
       local ok,err=sendFrame(
 	 to,{rd=schar(MsgPublish)..sh2n(4, totid)..sh2n(4,fromtid)..sh2n(4,stid)..data})
       if ok then return true end
-      manageWriteErr(self,to.sock,err)
+      manageWriteErr(self,to,err)
+      return nil,err
    end
    return false
 end
@@ -1127,7 +1140,7 @@ local function create(op)
       readtmo = op.readtmo or 4000,
       log = op.log or defaultLog,
       -- For server publish API(Ref:Q)
-      qSize = op.queuesize or 200,
+      qSize = (op.queuesize or 200) + 1, -- Ring buffer reserves one slot.
       qElems = 0,
       serverT={}, -- Server's simulated peerT
       onsubscribe=noop,

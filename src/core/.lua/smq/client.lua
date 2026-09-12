@@ -7,6 +7,7 @@ local jenc,jdec=ba.json.encode,ba.json.decode
 
 local MsgInit <const> = 1
 local MsgConnect <const> = 2
+local MsgConnAck <const> = 3
 local MsgSubscribe <const> = 4
 local MsgSubscribeAck <const> = 5
 local MsgCreate <const> = 6
@@ -38,6 +39,7 @@ end
 
 -- The following 3 functions create and encode ByteArrays (bta)
 local function createMsg(len,msg) -- SMQ message and packet header
+   assert(len <= 65535,"SMQ message too large")
    local bta=btaCreate(len)
    btah2n(bta,1,2,len)
    bta[3]=msg
@@ -130,6 +132,8 @@ local function initSelf(self)
       tid2topicT={}, --Key= tid, val = topic name
       topic2tidT={}, --Key=topic name, val=tid
       topicAckCBT={}, --Key=topic name, val=array of callback funcs
+      subscribeAckCBT={}, -- Separate subscription requests from topic creation.
+      subscriptions={}, -- Tokens invalidate pending callbacks on unsubscribe.
       tid2subtopicT={}, --Key= tid, val = subtopic name
       subtopic2tidT={}, --Key=sub topic name, val=tid
       subtopicAckCBT={}, --Key=sub topic name, val=array of callback funcs
@@ -147,34 +151,36 @@ local function onclose(self,err,canreconnect,msg)
    local reconn = self.onclose and self.onclose(err,canreconnect)
    self.reconTimeout = canreconnect and "number" == type(reconn) and reconn
    initSelf(self)
-   return reconn
+   return not self.disconnected and canreconnect and reconn
 end
 
 local function msgAck(_,data,tid2top,top2tid,ackCBT)
+   if #data < 8 then return nil,"protocolerror" end
    local accepted=data:byte(4) == 0 and true or false
    local tid=sn2h(4,data,5)
    local topic=data:sub(9,-1)
+   local callbacks=ackCBT[topic]
+   if not callbacks then return nil,"protocolerror" end
    if accepted then tid2top[tid],top2tid[topic]=topic,tid end
-   for _,onack in ipairs(ackCBT[topic]) do onack(accepted,topic,tid) end
+   ackCBT[topic]=nil
+   for _,onack in ipairs(callbacks) do onack(accepted,topic,tid) end
    return true
 end
 
 local function msgSubscribeAck(self,data)
-   msgAck(self,data,self.tid2topicT,self.topic2tidT,self.topicAckCBT)
-   return true
+   return msgAck(self,data,self.tid2topicT,self.topic2tidT,self.subscribeAckCBT)
 end
 
 local function msgCreateAck(self,data)
-   msgAck(self,data,self.tid2topicT,self.topic2tidT,self.topicAckCBT)
-   return true
+   return msgAck(self,data,self.tid2topicT,self.topic2tidT,self.topicAckCBT)
 end
 
 local function msgCreateSubAck(self,data)
-   msgAck(self,data,self.tid2subtopicT,self.subtopic2tidT,self.subtopicAckCBT)
-   return true
+   return msgAck(self,data,self.tid2subtopicT,self.subtopic2tidT,self.subtopicAckCBT)
 end
 
 local function msgPublish(self,data)
+   if #data < 15 then return nil,"protocolerror" end
    local tid = sn2h(4,data,4)
    local ptid = sn2h(4,data,8)
    local subtid = sn2h(4,data,12)
@@ -201,6 +207,7 @@ local function msgPong(self)
 end
 
 local function msgChange(self,data)
+   if #data < 11 then return nil,"protocolerror" end
    local tid = sn2h(4,data,4)
    local num = sn2h(4,data,8)
    local topic = self.tid2topicT[tid]
@@ -247,8 +254,8 @@ local function pingTimer(self)
    end
 end
 
-local function coSmqRun(self)
-   local sock,data,rem,ok,err=self.sock
+local function coSmqRun(self,data)
+   local sock,rem,ok,err=self.sock
    self.pongReceived,self.recCnt=true,0
    self.pingTimer=ba.timer(function() pingTimer(self) end)
    self.pingTimer:set(self.opt.ping*1000)
@@ -266,11 +273,12 @@ local function coSmqRun(self)
       data = rem -- remainder, if any
    end
    self.pingTimer:cancel()
+   sock:close()
    self.etid=nil
    self.disconnectCnt=self.disconnectCnt+1
    self.connected=false
    if not self.disconnected and onclose(self,err,"sysshutdown" ~= err) then
-      self.connectTime=nil
+      self.connectTime=ba.clock()
       if "sysshutdown" ~= err then startSMQ(self) end
    end
 end
@@ -280,7 +288,7 @@ local function coSmqConnect(sock,self,data)
    local canreconnect,err=true
    data,err=smqRec(sock,data,self.opt.timeout)
    if data then
-      if data:byte(3) == MsgInit and data:byte(4) == 1 then
+      if #data >= 8 and data:byte(3) == MsgInit and data:byte(4) == 1 then
 	 local rnd,ip=sn2h(4,data,5),data:sub(9,-1)
 	 local uid=self.opt.uid or (ip..self.sock:sockname())
 	 local info = self.opt.info or self.sock:sockname()
@@ -293,8 +301,12 @@ local function coSmqConnect(sock,self,data)
 	 bta[5],bta[6]=#uid,uid
 	 bta[6+#uid],bta[7+#uid]=#credentials,credentials
 	 if #info > 0 then bta[7+#uid+#credentials]=info end
-	 self.sock:write(bta)
-	 data,err=smqRec(sock,nil,self.opt.timeout)
+	 local ok
+	 ok,err=self.sock:write(bta)
+	 if ok then data,err=smqRec(sock,nil,self.opt.timeout) else data=nil end
+	 if data and (#data < 8 or data:byte(3) ~= MsgConnAck) then
+	    data,err=nil,"protocolerror"
+	 end
 	 if data then
 	    local status,etid=data:byte(4),sn2h(4,data,5)
 	    if 0 == status then
@@ -308,7 +320,7 @@ local function coSmqConnect(sock,self,data)
 	       elseif self.onconnect then
 		  self.onconnect(etid,rnd,ip)
 	       end
-	       coSmqRun(self)
+	       coSmqRun(self,err)
 	       return
 	    end
 	    err=serveECodes[status]
@@ -317,6 +329,7 @@ local function coSmqConnect(sock,self,data)
 	 err,canreconnect="nonsmq",true
       end
    end
+   sock:close()
    if "sysshutdown" == err then canreconnect = false end
    if onclose(self,err or "protocolerror",canreconnect) and canreconnect then
       startSMQ(self,true)
@@ -324,11 +337,12 @@ local function coSmqConnect(sock,self,data)
 end
 
 local function coSockConnect(cosock,self)
+   if self.disconnected then return end
    self.connectTime=ba.clock()
-   local sock,err,msg
-   local function callback(s,e,m) sock,err,msg=s,e,m cosock:enable() end
+   local sock,err,msg,done
+   local function callback(s,e,m) sock,err,msg,done=s,e,m,true cosock:enable() end
    self.connect(self,self.opt,callback)
-   cosock:disable()
+   if not done then cosock:disable() end
    if self.disconnected then
       if sock then sock:close() end
       return
@@ -348,7 +362,9 @@ local function coSockConnect(cosock,self)
 end
 
 startSMQ=function(self,defer)
-   local function conn() ba.socket.event(coSockConnect,self) end
+   local function conn()
+      if not self.disconnected then ba.socket.event(coSockConnect,self) end
+   end
    if self.connectTime then
       local timeout = self.reconTimeout or 5000
       local delta = ba.clock() - self.connectTime
@@ -367,7 +383,11 @@ end
 
 
 local function connect2url(_,opt,callback)
-   local http = require"http".create(opt)
+   local http,err = require"http".create(opt)
+   if not http then
+      ba.thread.run(function() callback(nil,err) end)
+      return
+   end
    http:timeout(opt.timeout)
    local h = opt.header or {}
    opt.header=h
@@ -395,7 +415,7 @@ C.__index=C
 local function createTopic(self,topic,top2tidT,ackCBT,msg,onack)
    if not self.connected then return false end
    onack=onack or function() end
-   local tid=top2tidT[topic]
+   local tid=msg ~= MsgSubscribe and top2tidT[topic]
    if tid then
       onack(true,topic,tid)
    else
@@ -403,11 +423,12 @@ local function createTopic(self,topic,top2tidT,ackCBT,msg,onack)
       if not arr then
 	 local bta,ix=createMsg(3+#topic,msg)
 	 encString(bta,ix,topic)
-	 sendMsg(self,bta)
-	 arr={}
+	 arr={onack}
 	 ackCBT[topic]=arr
+	 sendMsg(self,bta)
+      else
+	 tinsert(arr,onack)
       end
-      tinsert(arr,onack)
    end
    return true
 end
@@ -423,6 +444,7 @@ end
 function C:close()
    if not self.disconnected then
       self.disconnected=true
+      self.subscriptions={}
       if self.pingTimer then self.pingTimer:cancel() end
       if self.sock then
 	 sendMsg(self,createMsg(3,MsgDisconnect))
@@ -431,8 +453,8 @@ function C:close()
    end
    self.connected=false
 end
-C.__gc=C.disconnect
-C.__close=C.disconnect
+C.__gc=C.close
+C.__close=C.close
 
 function C:gettid()
    return self.etid
@@ -441,6 +463,8 @@ end
 function C:publish(data,topic,subtopic)
    local tid,stid
    if not self.connected then return false end
+   if "table" == type(data) then data=assert(jenc(data)) else data=tostring(data) end
+   assert(#data <= 65520,"SMQ message too large")
    if "string" == type(topic) then
       tid=self.topic2tidT[topic]
       if not tid then
@@ -468,7 +492,6 @@ function C:publish(data,topic,subtopic)
       stid = "number" == type(subtopic) and subtopic or 0
    end
    if tid and stid then
-      data = "table" == type(data) and jenc(data) or tostring(data)
       local bta,ix=createMsg(15+#data,MsgPublish)
       ix=enc4BInt(bta,ix,tid)
       ix=enc4BInt(bta,ix,self.etid)
@@ -480,21 +503,36 @@ function C:publish(data,topic,subtopic)
 end
 
 function C:subscribe(topic,subtopic,settings)
+   if not self.connected then return end
    local stid
    if not settings and "table" == type(subtopic) then
       settings,subtopic=subtopic,nil
    end
+   settings=settings or {}
+   local subscription=self.subscriptions[topic] or {}
+   self.subscriptions[topic]=subscription
    local function subscribe()
       local function topicAck(ok,_,tid)
+	 if self.subscriptions[topic] ~= subscription then
+	    if ok and self.connected and not self.subscriptions[topic]
+	       and not subscription.unsubscribed then
+	       subscription.unsubscribed=true
+	       local bta=createMsg(7,MsgUnsubscribe)
+	       enc4BInt(bta,4,tid)
+	       sendMsg(self,bta)
+	    end
+	    return
+	 end
 	 if settings.onack then settings.onack(ok,topic,tid,subtopic,stid) end
+	 if self.subscriptions[topic] ~= subscription then return end
 	 if not ok then
 	    if not settings.onack then log("sub failed",topic) end
 	    return
 	 end
 	 local onmsg=settings.onmsg
+	 local t = self.onMsgCBT[tid]
+	 if not t then t = {subtops={}} self.onMsgCBT[tid] = t end
 	 if onmsg then
-	    local t = self.onMsgCBT[tid]
-	    if not t then t = {subtops={}} self.onMsgCBT[tid] = t end
 	    if "json" == settings.datatype then
 	       local onmsg2=onmsg
 	       onmsg=function(data,ptid,id,subtid)
@@ -511,7 +549,7 @@ function C:subscribe(topic,subtopic,settings)
       if "self"==topic then
 	 topicAck(true,topic,self.etid)
       else
-	 createTopic(self,topic,self.topic2tidT,self.topicAckCBT,MsgSubscribe,topicAck)
+	 createTopic(self,topic,self.topic2tidT,self.subscribeAckCBT,MsgSubscribe,topicAck)
       end
    end
    if subtopic then
@@ -520,6 +558,7 @@ function C:subscribe(topic,subtopic,settings)
       else
 	 argchk(2,"string",subtopic)
 	 self:createsub(subtopic,function(ok,_,tid)
+	    if self.subscriptions[topic] ~= subscription then return end
 	    if ok then
 	       stid=tid
 	       subscribe()
@@ -553,10 +592,17 @@ end
 
 
 function C:unsubscribe(topic)
-   local tid=getTid(self, topic)
-   if self.onMsgCBT[tid] then
+   local name="string" == type(topic) and topic or self.tid2topicT[topic]
+   local subscription=self.subscriptions[name]
+   local tid
+   if subscription then tid=self.topic2tidT[name] else tid=getTid(self,topic) end
+   if name then self.subscriptions[name]=nil end
+   if tid and (subscription or self.onMsgCBT[tid]) then
       self.onMsgCBT[tid]=nil
-      sendMsgWithTid(self,MsgUnsubscribe,tid)
+      if not self.subscribeAckCBT[name] then
+	 if subscription then subscription.unsubscribed=true end
+	 sendMsgWithTid(self,MsgUnsubscribe,tid)
+      end
    end
 end
 

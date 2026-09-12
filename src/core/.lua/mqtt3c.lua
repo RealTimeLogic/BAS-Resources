@@ -208,7 +208,7 @@ local function subOrUnsub(self,topic,callback,sub)
 end
 
 function C:subscribe(topic,callback,opt)
-   if not opt and "table" == callback then
+   if not opt and "table" == type(callback) then
       opt,callback=callback,nil
    end
    if opt and "function" == type(opt.onpub) then self.onpubT[topic]=opt.onpub end
@@ -221,7 +221,10 @@ function C:unsubscribe(topic,callback)
 end
 
 function C:disconnect()
-   if not self.connected then return nil, self.error end
+   if not self.connected then
+      if self.sock then self.sock:close() end
+      return nil, self.error
+   end
    self.error="disconnect"
    local ok,err = self.sock:write(schar(MQTT_DISCONNECT)..schar(0))
    self.connected=false
@@ -234,25 +237,31 @@ C.__gc=C.close
 C.__close=C.close
 
 function C:run()
-   local cpt,msg
+   local cpt,msg,unknowncp
    while true do
       cpt,msg=mqttRec(self)
       if not cpt then break end
       local func = cpT[cpt]
-      if not func then return nil,"unknowncp",cpt end
+      if not func then unknowncp,msg=cpt,"unknowncp" break end
       cpt,msg = func(self, msg) -- cpt,msg are ok,err
       if not cpt then break end
    end
    self.timer:cancel()
    if not self.error then self.error = msg end -- msg=err
    self.connected,self.recOverflowData=false,nil
+   if unknowncp then return nil,"unknowncp",unknowncp end
    return nil,self.error
 end
 
 
 local function _connect(self, addr, onpub, opt)
    opt = opt or {}
+   if type(onpub) ~= "function" then
+      error(fmtArgErr(2,"connect","function",onpub),2)
+   end
    self.packetId,self.packetIdT=1,{}
+   self.error,self.pingResp,self.recOverflowData=nil,nil,nil
+   self.connected=false
    if opt.secure and not opt.shark then opt.shark=ba.sharkclient() end
    if type(addr) == "string" then
       local sock,err=ba.socket.connect(
@@ -260,16 +269,13 @@ local function _connect(self, addr, onpub, opt)
       if not sock then return nil,err,"sock" end
       if opt.shark and not opt.nocheck then
 	 local trusted,status = sock:trusted(addr)
-	 if not trusted then return nil,status,"sock" end
+	 if not trusted then sock:close() return nil,status,"sock" end
       end
       self.sock=sock
    elseif type(addr) == "userdata" and type(addr.trusted) == "function" then
       self.sock=addr
    else
       error(fmtArgErr(1,"connect","string",addr),2)
-   end
-   if type(onpub) ~= "function" then
-      error(fmtArgErr(2,"connect","function",onpub),2)
    end
    self.pingtmo = opt.keepalive and
       (opt.keepalive > 60 and opt.keepalive or 60) or 10*60
@@ -296,12 +302,17 @@ local function _connect(self, addr, onpub, opt)
       typechk("opt.passwd", "string",opt.passwd)
       data = data..mqttstr(opt.passwd)
    end
-   self.sock:write(schar(MQTT_CONNECT)..enclen(#data)..data)
+   local function failed(err,kind)
+      self.sock:close()
+      return nil,err,kind
+   end
+   local sent,err=self.sock:write(schar(MQTT_CONNECT)..enclen(#data)..data)
+   if not sent then return failed(err,"sock") end
    local cpt,msg=mqttRec(self)
-   if not cpt then return nil,msg,"sock" end -- msg=err
-   if cpt ~= MQTT_CONACK then return nil,"invalidresp","mqtt" end
+   if not cpt then return failed(msg,"sock") end -- msg=err
+   if cpt ~= MQTT_CONACK or #msg ~= 2 then return failed("invalidresp","mqtt") end
    local rcp = sbyte(msg,2)
-   if rcp ~= 0 then return nil, rcp, true end
+   if rcp ~= 0 then return failed(rcp,true) end
    self.onpub=onpub
    self.timer = ba.timer(function() sendPing(self) return true end)
    self.timer:set((self.pingtmo - 20) * 1000)
@@ -330,8 +341,15 @@ local function connectAndRun(self, addr, onstatus, onpub)
 	    recon,err=self:run()
 	    recon=onstatus("sock",self.error)
 	 end
+         self.sock:close()
+         self.connected=false
+         self.timer:cancel()
       else
-	 recon=onstatus("mqtt","connect", {reasoncode= (true == rcp and err or 0)})
+	 if true == rcp then
+	    recon=onstatus("mqtt","connect", {reasoncode=err,properties={}})
+	 else
+	    recon=onstatus(rcp,err)
+	 end
       end
       recon = "number" == type(recon) and recon or (true == recon and 5 or 0)
       if recon > 0 and "sysshutdown" ~= err then

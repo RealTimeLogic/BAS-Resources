@@ -56,19 +56,25 @@ local function nosubscribers(_ENV,tid)
    send2AllNodes(_ENV,schar(MsgUnsubscribe)..sh2n(4,tid))
 end
 
+local function sendPublication(sock,id,data,subtopic)
+   if not subtopic then return sendframe(sock,id,data) end
+   -- One write keeps the announcement with its publication if sending yields.
+   return sock:write(
+      sh2n(4,#subtopic+7)..sh2n(2,id)..schar(MsgSubTopic)..subtopic..
+      sh2n(4,#data+6)..sh2n(2,id)..data)
+end
+
 -- _ENV is the connection object
 local function onpublishCon(_ENV,data,ptid,tid,subtid)
+   local stn
    local rst = lSubTopicT[subtid] -- get Remote Sub Tid, if known
    if rst then
       subtid=rst -- translate
    elseif subtid ~= 0 then
-      local stn = cenv.smq:tid2subtopic(subtid)
-      if stn then
-	 sendframe(sock,id,schar(MsgSubTopic)..stn)
-      end
+      stn = cenv.smq:tid2subtopic(subtid)
    end
-   sendframe(sock,id,schar(MsgPublish)..sh2n(4,tid)..sh2n(4,
-	     ptid)..sh2n(4,subtid)..data)
+   sendPublication(sock,id,schar(MsgPublish)..sh2n(4,tid)..sh2n(4,
+	     ptid)..sh2n(4,subtid)..data,stn)
 end
 
 local function onpublish(_ENV,data,lptid,ltid,lsubtid)
@@ -81,25 +87,25 @@ local function onpublish(_ENV,data,lptid,ltid,lsubtid)
 end
 
 local function pubon(_ENV,data,ptid,topic,subtopic)
-   local peerT = smq:etid2peer(lptid)
+   local peerT = smq:etid2peer(ptid)
    if not peerT or peerT.phantom == _ENV then return false end
+   if type(data) == "table" then data = assert(ba.json.encode(data)) end
+   assert(#data <= 0xFFF0, "Max payload: 0xFFF0")
    onpublish(_ENV,data,ptid,a_getTid(topic),a_getSubTid(subtopic))
    return true
 end
 
 -- _ENV is the connection object
 local function onpubsrvCon(_ENV,data,ptid,subtid)
+   local stn
    local rst = lSubTopicT[subtid] -- get Remote Sub Tid, if known
    if rst then
       subtid=rst -- translate
    elseif subtid ~= 0 then
-      local stn = cenv.smq:tid2subtopic(subtid)
-      if stn then
-	 sendframe(sock,id,schar(MsgSubTopic)..stn)
-      end
+      stn = cenv.smq:tid2subtopic(subtid)
    end
    if type(data) == "table" then data = ba.json.encode(data) end
-   sendframe(sock,id,schar(MsgPubSrv)..sh2n(4,ptid)..sh2n(4,subtid)..data)
+   sendPublication(sock,id,schar(MsgPubSrv)..sh2n(4,ptid)..sh2n(4,subtid)..data,stn)
 end
 
 
@@ -134,11 +140,17 @@ end
 local function manageSubscribe(_ENV,data)
    local ltidT = cenv.ltidT
    local rtid=sn2h(4,data,8)
-   local ltid = cenv.smq:create(data:sub(12))
-   rtidT[rtid]=ltid
+   local name=data:sub(12)
+   local ltid=rtidT[rtid]
+   if ltid then
+      if cenv.smq:topic2tid(name) == ltid then return end
+      return cenv.mtl._protocolerror
+   end
+   ltid = cenv.smq:create(name)
    local x = ltidT[ltid]
+   if x and x[sock] then return cenv.mtl._protocolerror end
+   rtidT[rtid]=ltid
    if x then
-      assert(not x[sock])
       x[sock]=rtid
    else
       ltidT[ltid] = {[sock]=rtid}
@@ -155,7 +167,7 @@ local function manageSubTopicAck(_ENV,data)
    local smq=cenv.smq
    local rstid=sn2h(4,data,8)
    local stn=data:sub(12)
-   assert(smq:subtopic2tid(stn))
+   if not smq:subtopic2tid(stn) then return cenv.mtl._protocolerror end
    lSubTopicT[smq:createsub(stn)]=rstid
 end
 
@@ -196,9 +208,8 @@ end
 local function manageUnsubscribe(_ENV,data)
    local ltidT = cenv.ltidT
    local rtid=sn2h(4,data,8)
-   assert(rtidT[rtid])
    local ltid=rtidT[rtid]
-   assert(ltid)
+   if not ltid then return cenv.mtl._protocolerror end
    rtidT[rtid]=nil
    ltidTRemove(cenv,ltid,sock)
 end
@@ -256,9 +267,14 @@ end
 local function ondata(cenv,sock,data)
    local connenv = cenv.conT[sock]
    if connenv then
-      local manage = msgT[data:byte(7)]
+      if #data < 7 then return cenv.mtl._protocolerror end
+      local msg = data:byte(7)
+      local manage = msgT[msg]
       if manage then
-	 manage(connenv,data)
+         local minlen = msg == MsgPublish and 19 or msg == MsgPubSrv and 15 or
+            msg == MsgSubTopic and 7 or 11
+         if #data < minlen then return cenv.mtl._protocolerror end
+	 return manage(connenv,data)
       else
 	 trace("Cluster: Received unknown msg",data:byte(7))
       end
@@ -299,11 +315,10 @@ local function create(smq,pwdOrMtl,op)
    createCntr=createCntr+1
    env.mtl:open(env.mtlname,
 		function(sock,up,id) onstatus(env,sock,up,id) end,
-		function(sock,data) ondata(env,sock,data) end)
+		function(sock,data) return ondata(env,sock,data) end)
    return setmetatable(env,Cluster)
 end
 
 return {
    create=create,
 }
-

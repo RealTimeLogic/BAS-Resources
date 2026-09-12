@@ -5,6 +5,7 @@ local sn2h=ba.socket.n2h
 local sh2n=ba.socket.h2n
 local tinsert=table.insert
 local tconcat=table.concat
+local protocolerror={} -- Internal cluster-to-transport validation result.
 
 local hub=require"smq/hub"
 local pfmt=hub.pfmt
@@ -39,19 +40,20 @@ local function getSockFrame(sock,data,tmo)
    local err
    if not data then data,err = sock:read(tmo) end
    if data then
-      if #data < 6 then
+      while #data < 6 do
 	 local d=data
 	 data,err = sock:read(tmo)
-	 if not data then return nil,err end
+	 if not data then return nil,err,d end
 	 data=d..data
       end
       local len=sn2h(4,data)
+      if len < 6 then return nil,"protocolerror" end
       if len > #data then
 	 local t={data}
 	 local bytesRead = #data
 	 while bytesRead < len do
 	    data,err = sock:read(tmo)
-	    if not data then return nil,err end
+	    if not data then return nil,err,tconcat(t) end
 	    tinsert(t, data)
 	    bytesRead = bytesRead + #data
 	 end
@@ -76,15 +78,16 @@ local function MTL_log(self,highprio,msg,...)
    end
 end
 
-local function validateNewSock(self, sock, peerAddr, peerT)
-   local lweight = ba.rnd(1,0xFFFFFFFF/2-1)
+local function validateNewSock(self, sock, peerAddr, peerT, initialData)
+   local lweight = ba.rnd(1,0x7FFFFFFE)
    peerT.socksT[sock]=lweight
-   local data,rem = getSockFrame(sock,nil,100) -- Needed for secure serv cons
+   local data,rem,partial = getSockFrame(sock,initialData,100) -- Initial read needed for secure server connections.
    sendframe(sock,0,sh2n(4,0x0015A5A5)..sh2n(4,lweight)..sh2n(4,0xA5A55AAA))
-   if not data then data,rem = getSockFrame(sock,nil,2000) end
+   if not data and rem == "timeout" then data,rem = getSockFrame(sock,partial,2000) end -- Resume a partial greeting after the probe timeout.
    if not data then return false,rem end
+   if #data ~= 18 then return false,"invalid" end
    local magic1,rweight,magic2=sn2h(4,data,7),sn2h(4,data,11),sn2h(4,data,15)
-   if #data ~= 18 or magic1 ~= 0x0015A5A5 or magic2 ~= 0xA5A55AAA then
+   if magic1 ~= 0x0015A5A5 or magic2 ~= 0xA5A55AAA then
       MTL_log(self,true,"invalid protocol version %s",sock)
       return false,"invalid"
    end
@@ -150,6 +153,7 @@ local function removeIfEmpty(self,peerT,sock,peerAddr)
 end
 
 local function manageOpen(self,peerT,data)
+   if #data < 8 then return false end
    local id = sn2h(2,data,7)
    local name=data:sub(9)
    local client = self.clientsT[name]
@@ -162,8 +166,11 @@ local function manageOpen(self,peerT,data)
 end
 
 local function manageClose(self,peerT,data)
+   if #data < 8 then return false end
    local nl=sn2h(2,data,7)
+   if #data < 8+nl then return false end
    local name=data:sub(9, 8+nl)
+   if peerT.ridT then peerT.ridT[name]=nil end
    local client = self.clientsT[name]
    if client then
       local msg = data:sub(9+nl)
@@ -190,6 +197,7 @@ local function managePing(self,peerT)
 end
 
 local function managePong(self,peerT)
+   if not self.pingtmoT or self.pingtmoT[peerT] ~= false then return end
    self.ping.roundtripCB(peerT.sock,ba.clock()-peerT.pingStart)
    self.pingtmoT[peerT]=true
 end
@@ -204,7 +212,8 @@ local msgT={
    [MsgCheckOldConResp]=manageCheckOldConResp
 }
 
-local function sockThread(sock,self,statusCB)
+local function sockThread(sock,self,statusCB,initialData)
+   if self.terminated then return end
    local peerAddr=peername(sock)
    if not peerAddr then return end
    local peerT=self.peersT[peerAddr]
@@ -212,9 +221,9 @@ local function sockThread(sock,self,statusCB)
       peerT={socksT={}}
       self.peersT[peerAddr] = peerT
    end
-   local data,rem = validateNewSock(self, sock, peerAddr, peerT)
-   if not data then -- not OK
-      if removeIfEmpty(self,peerT,sock,peerAddr) then
+   local data,rem = validateNewSock(self, sock, peerAddr, peerT, initialData)
+   if not data or self.terminated then -- not OK
+      if removeIfEmpty(self,peerT,sock,peerAddr) and not self.terminated then
 	 statusCB(peerAddr,sock,false,rem)
       end
       return -- close
@@ -225,11 +234,11 @@ local function sockThread(sock,self,statusCB)
    peerT.socksT[sock]=0 -- 0 weight enables CheckOldCon
    peerT.sock = sock -- Set active connection (ref:Active)
    for s in pairs(peerT.socksT) do if s~=sock then s:close() end end
-   statusCB(peerAddr,sock,true)
    -- Send all in peersT
    for id, client in pairs(self.clientsIdT) do
       sendframe(sock, MsgOpen, sh2n(2,id)..client.name)
    end
+   statusCB(peerAddr,sock,true)
 
    self.onstatus(peerAddr,true)
    while true do
@@ -238,11 +247,11 @@ local function sockThread(sock,self,statusCB)
       local id=sn2h(2,data,5)
       local client = self.clientsIdT[id]
       if client then
-	 client.dataCB(sock,data)
+	 if client.dataCB(sock,data) == protocolerror then rem="protocolerror" break end
       else
 	 client = msgT[id]
 	 if client then
-	    client(self,peerT,data)
+	    if client(self,peerT,data) == false then rem="protocolerror" break end
 	 else
 	    MTL_log(self, false, "dropping rec ID(%d) %s", id,sock)
 	 end
@@ -301,13 +310,13 @@ local function mktimer(self,timerCB)
 end
 
 
-local MTL={log=MTL_log} -- MTL meta
+local MTL={log=MTL_log, _protocolerror=protocolerror} -- MTL meta
 MTL.__index=MTL
 
-function MTL:commence(s,statusCB)
+function MTL:commence(s,statusCB,data)
    if self.terminated then s:close() return false end
    if ba.cmpaddr(s:peername(), s:sockname()) then s:close() return false end
-   s:event(sockThread,"s",self,statusCB)
+   s:event(sockThread,"s",self,statusCB,data)
    return true
 end
 
@@ -327,11 +336,13 @@ function MTL:open(name,statusCB,dataCB)
    self.clientsT[name]=client
    self.clientsIdT[id]=client
    for _,peerT in pairs(self.peersT) do
-      sendframe(peerT.sock,MsgOpen,sh2n(2,client.id)..name)
-      local id = peerT.ridT and peerT.ridT[name]
-      if id then
-	 peerT.ridT[name]=nil
-	 statusCB(peerT.sock, true, id)
+      if peerT.sock then -- Pending handshakes announce registrations when ready.
+         sendframe(peerT.sock,MsgOpen,sh2n(2,client.id)..name)
+         local id = peerT.ridT and peerT.ridT[name]
+         if id then
+            peerT.ridT[name]=nil
+            statusCB(peerT.sock, true, id)
+         end
       end
    end
    return true
@@ -347,7 +358,7 @@ function MTL:close(name, msg)
    if client then
       msg=sh2n(2,#name)..name..(msg or '')
       for _,peerT in pairs(self.peersT) do
-	 sendframe(peerT.sock, MsgClose, msg)
+	 if peerT.sock then sendframe(peerT.sock, MsgClose, msg) end
       end
       self.clientsT[name]=nil
       self.clientsIdT[client.id]=nil
@@ -363,8 +374,9 @@ function MTL:shutdown()
    self.terminated=true
    if self.pingtimer then self.pingtimer:cancel() end
    for _,peerT in pairs(self.peersT) do
-      if peerT.sock then peerT.sock:close() end
+      for sock in pairs(peerT.socksT) do sock:close() end
    end
+   self.peersT={}
 end
 
 

@@ -37,8 +37,9 @@ local function sendmail(m)
    -- copy smtp settings to new table
    local cfg
    if pT then
-      local http = require"httpc".create{
+      local http,err = require"httpc".create{
 	 proxy=pT.name,socks=pT.socks,proxyport=pT.port,proxycon=true}
+      if not http then return perr(err) end
       local _,status = http:request{
 	 url=fmt("http://%s:%d",sT.server,sT.port)}
       if status ~= "prxready" then

@@ -1,9 +1,11 @@
 @echo off
 
+pushd "%~dp0" || exit /b 1
+
 where /q zip.exe
 if ERRORLEVEL 1 (
    echo Adding ..\tools\windows to path.
-   set "PATH=%CD%\..\tools\windows;%PATH%"
+   set "PATH=%~dp0..\tools\windows;%PATH%"
 )
 
 
@@ -12,33 +14,40 @@ for %%i in (%executables%) do (
     where /q %%i
     if ERRORLEVEL 1 (
         echo %%i not found in the path.
+        popd
         exit /b 1
     )
 )
 if exist "mako.zip" (del mako.zip)
 if exist "MakoBuild" (rmdir /s /q MakoBuild)
-mkdir MakoBuild || exit /b 2
-cd MakoBuild || exit /b 3
-xcopy ..\..\src\core . /eq || exit /b 4
-xcopy ..\..\src\mako . /eq || exit /b 5
-xcopy ..\..\src\opcua .lua\opcua\ /eq || exit /b 6
+mkdir MakoBuild || goto BuildFailed
+cd MakoBuild || goto BuildFailed
+xcopy ..\..\src\core . /eq || goto BuildFailed
+xcopy ..\..\src\mako . /eq || goto BuildFailed
+xcopy ..\..\src\opcua .lua\opcua\ /eq || goto BuildFailed
+for %%i in (.lua\acme\runtime.lua .lua\acme\dns.lua .lua\acme\_server.lua) do (
+   if not exist "%%i" (
+      echo Required ACME module %%i was not packaged.
+      goto BuildFailed
+   )
+)
 
 if exist "..\..\..\lua-protobuf" (
    echo Including lua-protobuf and Sparkplug lib
-   copy ..\..\..\lua-protobuf\protoc.lua .lua > nul || exit /b 7
-   copy ..\..\..\lua-protobuf\serpent.lua .lua > nul || exit /b 8
-   copy ..\..\src\sparkplug\* .lua > nul || exit /b 9
+   copy ..\..\..\lua-protobuf\protoc.lua .lua > nul || goto BuildFailed
+   copy ..\..\..\lua-protobuf\serpent.lua .lua > nul || goto BuildFailed
+   copy ..\..\src\sparkplug\* .lua > nul || goto BuildFailed
 ) else (
    echo ..\..\..\lua-protobuf not found; Not Including lua-protobuf and Sparkplug
 )
 
 if exist "..\..\..\LPeg" (
    echo Including LPeg
-   copy ..\..\..\LPeg\re.lua .lua > nul || exit /b 10
+   copy ..\..\..\LPeg\re.lua .lua > nul || goto BuildFailed
    if exist "..\..\..\CBOR" (
       echo Including CBOR 'cbor_s.lua'
       mkdir .lua\org\conman
-      copy ..\..\..\CBOR\cbor_s.lua .lua\org\conman > nul || exit /b 7
+      copy ..\..\..\CBOR\cbor_s.lua .lua\org\conman > nul || goto BuildFailed
    ) else (
        echo ..\..\..\CBOR not found; Not Including CBOR
    )
@@ -46,7 +55,13 @@ if exist "..\..\..\LPeg" (
    echo ..\..\..\LPeg not found; Not Including LPeg
 )
 
-set /p "userResponse=Do you want to minify the JS and CSS files (requires Node and npm) (y/n)? "
+if /i "%MinifyMakoZip%"=="yes" (
+   set "userResponse=y"
+) else if /i "%MinifyMakoZip%"=="no" (
+   set "userResponse=n"
+) else (
+   set /p "userResponse=Do you want to minify the JS and CSS files (requires Node and npm) (y/n)? "
+)
 if /i "%userResponse%"=="y" (
    where /q npm
     if ERRORLEVEL 1 (
@@ -59,5 +74,13 @@ if /i "%userResponse%"=="y" (
 
 echo Creating the zip file
 zip -D -q -u -r -9 ../mako.zip .
+if ERRORLEVEL 1 goto BuildFailed
 cd ..
-echo Done
+echo Created %~dp0mako.zip
+popd
+exit /b 0
+
+:BuildFailed
+echo Mako package build failed.
+popd
+exit /b 1

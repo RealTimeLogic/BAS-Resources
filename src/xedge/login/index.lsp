@@ -21,23 +21,31 @@ local function doIdErr(secretErr,recovery)
 end
 
 ------------------------------------------------------------
-local function emitLogin(err,ssoErrCodes,recovery)
-   local secretErr
+local function emitLogin(err,ssoErrCodes,recovery,status)
+   local idErr
    if ssoErrCodes then
       -- https://learn.microsoft.com/en-us/entra/identity-platform/reference-error-codes
       local idErrs={
 	 [7000215]="The client secret key is invalid/unknown",
-	 [7000222]="The client secret key has expired"
+	 [7000222]="The client secret key has expired",
+	 [700025]="The Microsoft Entra redirect URI must be registered under the Web platform, not Single-page application"
       }
       for _,code in ipairs(ssoErrCodes) do
-	 secretErr=idErrs[code]
-	 if secretErr and recovery then doIdErr(secretErr,recovery) return end
+	 idErr=idErrs[code]
+	 if idErr then
+	    if recovery and (code == 7000215 or code == 7000222) then
+	       doIdErr(idErr,recovery)
+	       return
+	    end
+	    err=idErr
+	    break
+	 end
       end
    end
 ?>
 <div class="center">
   <?lsp if err then ?>
-   <div class="alert"><p>Login failed: <?lsp=err?></p></div>
+   <div class="<?lsp=status == "starting" and "login-status" or "alert"?>"><p><?lsp=status == "starting" and "" or "Login failed: "?><?lsp=err?></p></div>
   <?lsp end if hasUserDb and not ssoErrCodes then ?>
    <form method="post" class="form" style="width:100%;">
      <input type="hidden" name="locallogin"/>
@@ -87,13 +95,13 @@ local session=request:session()
 local function tooMany() emitLogin("Too many authenticated users") end
 if request:method() == "POST" then
    if data.recovery and sso then
-      local ok,err,recovery=sso.rotate(request,data.secret,data.expires,data.recovery)
+      local ok,err,recovery,status=sso.rotate(request,data.secret,data.expires,data.recovery)
       if ok then
 	 action=function() end
       elseif recovery then
 	 action=function() doIdErr(err,recovery) end
       else
-	 action=function() emitLogin(err) end
+	 action=function() emitLogin(err,nil,nil,status) end
       end
    elseif data.locallogin then
       if hasUserDb then
@@ -137,8 +145,8 @@ else
    elseif request:user() then
       action=(hasUserDb or sso) and not request:session().xadmin and emitLogin or emitOK
    elseif data.sso and sso then
-      local ok,err=sso.sendredirect(request)
-      action=ok and function() end or function() emitLogin(err) end
+      local ok,err,_,status=sso.sendredirect(request)
+      action=ok and function() end or function() emitLogin(err,nil,nil,status) end
    elseif hasUserDb or sso then
       action=emitLogin
    else
@@ -160,6 +168,7 @@ end
 #sso:hover {background: #2F2F2F;}
 #sso .frow{gap: 12px; margin: 0;}
 #sso svg {max-height:20px}
+.login-status {color:var(--yellow);text-align:center;padding:10px;max-width:460px;}
 </style>
 <script>
 function authenticated() {

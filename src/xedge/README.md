@@ -16,7 +16,7 @@ The Mako Server version uses a public secret, which you may consider encrypting 
   - Change the secret to a new, unique value to enhance security.
 3. **Build xedge.zip**
   - Use the standard build script: BAS-Resources/build/XedgeMako.[cmd | sh].
-  - This script creates the mako.zip file needed for deployment.
+  - This script creates `Xedge.zip`. Deploy it with the matching `mako.zip`; the application uses the host's shared ACME modules.
 4. **Generate a Password**
   - Run the binpwd2str command-line tool to create a password.
   - This password will be used to encrypt the secret file.

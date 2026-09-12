@@ -1,12 +1,12 @@
 require"wfs" -- Install function ba.create.wfs
 
 local function trim(s) return s:gsub("^%s*(.-)%s*$", "%1") end
-local production=true -- Let's Encrypt
 local sfind,ssub,sfmt=string.find,string.sub,string.format
 local tinsert=table.insert
 local dtraceback=debug and debug.traceback or function(e) return e end
 local jencode,jdecode=ba.json.encode,ba.json.decode
 local startAcmeDns -- func
+local acmeRuntime,acmeIo,acmeClockReady
 local xedgeEvent -- = _XedgeEvent
 local smtp -- smtp settings, a table, used by sendmail
 local authRealm="Xedge"
@@ -33,8 +33,28 @@ G.xedge=xedge
 local apps={}
 local appsCfg=xcfg.apps
 local rw=require"rwfile"
-local function adns() return require"acme/dns" end
-pcall(function() xedge.portal=adns().token().info() end)
+local Acme,Dns=require"acme/runtime",require"acme/dns"
+local function acmeIdentity(config)
+   if not config or not config.manualIdentity then
+      local value=Dns.identity()
+      if value then return value,value.portalUrl:sub(9) end
+   end
+   if config and config.portalUrl and config.zoneKey and config.secret then
+      local zoneKey,secret=config.zoneKey,config.secret
+      if type(secret) ~= "string" or #secret ~= 64 or secret:find("[^%x]") then return end
+      local function proof(message)
+         local salt=zoneKey:gsub("%x%x",function(pair) return string.char(tonumber(pair,16)) end)
+         local key=ba.crypto.PBKDF2("sha256",secret:upper(),salt,1000,32)
+         return ba.crypto.hash("hmac","sha256",key)(message)(true,"binary")
+      end
+      return {portalUrl=config.portalUrl,zoneKey=config.zoneKey,proof=proof},
+         config.portalUrl:gsub("^https://",""):gsub("/.*$","")
+   end
+end
+do
+   local _,portal=acmeIdentity()
+   xedge.portal,xedge.compiledPortal=portal,portal
+end
 
 local fakeTime=(function()
    local _,_,date=ba.version()
@@ -101,7 +121,9 @@ end
 
 -- Returns app's config table or default if not set
 local function getJsonAppCfg(ion)
-   return app2json(appsCfg[ion] or {running=false})
+   local app=appsCfg[ion] or {}
+   app.running=apps[ion] and apps[ion].running or false
+   return app2json(app)
 end
 
 local function sendmail(m,s)
@@ -227,6 +249,7 @@ do -- elog
 	 end
 	 return msg
       end
+      if op.noTrace then return sfmt(fmt,...) end
       return log(fmt,...)
    end
    local orgErrh
@@ -267,7 +290,7 @@ end -- elog
 
 do
    local ev=require"EventEmitter".create()
-   ev.reporterr=function(event,cb,err) sendErr("Event CB err: %s %s %s",event,tostring(cb),err) end
+   ev.reporterr=function(cb,err) sendErr("Event CB err: %s %s",tostring(cb),err) end
    if dio then ev:on("sntp",function() startAcmeDns() end) end
    function xedge.event(event,cb,remove)
       assert("string" == type(event))
@@ -702,15 +725,51 @@ xedge.lio=lio
 -- End virtual file system
 ----------------------------------------------------------------
 
+local function acmeLog(err,message)
+   tracep(false,err and 0 or 5,"Xedge: "..message)
+   xedge.elog({flush=err,ts=true,noTrace=true},"%s",message)
+end
+
+local function acmeNotify(code)
+   -- The embedded host logs only the documented numeric lifecycle code.
+   acmeLog(code == 3,"ACME event "..code)
+end
+
+local function createAcme()
+   if not acmeIo or not xcfg.acme then return end
+   local config=xcfg.acme
+   local identity,portal=acmeIdentity(config)
+   if not identity then return nil,{code="sharktrust_not_configured"} end
+   identity.type,identity.reverse="dns-01",config.revcon == true
+   local runtime,err=Acme.create{
+      io=acmeIo,
+      config={email=config.email,domains={config.name},acceptTerms=true,
+         production=config.production,productionUrl=config.productionUrl,stagingUrl=config.stagingUrl,
+         namePolicy="exact",info=config.info or "Xedge",challenge=identity},
+      store={
+         load=function(cb) cb(config.state) end,
+         save=function(state,cb)
+            local previous=config.state
+            config.state=state
+            local ok=saveCfg()
+            if not ok then config.state=previous end
+            cb(ok,not ok and "Cannot save SharkTrust state" or nil)
+         end
+      },
+      notify=acmeNotify
+   }
+   if not runtime then return nil,err end
+   acmeRuntime,xedge.portal=runtime,portal
+   xedge.acmeRuntime=runtime
+   return runtime
+end
+
 startAcmeDns=function()
-   startAcmeDns=function() end
-   if not xedge.portal then return end
-   local ad=adns()
-   local _,dT=require"acme/bot".account()
-   local dn=dT and next(dT)
-   if dn and dn:find(xedge.portal,1,true) then
-      ad.auto{production=production,revcon=xcfg.revcon}
-   end
+   acmeClockReady=true
+   if acmeRuntime or not xcfg.acme then return end
+   local runtime,err=createAcme()
+   if not runtime then acmeLog(true,"Cannot configure: "..(err and (err.message or err.code) or "unknown")) return end
+   runtime:start()
 end
 
 local installAuth -- function is: installOrSetAuth() or setdb()
@@ -804,9 +863,10 @@ local function ssoInit()
    return true
 end
 
-local function xinit(aio,rwCfgFile,_tldir,_rtld,onAuth)
+local function xinit(aio,rwCfgFile,_tldir,_rtld,onAuth,_acmeIo)
    onAuth=onAuth or function() end
    tldir=_tldir
+   acmeIo=_acmeIo
    saveCfg = rwCfgFile and function() return rwCfgFile(xcfg) end or function() return true end
    local cfg=rwCfgFile and rwCfgFile() or {apps={}}
    ios=ba.io()
@@ -840,7 +900,12 @@ local function xinit(aio,rwCfgFile,_tldir,_rtld,onAuth)
       end
    end
    insRtld()
-   xcfg.revcon=cfg.revcon
+   xcfg.acme=cfg.acme
+   xcfg.revcon=xcfg.acme and xcfg.acme.revcon
+   do
+      local _,portal=acmeIdentity(xcfg.acme)
+      xedge.portal=portal or xedge.compiledPortal
+   end
    xcfg.smtp=cfg.smtp
    xcfg.openid=cfg.openid
    if "table" == type(cfg.elog) then  xcfg.elog=cfg.elog end
@@ -887,44 +952,125 @@ local function xinit(aio,rwCfgFile,_tldir,_rtld,onAuth)
    loadPlugins()
 end
 
+local function acmeSettings(data)
+   local current=xcfg.acme or {}
+   local manual=data.manualIdentity == true or data.manualIdentity == "true"
+   local portal,key,secret=data.portalUrl or current.portalUrl,
+      data.zoneKey and #data.zoneKey > 0 and data.zoneKey or current.zoneKey,
+      data.secret and #data.secret > 0 and data.secret or current.secret
+   local production=current.production
+   if data.staging ~= nil then production=not (data.staging == true or data.staging == "true") end
+   local same=manual == (current.manualIdentity and true or false) and portal == current.portalUrl and
+      key == current.zoneKey and secret == current.secret
+   return {email=data.email or current.email,name=data.name or current.name,
+      revcon=data.revcon == true or data.revcon == "true",production=production,
+      productionUrl=current.productionUrl,stagingUrl=current.stagingUrl,state=same and current.state or nil,
+      manualIdentity=manual,portalUrl=portal,zoneKey=key,secret=secret}
+end
+
+local function acmeResponse(data)
+   local current=xcfg.acme
+   local status=acmeRuntime and acmeRuntime:status()
+   local ready=false
+   for _,record in pairs(status and status.domains or {}) do
+      if record.expiresAt and record.expiresAt > os.time() then ready=true break end
+   end
+   data.portal=current and current.manualIdentity and current.portalUrl or
+      xedge.portal or current and current.portalUrl or xedge.compiledPortal or ""
+   data.compiledPortal,data.compiledIdentity=xedge.compiledPortal or "",xedge.compiledPortal and true or false
+   data.manualIdentity=current and current.manualIdentity and true or false
+   data.staging=current and current.production == false or false
+   data.revcon=xcfg.revcon and true or false
+   data.reverseStatus=status and status.reverse or
+      {enabled=data.revcon,connected=false,status=0,connections=0}
+   data.certificateRetrying=status and status.retryPending or false
+   local busy=status and (status.starting or status.retryPending or status.operation)
+   data.certificateWorking=(not acmeClockReady or busy) and true or false
+   data.certificateReady=ready and not data.certificateWorking
+   return data
+end
+
+local function deferredJson(response)
+   response=response:deferred()
+   return function(value)
+      local data=jencode(value)
+      response:setcontentlength(#data)
+      response:send(data)
+      response:close()
+   end
+end
+
 local acmeCmd={
-   isreg=function(cmd)
-      local status,wan,sockname,email=adns().isreg()
-      cmd:json{
-	 ok=true,
-	 isreg=status and true or false,
-	 wan=wan,
-	 sockname=sockname,
-	 name=status and status:match"^[^%.]+",
-	 email=email,
-	 portal=xedge.portal or "",
-	 revcon=xcfg.revcon and true or false
-      }
-   end,
-   available=function(cmd,data)
-      cmd:json{ok=true, available=adns().available(data.name)}
-   end,
-   auto=function(cmd,data)
-      xcfg.revcon = xcfg.revcon or false -- not nil
-      local revcon = "true" == data.revcon and true or false
-      local op={revcon=revcon,acceptterms=true,production=production}
-      if data.email and data.name then
-	 xcfg.revcon=revcon
-	 saveCfg()
-	 local name=adns().isreg()
-	 if name then data.name=name:match"^[^%.]+" end
-	 adns().auto(data.email, data.name, op)
-      elseif xcfg.revcon ~= revcon then
-	 xcfg.revcon=revcon
-	 saveCfg()
+   isreg=function(_,data,response)
+      local send=deferredJson(response)
+      local status=acmeRuntime and acmeRuntime.challenge:status()
+      if not status or not status.enrolled then
+         send(acmeResponse{ok=true,isreg=false})
+         return
       end
-      cmd:json{ok=true}
+      acmeRuntime:isRegistered(function(result,problem)
+         local rsp=acmeResponse{ok=true,isreg=result and true or false,
+            name=(result and result.name or status.name or ""):match"^[^%.]+",sockname=result and result.sockname,
+            email=xcfg.acme and xcfg.acme.email}
+         if problem then rsp.connectionError=problem.message or problem.code end
+         if not result then send(rsp) return end
+         acmeRuntime.challenge:getWan(function(value,wanProblem)
+            rsp.wan=value and value.ipAddress
+            if wanProblem then rsp.connectionError=wanProblem.message or wanProblem.code end
+            send(rsp)
+         end)
+      end)
+   end,
+   available=function(_,data,response)
+      local send=deferredJson(response)
+      local identity=acmeIdentity(acmeSettings(data))
+      if not identity then return send{err="SharkTrust is not configured"} end
+      local client,err=Dns.createClient(identity)
+      if not client then return send{err=err.message or err.code} end
+      client:isAvailable(data.name,function(result,problem)
+         client:close()
+         if not result then return send{err=problem and (problem.message or problem.code) or "Cannot check name"} end
+         send{ok=true,available=result.available,name=result.name}
+      end)
+   end,
+   auto=function(cmd,data,response)
+      local send=deferredJson(response)
+      local config=acmeSettings(data)
+      if type(config.email) ~= "string" or type(config.name) ~= "string" then send{err="Invalid settings"} return end
+      xcfg.acme,xcfg.revcon=config,config.revcon
+      if not saveCfg() then send{err="Cannot save ACME settings"} return end
+      local function launch()
+         local runtime,err=createAcme()
+         if not runtime then
+            local message=err and (err.message or err.code) or "Cannot configure ACME"
+            acmeLog(true,"Cannot configure: "..message)
+            send{err=message}
+            return
+         end
+         runtime:start(function(_,problem)
+            if problem and runtime:status().retryPending then
+               send{ok=true,pending=true}
+            else
+               send(problem and {err=problem.message or problem.code} or {ok=true})
+            end
+         end)
+      end
+      if acmeRuntime then
+         local old=acmeRuntime
+         acmeRuntime,xedge.acmeRuntime=nil,nil
+         old:close(function(_,err)
+            if err then acmeLog(true,"ACME cleanup: "..(err.message or err.code)) end
+            if acmeClockReady then launch() else send{ok=true,pending=true} end
+         end)
+      elseif acmeClockReady then launch() else send{ok=true,pending=true} end
    end
 }
 
 function xedge.revcon(enable)
    xcfg.revcon=enable and true or false
+   if xcfg.acme then xcfg.acme.revcon=xcfg.revcon end
    saveCfg()
+   if acmeRuntime then return acmeRuntime:reverseConnection(xcfg.revcon) end
 end
 
 function xedge.ha1(name,pwd,realm)
@@ -962,11 +1108,11 @@ end
 -- Used by command.lsp via xedge.command()
 local commands={
 
-   acme=function(cmd,data)
-	   local f=acmeCmd[data.acmd]
-      if not f then cmd:json{err="Unknown acmd"} end
-      if not dio then cmd:json{err="No IO"} end
-      f(cmd,data)
+   acme=function(cmd,data,response)
+      local f=acmeCmd[data.acmd]
+      if not f then return cmd:json{err="Unknown acmd"} end
+      if not acmeIo then return cmd:json{err="No IO"} end
+      return f(cmd,data,response)
    end,
    getconfig=function(cmd,_)
       local cfg={apps=appsCfg}
@@ -1105,8 +1251,10 @@ local commands={
 	       elseif #d.tenant > 20 and #d.client_id > 20 and #d.client_secret > 10 and
 		      #(d.client_secret_expires or "") > 0 then
 		  local origin=cmd:url():match"^https?://[^/]+"
-		  if origin then
-		     d.redirect_uri=origin.."/rtl/login/"
+		  local redirect_uri=origin and origin.."/rtl/login/"
+		  if redirect_uri and
+		     (redirect_uri:match"^https://" or redirect_uri:match"^http://localhost[:/]") then
+		     d.redirect_uri=redirect_uri
 		     local previous=xcfg.openid
 		     xcfg.openid=d
 		     local ok,err=ssoInit()
@@ -1117,6 +1265,9 @@ local commands={
 			ssoInit()
 			rsp.ok,rsp.err=false,err or "Cannot save configuration"
 		     end
+		  elseif redirect_uri then
+		     rsp.ok,rsp.err=false,
+			"Single Sign On requires HTTPS. Open Xedge using a secure HTTPS URL and try again."
 		  else
 		     rsp.ok,rsp.err=false,"Cannot determine the redirect URI"
 		  end
@@ -1341,7 +1492,7 @@ end
 
 
 -- Used by command.lsp
-function xedge.command(cmd)
+function xedge.command(cmd,response)
    local site,err=cmd:header"Sec-Fetch-Site"
    if site and "cross-site" == site then
       cmd:senderror(404)
@@ -1349,7 +1500,7 @@ function xedge.command(cmd)
    end
    local data = cmd:data()
    local f=commands[data.cmd]
-   if f then f(cmd,data) end
+   if f then return f(cmd,data,response) end
    err=sfmt("Unknown command '%s'",data.cmd or "?")
    sendErr("%s",err)
    cmd:json{err=err}
@@ -1367,6 +1518,11 @@ end
 
 local function onunload()
    if sso then sso.close() end
+   if acmeRuntime then
+      local runtime=acmeRuntime
+      acmeRuntime,xedge.acmeRuntime=nil,nil
+      runtime:close()
+   end
    for name,app in pairs(apps) do if(app.running) then stopApp(name) end end
 end
 

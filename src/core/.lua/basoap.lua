@@ -8,9 +8,11 @@ local strmatch,strlower=string.match,string.lower
 
 local function load_config_file(fname)
   local io=ba.openio("vm")
-  local fnsource,err=io:loadfile(fname)
-  if not fnsource then error("failed to load soap services : "..err) end
-  return fnsource
+  return function(env)
+    local fnsource,err=io:loadfile(fname,env)
+    if not fnsource then error("failed to load soap services : "..err) end
+    return fnsource
+  end
 end
 
 local function load_config(context,env)
@@ -18,7 +20,7 @@ local function load_config(context,env)
   local ret,err=pcall(context.serviceloader(fnenv))
   if not ret then return nil,"failed to parse soap config :"..(err or "unspecified error") end
   local services=fnenv.soap_services
-  if (not services) or (type(services)~="table") then return nil,context.config.." defines no soap services" end
+  if (not services) or (type(services)~="table") then return nil,"config defines no soap services" end
   return services
 end
 
@@ -148,7 +150,8 @@ local function soaploader(dirname,serviceloader,wsdl_life,rpc_life)
     trace ("rpc returned",x,status, msg, body)
 --]]
 
-    local status,msg,body,life=soap.handle_rpc_request(request:rawrdr(),handler)
+    local status,msg,body,life=soap.handle_rpc_request(
+      request:rawrdr(),handler,soap.default_tns..hname)
     if status ~= 200 then
       life=0
       trace("SOAP ERROR",msg)
@@ -165,7 +168,7 @@ end
 ba.create.soapdir=function (dirname,serviceloader,wsdl_life,rpc_life)
   if type(dirname) ~= "string" then error("Directory name is not a string") end
   if type(serviceloader) == "string" then
-    serviceloader=load_config_file(serviceloader) -- throws an error on failure
+    serviceloader=load_config_file(serviceloader)
   elseif type(serviceloader) ~= "function" then
     error("service loader is not a function")
   end

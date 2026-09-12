@@ -48,24 +48,24 @@ http_error=function(errmsg,status)
 end
 
 do -------------------------- local locals --------------------------------
-local entities={["<"]="&lt;",[">"]="&gt;"}--,["'"]="&apos;",["\""]="&quot;"}
-local epatt ="([<>])"--'\"])"
+local entities={["&"]="&amp;",["<"]="&lt;",[">"]="&gt;"}
+local epatt ="([&<>])"
 
 encode_text = function(msg)
 	return gsub(msg,epatt,entities)
 end
 
-local entities={["<"]="&lt;",[">"]="&gt;",["'"]="&apos;",["\""]="&quot;"}
-local epatt ="([<>'\"])"--'\"])"
+local entities={["&"]="&amp;",["<"]="&lt;",[">"]="&gt;",["'"]="&apos;",["\""]="&quot;"}
+local epatt ="([&<>'\"])"
 
 encode_attribute = function(msg)
 	return gsub(msg,epatt,entities)
 end
 
-local xrepl={["<"]="&lt;",[">"]="&gt;"}
+local xrepl={["&"]="&amp;",["<"]="&lt;",[">"]="&gt;"}
 local i
 for i=1,31 do xrepl[strchar(i)] = "&#"..i..";" end
-local xpatt = "([\001-\031<>])"
+local xpatt = "([\001-\031&<>])"
 
 encode_string = function(s)
   return gsub(s,xpatt,xrepl)
@@ -77,7 +77,10 @@ end -------------------------- local locals -------------------------------
 local toint = tonumber
 local fromint = function(i) return strformat("%d",tonumber(i)) end
 
-local tobool = function(s) return tonumber(s) ~= 0 end
+local tobool = function(s)
+  if s=="true" or s=="1" then return true end
+  if s=="false" or s=="0" then return false end
+end
 local frombool = function(b) return (b and 1) or 0 end
 
 local todec = tonumber
@@ -86,32 +89,32 @@ local fromdec = function(n) return gsub(strformat("%.18f",tonumber(n)),"0+$","")
 local todouble = tonumber
 local fromdouble = function(d) return strformat("%.18g",tonumber(d)) end
 
-local tostring = tostring -- string will already have been entity-decoded
+local totext = function(s) return s or "" end -- entity-decoded text
 local fromstring = encode_string -- xml encode the string
 
 
 local xs_types = setmetatable({	 -- abbrev,to,from
-	string = {"Str",tostring,tostring},
+	string = {"Str",totext,fromstring},
 	boolean = {"Bool",tobool,frombool},
 	decimal = {"Dec",todec,fromdec},
 	integer = {"Int",toint,fromint},
 	float = {"Flt",todouble,fromdouble},
 	double = {"Dbl",todouble,fromdouble},
-	duration = {"Dur",tostring,fromstring},
-	dateTime = {"DT",tostring,fromstring},
-	time = {"T",tostring,fromstring},
-	date = {"D",tostring,fromstring},
-	gYearMonth = {"YM",tostring,fromstring},
-	gYear = {"YY",tostring,fromstring},
-	gMonthDay = {"MD",tostring,fromstring},
-	gDay = {"DD",tostring,fromstring},
-	gMonth = {"MM",tostring,fromstring},
-	hexBinary = {"Hex",tostring,fromstring},
-	base64Binary = {"B64",tostring,fromstring},
-	anyURI = {"URI",tostring,fromstring},
-	QName = {"QN",tostring,fromstring},
-	NOTATION = {"NOTE",tostring,fromstring},
-	},{__index=function(t,k) return {k,tostring,fromstring} end}) -- default convert
+	duration = {"Dur",totext,fromstring},
+	dateTime = {"DT",totext,fromstring},
+	time = {"T",totext,fromstring},
+	date = {"D",totext,fromstring},
+	gYearMonth = {"YM",totext,fromstring},
+	gYear = {"YY",totext,fromstring},
+	gMonthDay = {"MD",totext,fromstring},
+	gDay = {"DD",totext,fromstring},
+	gMonth = {"MM",totext,fromstring},
+	hexBinary = {"Hex",totext,fromstring},
+	base64Binary = {"B64",totext,fromstring},
+	anyURI = {"URI",totext,fromstring},
+	QName = {"QN",totext,fromstring},
+	NOTATION = {"NOTE",totext,fromstring},
+	},{__index=function(t,k) return {k,totext,fromstring} end}) -- default convert
 
 
 
@@ -286,16 +289,16 @@ local portop=[[
 local literal_bindop= [[
 <wsdl:operation name="%OPNAME%">
 <soap:operation soapAction="http://www.barracuda-server.com/lsoap/#%OPNAME%"/>
-<wsdl:input><soap:body use="literal" /></wsdl:input>
-<wsdl:output><soap:body use="literal" /></wsdl:output>
+<wsdl:input><soap:body use="literal" namespace="%TNS%" /></wsdl:input>
+<wsdl:output><soap:body use="literal" namespace="%TNS%" /></wsdl:output>
 </wsdl:operation>
 ]]
 
 local encoded_bindop= [[
 <wsdl:operation name="%OPNAME%">
 <soap:operation soapAction="http://www.barracuda-server.com/lsoap/#%OPNAME%"/>
-<wsdl:input><soap:body use="encoded" encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" /></wsdl:input>
-<wsdl:output><soap:body use="encoded" encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" /></wsdl:output>
+<wsdl:input><soap:body use="encoded" namespace="%TNS%" encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" /></wsdl:input>
+<wsdl:output><soap:body use="encoded" namespace="%TNS%" encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" /></wsdl:output>
 </wsdl:operation>
 ]]
 
@@ -364,7 +367,7 @@ local function build_complex_type(schema,typenames,type_t)
   local hash = {}
   local t = {false} -- placeholder for <complexType >
   for k,v in ipairs(type_t) do
-    local typ,name = v.type,v.name
+    local typ,name = v.type or "string",v.name
     if type(typ) ~= "table" then
       local tn = build_simple_type(schema,typenames,typ)
       t[#t+1] = "<xs:element name='"..name.."' type='"..tn.."'/>\n"
@@ -498,8 +501,8 @@ local bind_envelope = function(doc)
 	end
   doc.soap_envelope=root
 
-	local ns = root.namespace_ref
-	if ns and ns ~= envelope_ns then
+	local ns = root.namespace_ref or root.namespaces["@default"]
+	if ns ~= envelope_ns then
 		return nil,{src="Request",code = "VersionMismatch",
 		  doc=doc,msg="version namespace mismatch"}
 	end
@@ -509,15 +512,15 @@ local bind_envelope = function(doc)
 	end
 
   local kids=root.elements
-	if #kids == 0 then
+	if not kids or #kids == 0 then
 		return nil,{src="Request",doc=doc,msg="No children of <Envelope>"}
 	elseif #kids	> 2 then -- could be text nodes!!!
-		return {src="Request",doc=doc,msg="Too many children of <Envelope>"}
+		return nil,{src="Request",doc=doc,msg="Too many children of <Envelope>"}
 	elseif (#kids == 2) then
 		local hdr = kids[1]
 		if hdr.local_name ~= "Header" then
 			return nil,{src="Request",doc=doc,node=hdr,msg="bad <Envelope> child #1 (Expecting <Header>, found <"..hdr.local_name..")"}
-		elseif hdr.namespace_ref ~= root.namespace_ref then
+		elseif (hdr.namespace_ref or hdr.namespaces["@default"]) ~= ns then
 			return nil,{src="Request",doc=doc,node=hdr,msg="Header namespace mismatch"}
 		end
     doc.soap_header=hdr
@@ -526,10 +529,11 @@ local bind_envelope = function(doc)
 	local body = kids[#kids]
 	if body.local_name ~= "Body" then
 		return nil,{src="Request",doc=doc,node=body,msg="bad <Envelope> child #"..#doc.." (Expecting <Body>, found <"..body.local_name..")"}
-	elseif body.namespace_ref ~= root.namespace_ref then
+	elseif (body.namespace_ref or body.namespaces["@default"]) ~= ns then
 		return nil,{src="Request",doc=doc,node=body,msg="Body namespace mismatch"}
 	end
   doc.soap_body=body
+  if not body.elements then return nil,soap_error("Empty SOAP Body","Request") end
   return doc
 end
 
@@ -579,7 +583,7 @@ setmetatable(soap_cb,{__index=xml2table})
 --returns a new soap parser object
 new_parser=function(options)
 
-  local lxp = xparser.create(soap_cb,{soap_options=options},"SKIPBLANK")
+  local lxp = xparser.create(soap_cb,{soap_options=options},"PRESERVE")
   local sp = {
     parse = function(p,...) return parse_request(lxp,...) end,
     destroy = function(p,...) return lxp:destroy() end,
@@ -609,7 +613,6 @@ local xml_response_head = [[
 <?xml version="1.0" encoding="UTF-8" ?>
 <soap-env:Envelope
   xmlns:soap-env="http://schemas.xmlsoap.org/soap/envelope/"
-  soap-env:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/"
   >
   <soap-env:Body>
 ]]
@@ -633,7 +636,7 @@ local function build_simple_output(t,name,typ,reply)
   local arrayType=strmatch(typ,"^(.+)Array$")
     if arrayType then
       if type(reply) ~= "table" then return nil, "reply '"..name.."' is not table" end
-      local cvt = xs_types[arrayTyp][3]
+      local cvt = xs_types[arrayType][3]
       local t0,t1="<"..arrayType..">","</"..arrayType..">"
       for i=1,#reply do t[#t+1] = t0..cvt(reply[i])..t1 end
     else
@@ -644,7 +647,7 @@ end
 
 local function build_table_output(t,name,typ,reply)
   for i,v in ipairs(typ) do
-    local typ,name = v.type,v.name
+    local typ,name = v.type or "string",v.name
     if type(typ) ~= "table" then
       t[#t+1]="<"..name..">"
       local ret, err = build_simple_output(t,name,typ,reply[name])
@@ -662,7 +665,7 @@ local function build_output(t,parm,reply)
   local typ=parm.type
   local ret, err = true
   if not typ then -- default to string
-    t[#t+1] = tostring(ret[1])
+    ret, err = build_simple_output(t,parm.name,"string",reply)
   elseif type(typ)=="table" then
     if type(reply) ~= "table" then return nil, "reply '"..parm.name.."' is not a table" end
     ret, err = build_table_output(t,parm.name,typ,reply)
@@ -676,8 +679,8 @@ end
 
 local build_reply_xml=function(doc,node)
   local fn = node.soap_func
-  local tagname = node.tag_name
-  local xml={"<",tagname,">"}
+  local tagname = "m:"..node.local_name.."Response"
+  local xml={"<",tagname,' xmlns:m="',encode_attribute(node.soap_namespace),'">'}
 
   local reply = node.soap_reply -- note reply[1] is status
   local output = fn.output
@@ -745,36 +748,44 @@ end
 
 
 
+local function node_text(node)
+  local text={}
+  for _,part in ipairs(node) do
+    if part.type=="TEXT" or part.type=="CDATA" then text[#text+1]=part.value end
+  end
+  return tconcat(text)
+end
+
 local bind_struct_param=function(parm,node)
 
   local typ,name = parm.type,parm.name
 
-  if not typ then return (node.text or "") end-- default to string
+  if not typ then return node_text(node) end-- default to string
   if type(typ)=="table" then return nil,"nested struct",name end
 
   local arrayType=strmatch(typ,"^(.+)Array$")
   if arrayType then
     local p={}
     local cvt = xs_types[arrayType][2]
-    for k,v in ipairs(node.elements) do
-      local txt = cvt(v.text)
-      if not txt then return nil,"bad type",name end
+    for k,v in ipairs(node.elements or {}) do
+      local txt = cvt(node_text(v))
+      if txt==nil then return nil,"bad type",name end
       p[#p+1] = txt
     end
     return p
   end
 
-  return xs_types[typ][2](node.text)
+  return xs_types[typ][2](node_text(node))
 
 end
 
 local bind_struct=function(parm,node)
   local p = {}
   for i,v in ipairs(parm) do
-    local el  = node.elements[v.name]
+    local el  = node.elements and node.elements[v.name]
     if not el then return nil,v.name end
     local pp,err,nn = bind_struct_param(v,el)
-    if not pp then return nil, err,nn end
+    if pp==nil then return nil, err,nn end
     p[#p+1] = pp
     p[v.name]=pp
   end
@@ -784,36 +795,41 @@ end
 local bind_param=function(parm,node)
 
   local typ,name = parm.type,parm.name
-  local el = node.elements[name]
+  local el = node.elements and node.elements[name]
   if not el then return nil,"not found", name end
 
-  if not typ then return (el.text or "") end-- default to string
+  if not typ then return node_text(el) end-- default to string
   if type(typ)=="table" then return bind_struct(typ,el) end
 
   local arrayType=strmatch(typ,"^(.+)Array$")
   if arrayType then
     local p={}
     local cvt = xs_types[arrayType][2]
-    for k,v in ipairs(el) do
-      local txt = cvt(v.text)
-      if not txt then return nil,"bad type",v.name end
+    for k,v in ipairs(el.elements or {}) do
+      local txt = cvt(node_text(v))
+      if txt==nil then return nil,"bad type",v.name end
       p[#p+1] = txt
     end
     return p
   end
-  return xs_types[typ][2](el.text)
+  return xs_types[typ][2](node_text(el))
 end
 
 
 --========================= PUBLIC ========================================
 -- map functions and parameters to soap request doc
 -- returns doc, or nil,error_table
-bind_funcs=function(doc,funcs)
+bind_funcs=function(doc,funcs,tns)
   local body = doc.soap_body
   for i,node in ipairs(body.elements) do -- iterate child nodes
-    local fn=funcs[node.expanded_name]
+    local ns=node.namespace_ref or node.namespaces["@default"]
+    if not ns or ns=="" or (tns and ns~=tns) then
+      return nil,func_not_found(doc,node)
+    end
+    local fn=funcs[node.local_name]
     if type(fn)~="table" then return nil,func_not_found(doc,node) end
     node.soap_func=fn
+    node.soap_namespace=ns
 
     local parm = fn.input
     if parm then
@@ -821,7 +837,7 @@ bind_funcs=function(doc,funcs)
 	local p = {}
 	for i,v in ipairs(parm) do
 	  local ret, err,nn = bind_param(v,node)
-	  if not ret then
+	  if ret==nil then
 	    if err=="not found" then return nil, param_not_found(doc,node,fn,nn) end
 	    if err=="bad type" then return nil, bad_param_type(doc,node,fn,nn) end
 	    return nil,unknown_err(doc,node,fn,nn)
@@ -831,7 +847,7 @@ bind_funcs=function(doc,funcs)
 	node.soap_parms=p
       else
 	local ret, err,nn = bind_param(parm,node)
-	if not ret then
+	if ret==nil then
 	  if err=="not found" then return nil, param_not_found(doc,node,fn,nn) end
 	  if err=="bad type" then return nil, bad_param_type(doc,node,fn,nn) end
 	  return nil,unknown_err(doc,node,fn,nn)
@@ -867,10 +883,8 @@ call_funcs=function(doc)
     else
       ret = {pcall(node.soap_func.call)}
     end
-    if not ret[1] then return nil,call_failed(doc,node,ret[2]) end
-    if node.soap_func.output then
-      if (ret[2]==nil) and ret[3] then return nil,call_failed(doc,node,tostring(ret[3])) end
-    end
+    if not ret[1] then return nil,call_failed(doc,node,tostring(ret[2])) end
+    if (ret[2]==nil) and ret[3] then return nil,call_failed(doc,node,tostring(ret[3])) end
     node.soap_reply = ret
   end
   return doc
@@ -886,8 +900,8 @@ do ---------------------- wrapper functions -------------------------------
 --========================= PUBLIC ========================================
 -- call rpc function(s), given soap doc and table of handlers
 -- returns xml reply, or nil,error_table
-execute_rpc_request=function(doc,funcs)
-  local ret, err = bind_funcs(doc,funcs)
+execute_rpc_request=function(doc,funcs,tns)
+  local ret, err = bind_funcs(doc,funcs,tns)
   if ret then ret,err = call_funcs(doc) end
   if ret then ret,err = build_reply(doc) end
 
@@ -899,7 +913,7 @@ end
 -- parse handlers and call rpc function(s), building response
 -- data is string or reader
 -- returns doc, or nil,error_table
-handle_rpc_request=function(data,service_t)
+handle_rpc_request=function(data,service_t,tns)
 
   local parser=new_parser()
   local doc, ret,err
@@ -925,7 +939,7 @@ handle_rpc_request=function(data,service_t)
   elseif type(doc)~="table" then
     err= soap_error("broken state","Response")
   else
-    ret,err=execute_rpc_request(doc,service_t)
+    ret,err=execute_rpc_request(doc,service_t,tns)
     if ret then return 200,"OK",ret,err end -- err is lifetime on good ret
   end
 
@@ -935,4 +949,3 @@ end --------------------- wrapper functions -------------------------------
 
 
 return _ENV -- return module table
-

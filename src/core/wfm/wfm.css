@@ -197,11 +197,11 @@
 }
 
 .wfm-folder::before {
-  content: "▸";
+  content: "\25B8";
 }
 
 .wfm-file::before {
-  content: "·";
+  content: "\B7";
 }
 
 .wfm [data-locked="true"]::before {

@@ -1,3 +1,8 @@
+#!/bin/bash
+
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd) || exit 1
+cd "$script_dir" || exit 1
+
 executables="zip"
 for i in $executables; do
     if ! command -v $i &> /dev/null; then
@@ -6,16 +11,17 @@ for i in $executables; do
     fi
 done
 
-if [ -f "xedge.zip" ]; then rm -f xedge.zip; fi
+if [ -f "Xedge.zip" ]; then rm -f Xedge.zip; fi
 if [ -d "XedgeBuild" ]; then rm -rf XedgeBuild; fi
 
 mkdir XedgeBuild || exit 1
 cd XedgeBuild || exit 1
 
 cp -R ../../src/xedge/. . || exit 1 
+# ACME modules are supplied by the matching Mako resource package.
 rm -f README.md
 rm -f .config
-rm -rf /s /q .certificate
+rm -rf .certificate
 
 read -p "Do you want to minify the JS and CSS files (requires Node and npm) (y/n)? "  userResponse
 if [ "$userResponse" = "y" ]; then
