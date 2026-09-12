@@ -282,16 +282,23 @@ function M.createManager(options)
             scheduleTimer()
          end)
       end
-      each(refresh,function(domain,done) refreshRenewal(activeProfile,domain,done) end,function(_,refreshProblem)
-         if refreshProblem then return finish(refreshProblem) end
+      local firstProblem
+      local function continueWith(done)
+         return function(_,problem)
+            firstProblem=firstProblem or problem
+            done(true)
+         end
+      end
+      -- A failing domain must not prevent other due certificates from renewing.
+      each(refresh,function(domain,done)
+         refreshRenewal(activeProfile,domain,continueWith(done))
+      end,function()
          each(renew,function(domain,done)
             local record=activeProfile.certificates[domain]
             if not renewAllowed or renewAllowed(domain,record.expiresAt) ~= false then
-               issue(activeProfile,domain,true,done)
+               issue(activeProfile,domain,true,continueWith(done))
             else deferred=true done(true) end
-         end,function(_,problem)
-            finish(problem)
-         end)
+         end,function() finish(firstProblem) end)
       end)
    end
 
@@ -533,10 +540,12 @@ function M.create(options)
    local function cancelRetry()
       if retryTimer then retryTimer:cancel() retryTimer=nil end
    end
-   local function scheduleRetry()
+   local function scheduleRetry(err)
       if retryTimer or closed or started then return end
-      local delay=retryDelay
-      retryDelay=math.min(retryDelay*2,retryMax)
+      -- Error classification selects the delay, never whether an enabled runtime survives.
+      local delay=retryable(err) and retryDelay or 3600000
+      if err and err.code == "name_unavailable" then delay=3600000 end
+      if delay ~= 3600000 then retryDelay=math.min(retryDelay*2,retryMax) end
       retryTimer=timerFactory(function()
          retryTimer=nil
          if not closed and not started then startAttempt() end
@@ -595,8 +604,8 @@ function M.create(options)
       local function done(value,err)
          starting=false
          if err then emit(3) end
-         if err and retryable(err) then scheduleRetry()
-         elseif not err then cancelRetry() retryDelay=retryFirst end
+         if err then scheduleRetry(err)
+         else cancelRetry() retryDelay=retryFirst end
          callback(cb,value,err)
       end
       if closed then return done(nil,problem"runtime_closed") end
@@ -607,7 +616,7 @@ function M.create(options)
       if not challenge or not st then startManager(nil,done) return true end
       challenge:load(function(saved,loadErr)
          if loadErr then return done(nil,loadErr) end
-         if not saved then return enroll(done) end
+         if not saved or saved.pending then return enroll(done) end
          emit(12)
          local ok,err=managerConfig(saved.name)
          if not ok then return done(nil,err) end

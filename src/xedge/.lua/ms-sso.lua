@@ -167,7 +167,9 @@ local function query(values)
 end
 
 local function beginLogin(self,cmd,candidate)
-   if not self.provider then return nil,"The Microsoft sign-in service is still starting. Please try again." end
+   if not self.provider then
+      return nil,"Microsoft sign-in is initializing while Xedge downloads the provider configuration and signing keys. Wait a few seconds, then click Sign in with Microsoft again.",nil,"starting"
+   end
    local session=cmd:session(true)
    if not session then return nil,"Cannot create a login session" end
    local verifier=random()

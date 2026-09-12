@@ -204,20 +204,25 @@ function M.createClient(options)
 
    function client:enroll(request,callback)
       local body={command="Register",name=request.name,namePolicy=request.namePolicy,
-         dns=request.dns,info=request.info}
+         dns=request.dns,info=request.info,credential=request.credential}
       return begin(callback,function()
          local address,addressErr=networkAddress()
          if not address then return nil,addressErr end
          body.ipAddress=address
          local result,requestErr=zonePost(body,"SHARKTRUST-REGISTER\0")
-         if not result then return nil,enrollmentError(requestErr) end
+         if not result then
+            return nil,request.credential and requestErr or enrollmentError(requestErr)
+         end
          if type(result.deviceId) ~= "string" or type(result.name) ~= "string" or
             not isHex(result.credential,64) then
             return nil,errorTable("invalid_response")
          end
-          credential=string.lower(result.credential)
-          restartReverse()
-          return result,nil
+         if request.credential and result.credential ~= request.credential then
+            return nil,errorTable("enrollment_credential_mismatch")
+         end
+         credential=string.lower(result.credential)
+         restartReverse()
+         return result,nil
       end)
    end
 
@@ -300,8 +305,11 @@ local function validState(state,identity)
    if state.portalUrl ~= identity.portalUrl or state.zoneIdentity ~= identity.zoneIdentity then
       return nil,errorTable("sharktrust_identity_mismatch")
    end
-   if type(state.deviceId) ~= "string" or state.deviceId == "" or type(state.name) ~= "string" or
-      state.name == "" or not isHex(state.credential,64) then return nil,errorTable("invalid_saved_state") end
+   if not isHex(state.credential,64) then return nil,errorTable("invalid_saved_state") end
+   if state.pending then
+      if state.pending ~= true or type(state.request) ~= "table" then return nil,errorTable("invalid_saved_state") end
+   elseif type(state.deviceId) ~= "string" or state.deviceId == "" or type(state.name) ~= "string" or
+      state.name == "" then return nil,errorTable("invalid_saved_state") end
    state=copy(state)
    state.credential=state.credential:lower()
    return state
@@ -398,12 +406,23 @@ function M.createSharkTrust(options)
    end
    function adapter:enroll(request,callback)
       if not enter("enroll",callback) then return end
-      local oldCredential=client:credential()
-      client:enroll(request,function(result,problem)
-         if not result then return leave(callback,nil,problem) end
-         saveState(makeState(result,identity),function(saved,saveProblem)
-            if not saved then client:setCredential(oldCredential) end
-            leave(callback,saved and copy(saved),saveProblem)
+      local saved=pendingState or state
+      local function done(result,problem) leave(callback,result and copy(result),problem) end
+      -- A successful reply awaiting disk storage must not cause another registration.
+      if pendingState and not pendingState.pending then return saveState(pendingState,done) end
+      if not saved or not saved.pending then
+         saved={version=2,portalUrl=identity.portalUrl,zoneIdentity=identity.zoneIdentity,
+            pending=true,request=copy(request),updatedAt=now(),
+            credential=ba.rndbs(32):gsub(".",function(c) return string.format("%02x",string.byte(c)) end)}
+      end
+      -- Persist before sending. Reuse this credential after timeouts and process restarts.
+      saveState(saved,function(pending,saveProblem)
+         if not pending then return done(nil,saveProblem) end
+         local attempt=copy(pending.request)
+         attempt.credential=pending.credential
+         client:enroll(attempt,function(result,problem)
+            if not result then return done(nil,problem) end
+            saveState(makeState(result,identity),done)
          end)
       end)
       return true
@@ -518,7 +537,7 @@ function M.createSharkTrust(options)
    end
 
    function adapter:status()
-      return {type="sharktrust",loaded=loaded,enrolled=state ~= nil,name=state and state.name,
+      return {type="sharktrust",loaded=loaded,enrolled=state ~= nil and not state.pending,name=state and state.name,
          deviceId=state and state.deviceId,portalUrl=identity.portalUrl,operation=busy,
          challenge=challenge and {recordName=challenge.context.recordName,ready=challenge.ready},
          pendingSave=pendingState ~= nil,busy=busy ~= nil or loading or saving or #saveQueue > 0}

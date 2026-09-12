@@ -1112,6 +1112,12 @@ const authenticationFormObj = [
 		html: "Single Sign On"
 	    },
 	    {
+		el: "p",
+		id: "OpenidSecurityWarning",
+		class: "form-warning",
+		html: ""
+	    },
+	    {
 		el: "input",
 		type: "text",
 		label: "OpenidTenantId",
@@ -1440,6 +1446,11 @@ function ideCfg(e) {
 		    let oid=rsp.data;
 		    let elems={};
 		    let editorId=createEditor(" Authentication",null,null,mkForm(authenticationFormObj,elems));
+		    let secureSSO=location.protocol=="https:" || location.hostname=="localhost";
+		    elems.OpenidSecurityWarning.textContent=
+			"Single Sign On requires HTTPS. Open Xedge using a secure HTTPS URL before configuring it.";
+		    elems.OpenidSecurityWarning.hidden=secureSSO;
+		    elems.OpenidSecurityWarning.setAttribute("role","alert");
 		    if(cfg.name)
 			elems.AuthName.value=cfg.name;
 		    if(oid.tenant)
@@ -1468,6 +1479,10 @@ function ideCfg(e) {
 			    client_secret:elems.OpenidClientSecret.value.trim(),
 			    client_secret_expires:elems.OpenidClientSecretExpires.value,
 			};
+			if(!secureSSO && (data.tenant || data.client_id || data.client_secret)) {
+			    alert("Single Sign On requires HTTPS.\n\nOpen Xedge using a secure HTTPS URL and try again.");
+			    return;
+			}
 			sendCmd("openid",(rsp)=>{
 			    if(rsp) closeEditor(editorId);
 			}, data);

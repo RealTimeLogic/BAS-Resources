@@ -1001,8 +1001,8 @@ local function deferredJson(response)
 end
 
 local acmeCmd={
-   isreg=function(_,data)
-      local send=deferredJson(data.response)
+   isreg=function(_,data,response)
+      local send=deferredJson(response)
       local status=acmeRuntime and acmeRuntime.challenge:status()
       if not status or not status.enrolled then
          send(acmeResponse{ok=true,isreg=false})
@@ -1021,8 +1021,8 @@ local acmeCmd={
          end)
       end)
    end,
-   available=function(_,data)
-      local send=deferredJson(data.response)
+   available=function(_,data,response)
+      local send=deferredJson(response)
       local identity=acmeIdentity(acmeSettings(data))
       if not identity then return send{err="SharkTrust is not configured"} end
       local client,err=Dns.createClient(identity)
@@ -1033,8 +1033,8 @@ local acmeCmd={
          send{ok=true,available=result.available,name=result.name}
       end)
    end,
-   auto=function(cmd,data)
-      local send=deferredJson(data.response)
+   auto=function(cmd,data,response)
+      local send=deferredJson(response)
       local config=acmeSettings(data)
       if type(config.email) ~= "string" or type(config.name) ~= "string" then send{err="Invalid settings"} return end
       xcfg.acme,xcfg.revcon=config,config.revcon
@@ -1048,7 +1048,7 @@ local acmeCmd={
             return
          end
          runtime:start(function(_,problem)
-            if problem and problem.temporary == true and problem.retryable ~= false then
+            if problem and runtime:status().retryPending then
                send{ok=true,pending=true}
             else
                send(problem and {err=problem.message or problem.code} or {ok=true})
@@ -1108,11 +1108,11 @@ end
 -- Used by command.lsp via xedge.command()
 local commands={
 
-   acme=function(cmd,data)
+   acme=function(cmd,data,response)
       local f=acmeCmd[data.acmd]
       if not f then return cmd:json{err="Unknown acmd"} end
       if not acmeIo then return cmd:json{err="No IO"} end
-      return f(cmd,data)
+      return f(cmd,data,response)
    end,
    getconfig=function(cmd,_)
       local cfg={apps=appsCfg}
@@ -1251,8 +1251,10 @@ local commands={
 	       elseif #d.tenant > 20 and #d.client_id > 20 and #d.client_secret > 10 and
 		      #(d.client_secret_expires or "") > 0 then
 		  local origin=cmd:url():match"^https?://[^/]+"
-		  if origin then
-		     d.redirect_uri=origin.."/rtl/login/"
+		  local redirect_uri=origin and origin.."/rtl/login/"
+		  if redirect_uri and
+		     (redirect_uri:match"^https://" or redirect_uri:match"^http://localhost[:/]") then
+		     d.redirect_uri=redirect_uri
 		     local previous=xcfg.openid
 		     xcfg.openid=d
 		     local ok,err=ssoInit()
@@ -1263,6 +1265,9 @@ local commands={
 			ssoInit()
 			rsp.ok,rsp.err=false,err or "Cannot save configuration"
 		     end
+		  elseif redirect_uri then
+		     rsp.ok,rsp.err=false,
+			"Single Sign On requires HTTPS. Open Xedge using a secure HTTPS URL and try again."
 		  else
 		     rsp.ok,rsp.err=false,"Cannot determine the redirect URI"
 		  end
@@ -1494,9 +1499,8 @@ function xedge.command(cmd,response)
       return
    end
    local data = cmd:data()
-   data.response=response
    local f=commands[data.cmd]
-   if f then return f(cmd,data) end
+   if f then return f(cmd,data,response) end
    err=sfmt("Unknown command '%s'",data.cmd or "?")
    sendErr("%s",err)
    cmd:json{err=err}
