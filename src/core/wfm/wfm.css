@@ -25,7 +25,8 @@
 }
 
 .wfm button:focus-visible,
-.wfm tr:focus-visible {
+.wfm tr:focus-visible,
+.wfm-body:focus-visible {
   position: relative;
   z-index: 1;
   outline: 2px solid var(--wfm-accent);
@@ -56,8 +57,42 @@
   flex-wrap: wrap;
 }
 
-.wfm-toolbar [data-commands] {
+.wfm-toolbar [data-group] {
   display: contents;
+}
+
+.wfm-group {
+  display: flex;
+  flex: 1 1 26rem;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .35rem;
+  max-width: 100%;
+}
+
+.wfm-group + .wfm-group {
+  border-left: 1px solid var(--wfm-border);
+  padding-left: .6rem;
+  margin-left: .25rem;
+}
+
+.wfm-group small {
+  flex-basis: 100%;
+  color: var(--wfm-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  width: 0;
+  min-width: 100%;
+}
+
+.wfm-toolbar .wfm-delete {
+  margin-left: .4rem;
+}
+
+.wfm .wfm-delete {
+  color: #ff8b82;
 }
 
 .wfm-toolbar button,
@@ -69,15 +104,8 @@
   cursor: pointer;
 }
 
-.wfm-toolbar button:hover {
+.wfm-toolbar button:enabled:hover {
   background: color-mix(in srgb, var(--wfm-bg) 70%, var(--wfm-color));
-}
-
-.wfm-toolbar [data-action="refresh"] {
-  color: #172019;
-  background: var(--wfm-accent);
-  border-color: var(--wfm-accent);
-  font-weight: 650;
 }
 
 .wfm-path button {
@@ -136,12 +164,14 @@
   color: var(--wfm-muted);
 }
 
-.wfm-tree-name[aria-current="page"],
-.wfm-tree-name[aria-selected="true"] {
+.wfm-tree-name[aria-current="page"] {
   color: var(--wfm-accent);
+  font-weight: 650;
+}
+
+.wfm-tree-name[aria-selected="true"] {
   background: color-mix(in srgb, var(--wfm-accent) 18%, transparent);
   border-radius: .2rem;
-  font-weight: 650;
 }
 
 .wfm-list {
@@ -226,6 +256,9 @@
   z-index: 3;
   display: grid;
   min-width: 10rem;
+  max-height: calc(100% - 1rem);
+  max-width: calc(100% - 1rem);
+  overflow: auto;
   margin: 0;
   padding: .25rem;
   background: color-mix(in srgb, var(--wfm-bg) 82%, var(--wfm-color));
@@ -247,9 +280,16 @@
   cursor: pointer;
 }
 
-.wfm [data-menu] button:hover {
+.wfm [data-menu] button:enabled:hover,
+.wfm [data-menu] button:focus-visible {
   color: #172019;
   background: var(--wfm-accent);
+}
+
+.wfm [data-menu] .wfm-delete {
+  border-top: 1px solid var(--wfm-border);
+  border-radius: 0;
+  margin-top: .25rem;
 }
 
 .wfm[data-drop="true"]::after {
@@ -294,6 +334,11 @@
 
 .wfm-dialog::backdrop {
   background: #000a;
+}
+
+.wfm-dialog [data-copy-url] {
+  box-sizing: border-box;
+  width: 100%;
 }
 
 .wfm-dialog header {

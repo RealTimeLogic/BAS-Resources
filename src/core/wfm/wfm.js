@@ -1,9 +1,12 @@
 import{el,on}from"../dom.js";
 
+const bt=(textContent,p)=>el("button",{type:"button",textContent,...p});
+const valid=n=>n&&n!=="."&&n!==".."&&!/[\/\\\0]/.test(n);
+
 const pp=p=>{
   if(typeof p!=="string")throw new TypeError("Path must be a string");
   const a=p.split("/").filter(Boolean);
-  if(a.some(x=>x==="."||x===".."||x.includes("\0")||x.includes("\\")))
+  if(!a.every(valid))
     throw new TypeError("Invalid path");
   return a;
 };
@@ -15,7 +18,7 @@ const dp=p=>{
 
 function authenticationError(open,message,url=location.href){
   message=message||"Your session has expired. Sign in again to continue.";
-  const b=el("button",{type:"button",textContent:"Sign in again"}),c=el("div");
+  const b=bt("Sign in again"),c=el("div");
   b.dataset.action="sign-in";
   b.onclick=()=>location.assign(url);
   c.append(el("p",message),b);
@@ -46,13 +49,20 @@ export function mount(h,o={}){
     c:new Map,x:new Set(["/"]),m:new Map,p:[],r:new Set,q:[],n:0,y:0,g:0,u:0,j:0,h:0,f:0
   };
 
+  const watch=(t,n,f)=>{
+    for(const e of n.split(" ")){
+      t.addEventListener(e,f);
+      s.q.push(()=>t.removeEventListener(e,f));
+    }
+  };
+
   h.replaceChildren();
   const r=el("div",{className:"wfm"});
-  r.innerHTML='<div class="wfm-toolbar" role="toolbar"><button type="button" data-action="refresh">Refresh</button><span data-commands></span></div><nav class="wfm-path" aria-label="Current directory"></nav><div class="wfm-body"><nav class="wfm-tree" aria-label="Folders"></nav><div><table class="wfm-list"><thead><tr><th><button type="button" data-sort="n">Name</button></th><th><button type="button" data-sort="s">Size</button></th><th><button type="button" data-sort="t">Modified</button></th></tr></thead><tbody></tbody></table></div></div><div class="wfm-status" role="status"></div><input data-upload type="file" multiple hidden><menu data-menu role="menu" hidden></menu><dialog class="wfm-dialog"><header><strong data-dialog-title></strong><button type="button" data-action="close" aria-label="Close">x</button></header><div data-dialog-body></div></dialog>';
+  r.innerHTML='<div class="wfm-toolbar" role="toolbar" aria-label="File actions"><span class="wfm-group" role="group" aria-label="Current folder"><small>Current folder</small><span data-group="folder"></span></span><span class="wfm-group" role="group" aria-label="Selected items"><small data-selection>Selection</small><span data-group="selection"></span><button type="button" data-action="more" aria-haspopup="menu" aria-expanded="false">More</button></span></div><nav class="wfm-path" aria-label="Current directory"></nav><div class="wfm-body" tabindex="0" aria-label="File area"><nav class="wfm-tree" aria-label="Folders"></nav><div><table class="wfm-list"><thead><tr><th><button type="button" data-sort="n">Name</button></th><th><button type="button" data-sort="s">Size</button></th><th><button type="button" data-sort="t">Modified</button></th></tr></thead><tbody></tbody></table></div></div><div class="wfm-status" role="status"></div><input data-upload type="file" multiple hidden><menu data-menu role="menu" hidden></menu><dialog class="wfm-dialog"><header><strong data-dialog-title></strong><button type="button" data-action="close" aria-label="Close">x</button></header><div data-dialog-body></div></dialog>';
   h.append(r);
 
   const q=x=>r.querySelector(x),
-    tc=q("[data-commands]"),pb=q(".wfm-path"),tr=q(".wfm-tree"),
+    tc=q(".wfm-toolbar"),more=q('[data-action="more"]'),pb=q(".wfm-path"),tr=q(".wfm-tree"),
     tb=q("tbody"),st=q(".wfm-status"),fi=q("[data-upload]"),mn=q("[data-menu]"),d=q("dialog"),
     dt=d.querySelector("[data-dialog-title]"),
     db=d.querySelector("[data-dialog-body]");
@@ -90,8 +100,7 @@ export function mount(h,o={}){
     if(!Array.isArray(a))throw new Error("Bad directory response");
     return a.map(x=>{
       if(!x||typeof x.n!=="string"||typeof x.s!=="number"||
-        typeof x.t!=="number"||!x.n||x.n==="."||x.n===".."||
-        x.n.includes("/")||x.n.includes("\\")||x.n.includes("\0"))
+        typeof x.t!=="number"||!valid(x.n))
         throw new Error("Bad directory entry");
       return{...x,path:ep(p,x)};
     });
@@ -100,10 +109,7 @@ export function mount(h,o={}){
   async function ll(p,v){
     const f=v.filter(x=>x.s!==-1);
     if(!f.length)return v;
-    const z=new URLSearchParams({cmd:"getlocks"});
-    for(const x of f)z.append("n",x.n);
-    const r=await rq(u(p),{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:z}),
-      j=await r.json(),m=new Map((Array.isArray(j.files)?j.files:[]).map(x=>[x.n,x.l]));
+    const j=await post(p,"getlocks",f),m=new Map((Array.isArray(j.files)?j.files:[]).map(x=>[x.n,x.l]));
     for(const x of f)x.l=m.get(x.n)||false;
     return v;
   }
@@ -133,7 +139,7 @@ export function mount(h,o={}){
     pb.replaceChildren();
     let p="/";
     const add=(n,p)=>{
-      const b=el("button",{textContent:n,type:"button"});
+      const b=bt(n);
       b.dataset.path=p;
       pb.append(b);
     };
@@ -147,32 +153,56 @@ export function mount(h,o={}){
 
   const cx=()=>({directory:s.d,listing:[...s.e],selection:a.selection()});
 
-  function cr(p,k){
+  const enabled=(x,c)=>{
+    try{return !x.when||!!x.when(c)}catch(e){console.error("WFM command",x.id,e);return false}
+  };
+
+  function cr(p,k,group,c=cx()){
     p.replaceChildren();
-    const c=cx();
+    let last;
     for(const x of s.m.values()){
-      let v=!x.when;
-      try{v=v||!!x.when(c)}catch(e){console.error("WFM command",x.id,e)}
+      if((x.group||"selection")!==group)continue;
+      const v=enabled(x,c);
       if(x[k]===false||(!v&&k==="menu"&&!x.showDisabled))continue;
-      const b=el("button",{textContent:x.label||x.id,type:"button"});
+      const b=bt(x.label||x.id);
       b.dataset.command=x.id;
       b.disabled=!v;
-      if(k==="menu")b.setAttribute("role","menuitem");
-      p.append(b);
+      if(k==="menu"){b.setAttribute("role","menuitem");b.tabIndex=-1}
+      if(x.id==="delete"){b.className="wfm-delete";last=b}
+      else p.append(b);
     }
+    if(last)p.append(last);
   }
 
-  function rc(){cr(tc,"toolbar")}
+  function rc(){
+    const c=cx();
+    for(const g of ["folder","selection"])cr(tc.querySelector(`[data-group="${g}"]`),"toolbar",g,c);
+    const p=tc.querySelector('[data-group="selection"]');
+    p.insertBefore(more,p.querySelector(".wfm-delete"));
+    const v=c.selection;
+    q("[data-selection]").textContent=`Selected: ${v.length===1?v[0].n:v.length}`;
+    more.disabled=![...s.m.values()].some(x=>(x.group||"selection")==="selection"&&x.menu!==false&&enabled(x,c));
+    hm();
+  }
 
-  const hm=()=>mn.hidden=true;
+  let menuTarget;
+  function hm(focus=false){
+    mn.hidden=true;
+    more.setAttribute("aria-expanded","false");
+    if(focus&&menuTarget?.isConnected)menuTarget.focus();
+  }
 
-  function cm(e){
-    cr(mn,"menu");
+  function cm(e,group,target){
+    cr(mn,"menu",group);
     if(!mn.children.length)return;
+    menuTarget=target;
+    mn.setAttribute("aria-label",group==="folder"?`Current folder: ${s.d}`:"Selected items");
     mn.hidden=false;
+    more.setAttribute("aria-expanded",String(target===more));
     const z=r.getBoundingClientRect();
     mn.style.left=Math.max(0,Math.min(e.clientX-z.left,z.width-mn.offsetWidth))+'px';
     mn.style.top=Math.max(0,Math.min(e.clientY-z.top,z.height-mn.offsetHeight))+'px';
+    mn.querySelector("button:enabled")?.focus();
   }
 
   function rl(){
@@ -200,6 +230,8 @@ export function mount(h,o={}){
   function rs(){
     tb.querySelectorAll("tr[data-path]").forEach(r=>
       r.setAttribute("aria-selected",s.s.has(r.dataset.path)?"true":"false"));
+    tr.querySelectorAll(".wfm-tree-name").forEach(t=>
+      t.setAttribute("aria-selected",String(t.dataset.path===s.g?.path)));
     rc();
   }
 
@@ -208,15 +240,11 @@ export function mount(h,o={}){
     const br=(p,n)=>{
       const i=el("li"),r=el("div"),v=s.c.get(p),
         f=v&&so(v.filter(x=>x.s===-1)),x=s.x.has(p),
-        t=el("button",{
-          className:"wfm-tree-toggle",textContent:x?"▾":"▸",type:"button"
-        });
+        t=bt(x?"▾":"▸",{className:"wfm-tree-toggle"});
       t.dataset.toggle=p;
       t.setAttribute("aria-expanded",String(x));
       if(f&&!f.length)t.disabled=true;
-      const b=el("button",{
-        className:"wfm-tree-name",textContent:n,type:"button"
-      });
+      const b=bt(n,{className:"wfm-tree-name"});
       b.dataset.path=p;
       if(p===s.d)b.setAttribute("aria-current","page");
       if(p===s.g?.path)b.setAttribute("aria-selected","true");
@@ -242,7 +270,6 @@ export function mount(h,o={}){
   function se(t,e){
     const p=t.dataset.path;
     s.g=0;
-    tr.querySelector('[aria-selected="true"]')?.removeAttribute("aria-selected");
     if(e.shiftKey&&s.a){
       const a=s.v.findIndex(x=>x.path===s.a),b=s.v.findIndex(x=>x.path===p);
       if(a>=0&&b>=0){
@@ -260,10 +287,11 @@ export function mount(h,o={}){
     const v=pp(p);
     s.s.clear();s.a="";
     s.g={n:v.at(-1)||"Files",s:-1,t:0,path:dp(p)};
-    rt();rc();
+    rs();
   }
 
   function ui(o={}){
+    hm();
     if(s.f)try{s.f()}catch(e){console.error("WFM dialog",e)}
     s.f=o.close||0;
     dt.textContent=o.title||"";
@@ -333,7 +361,7 @@ export function mount(h,o={}){
     files=c=>c.selection.length&&c.selection.every(x=>x.s!==-1),
     name=n=>{
       n=n&&n.trim();
-      if(!n||n==="."||n===".."||n.includes("/")||n.includes("\\")||n.includes("\0"))
+      if(!valid(n))
         throw new Error("Invalid name");
       return n;
     },
@@ -345,13 +373,18 @@ export function mount(h,o={}){
     parent=p=>{const v=pp(p);v.pop();return`/${v.join("/")}${v.length?"/":""}`},
     sync=async(p=s.d)=>{s.c.clear();await a.open(p)};
 
-  async function lop(c,v,time){
+  async function post(p,c,v,time){
     const z=new URLSearchParams({cmd:c});
     if(time)z.set("time",time);
     for(const x of v)z.append("n",x.n);
-    const r=await rq(u(s.d),{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:z}),
+    const r=await rq(u(p),{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:z}),
       j=await r.json();
     if(j.err)throw new Error(j.emsg||j.err);
+    return j;
+  }
+
+  async function lop(c,v,time){
+    await post(s.d,c,v,time);
     await sync();
   }
 
@@ -380,7 +413,7 @@ export function mount(h,o={}){
     if(s.j){ms("Upload already in progress",1);return}
     s.j=1;rc();
     const p=s.d,n=el("strong"),c=el("span"),g=el("progress",{max:100,value:0}),
-      e=el("div"),z=el("button",{type:"button",textContent:"Cancel"}),box=el("div");
+      e=el("div"),z=bt("Cancel"),box=el("div");
     box.dataset.uploadBox="";e.dataset.uploadError="";z.dataset.action="cancel-upload";
     box.append(el("div","Uploading: ",n),g,el("div","Completed: ",c),e,z);
     ui({title:"Upload",content:box});
@@ -410,49 +443,62 @@ export function mount(h,o={}){
     }finally{s.u=0;s.j=0;z.hidden=true;rc()}
   }
 
-  a.add("command",{id:"open",label:"Open",when:one,
+  async function copy(v,label){
+    if(navigator.clipboard?.writeText)try{
+      await navigator.clipboard.writeText(v);
+      if(!s.y)ms(`${label} copied`);
+      return;
+    }catch{} // Clipboard access can also be denied in a secure context.
+    if(s.y)return;
+    const x=el("input",{value:v,readOnly:true,ariaLabel:label}),c=el("div");
+    x.dataset.copyUrl="";
+    c.append(el("p","Copy the selected URL with Ctrl+C / Command+C, or use your device's Copy action."),x);
+    ui({title:`Copy ${label}`,content:c});
+    x.focus();x.select();
+    ms("Automatic copy unavailable. Copy the selected URL from the dialog.");
+  }
+
+  const command=x=>a.add("command",{showDisabled:true,...x});
+  command({id:"refresh",label:"Refresh",group:"folder",run:()=>a.refresh()});
+  command({id:"open",label:"Open",when:one,
     run:c=>ac(c.selection[0])});
-  a.add("command",{id:"download",label:"Download",when:file,
+  command({id:"download",label:"Download",when:file,
     run:c=>{const x=el("a",{href:a.url(c.selection[0],{download:1}),download:""});x.click()}});
-  a.add("command",{id:"upload",label:"Upload",menu:false,when:()=>!s.j,run:()=>fi.click()});
-  a.add("command",{id:"copy",label:"Copy URL",when:one,
-    run:async c=>{
-      const v=a.url(c.selection[0]);
-      try{await navigator.clipboard.writeText(v);ms("URL copied")}
-      catch{const x=el("input",{value:v});ui({title:"Copy URL",content:x});x.select()}
-    }});
-  a.add("command",{id:"ses",label:"Copy Session URL",toolbar:false,showDisabled:true,
+  command({id:"upload",label:"Upload",group:"folder",when:()=>!s.j,run:()=>fi.click()});
+  command({id:"copy",label:"Copy URL",when:one,
+    run:c=>copy(a.url(c.selection[0]),"URL")});
+  command({id:"ses",label:"Copy Session URL",toolbar:false,
     when:c=>one(c)&&s.h,run:async c=>{
       const e=c.selection[0],f=e.s!==-1,x=await(await rq(u(f?parent(e.path):e.path,{cmd:"sesuri"}))).json(),
         v=new URL(f?encodeURIComponent(e.n):"",new URL(x.uri,location.origin)).href;
-      await navigator.clipboard.writeText(v);ms("Session URL copied");
+      await copy(v,"Session URL");
     }});
-  a.add("command",{id:"window",label:"New window",menu:false,when:()=>true,
+  command({id:"window",label:"New window",group:"folder",
     run:()=>{
       if(o.history){window.open(u(s.d).href,"_blank","noopener");return}
       w.searchParams.set("wfm",s.d);
       window.open(w.href,"_blank","noopener");
     }});
-  a.add("command",{id:"mkdir",label:"New folder",menu:false,when:()=>true,run:async()=>{
+  command({id:"mkdir",label:"New folder",group:"folder",run:async()=>{
     const n=prompt("Folder name:","New Folder");
     if(n===null)return;
     await rq(u(s.d,{cmd:"mkdirt",dir:name(n)}));
     await sync();
   }});
-  a.add("command",{id:"lock",label:"Lock",toolbar:false,when:c=>files(c)&&c.selection.some(x=>!x.l),run:async c=>{
+  command({id:"lock",label:"Lock",toolbar:false,when:c=>files(c)&&c.selection.some(x=>!x.l),run:async c=>{
     const x=prompt("Lock until:",new Date(Date.now()+3600000).toISOString()),t=x&&Date.parse(x);
     if(x===null)return;
     if(!t||t<=Date.now())throw new Error("Enter a future expiration time");
     await lop("lock",c.selection.filter(x=>!x.l),Math.floor(t/1000));
   }});
-  a.add("command",{id:"unlock",label:"Unlock",toolbar:false,when:c=>files(c)&&c.selection.some(x=>x.l),
+  command({id:"unlock",label:"Unlock",toolbar:false,when:c=>files(c)&&c.selection.some(x=>x.l),
     run:c=>lop("unlock",c.selection.filter(x=>x.l))});
-  a.add("command",{id:"lockinfo",label:"Lock info",toolbar:false,when:c=>file(c)&&c.selection[0].l,run:async c=>{
+  command({id:"lockinfo",label:"Lock info",toolbar:false,when:c=>file(c)&&c.selection[0].l,run:async c=>{
     const x=c.selection[0],v=await(await rq(u(s.d,{cmd:"getlock",name:x.n}))).json();
     if(!v.owner)return sync();
     ui({title:x.n,content:`Locked by ${v.owner}. Expires ${new Date(v.time*1000).toLocaleString()}.`});
   }});
-  a.add("command",{id:"move",label:"Rename / move",when:item,run:async c=>{
+  command({id:"move",label:"Rename / move",when:item,run:async c=>{
     const x=c.selection[0],p=prompt("New path:",x.path);
     if(p===null)return;
     let t=path(p.startsWith("/")?p:s.d+p);
@@ -465,7 +511,7 @@ export function mount(h,o={}){
     await sync(n);
     if(g)ts(t);
   }});
-  a.add("command",{id:"delete",label:"Delete",when:c=>c.selection.length&&c.selection.every(x=>x.path!=="/"),run:async c=>{
+  command({id:"delete",label:"Delete",when:c=>c.selection.length&&c.selection.every(x=>x.path!=="/"),run:async c=>{
     const v=c.selection;
     if(!confirm(`Delete ${v.length===1?v[0].n:v.length+" items"}?`))return;
     const f=[],g=!!s.g,x=v.find(x=>x.s===-1&&s.d.startsWith(x.path));
@@ -493,8 +539,14 @@ export function mount(h,o={}){
 
   s.q.push(on(r,"click","button, tr",async(e,t)=>{
     try{
-      if(t.dataset.action==="refresh")await a.refresh();
-      else if(t.dataset.action==="close")cl();
+      if(t.disabled)return;
+      if(t===more){
+        if(!mn.hidden)return hm(true);
+        const z=t.getBoundingClientRect();
+        cm({clientX:z.left,clientY:z.bottom},"selection",t);
+        return;
+      }
+      if(t.dataset.action==="close")cl();
       else if(t.dataset.action==="cancel-upload"){
         s.j=2;s.u?.abort?.();
       }
@@ -517,8 +569,9 @@ export function mount(h,o={}){
         else{s.k=t.dataset.sort;s.z=0}
         rl();
       }else if(t.dataset.command){
-        const x=s.m.get(t.dataset.command);
-        if(x)await x.run(cx(),a);
+        const x=s.m.get(t.dataset.command),c=cx();
+        hm(mn.contains(t));
+        if(x&&enabled(x,c))await x.run(c,a);
       }
     }catch(x){if(x.name!=="AbortError")ms(x.message,1)}
   }));
@@ -528,14 +581,28 @@ export function mount(h,o={}){
     try{if(x)await ac(x)}catch(x){if(x.name!=="AbortError")ms(x.message,1)}
   }));
 
-  s.q.push(on(r,"contextmenu","tr[data-path], .wfm-tree-name",(e,t)=>{
+  function context(e,t){
     e.preventDefault();
+    const item=t.matches("tr[data-path], .wfm-tree-name");
     if(t.matches(".wfm-tree-name"))ts(t.dataset.path);
-    else if(!s.s.has(t.dataset.path)){
-      s.g=0;tr.querySelector('[aria-selected="true"]')?.removeAttribute("aria-selected");
-      s.s.clear();s.s.add(t.dataset.path);s.a=t.dataset.path;rs();
+    else if(item){if(!s.s.has(t.dataset.path))se(t,{})}
+    else{s.g=0;s.s.clear();s.a="";rs()}
+    cm(e,item?"selection":"folder",t);
+  }
+  s.q.push(on(r,"contextmenu","tr[data-path], .wfm-tree-name, .wfm-body",context));
+  s.q.push(on(r,"keydown","*",(e,t)=>{
+    if(!mn.hidden){
+      const v=[...mn.querySelectorAll("button:enabled")],i=v.indexOf(document.activeElement);
+      if(e.key==="Escape"){e.preventDefault();e.stopPropagation();hm(true)}
+      else if(e.key==="Tab")hm(true);
+      else if(["ArrowDown","ArrowUp","Home","End"].includes(e.key)){
+        e.preventDefault();
+        v[e.key==="Home"?0:e.key==="End"?v.length-1:(i+(e.key==="ArrowDown"?1:-1)+v.length)%v.length]?.focus();
+      }
+    }else if(e.key==="ContextMenu"||(e.shiftKey&&e.key==="F10")){
+      const x=t.closest("tr[data-path], .wfm-tree-name, .wfm-body");
+      if(x){const z=x.getBoundingClientRect();e.preventDefault();context({preventDefault(){},clientX:z.left,clientY:z.bottom},x)}
     }
-    cm(e);
   }));
 
   s.q.push(on(r,"change","[data-upload]",()=>{
@@ -548,8 +615,7 @@ export function mount(h,o={}){
     const x=d.getBoundingClientRect();
     if(e.clientX<x.left||e.clientX>x.right||e.clientY<x.top||e.clientY>x.bottom)cl();
   };
-  d.addEventListener("click",bk);
-  s.q.push(()=>d.removeEventListener("click",bk));
+  watch(d,"click",bk);
 
   let dc=0;
   const drag=e=>{
@@ -564,15 +630,14 @@ export function mount(h,o={}){
       upload([...e.dataTransfer.files]).catch(x=>ms(x.message,1));
     }
   };
-  for(const n of["dragenter","dragover","dragleave","drop"])r.addEventListener(n,drag);
-  s.q.push(()=>{for(const n of["dragenter","dragover","dragleave","drop"])r.removeEventListener(n,drag)});
+  watch(r,"dragenter dragover dragleave drop",drag);
 
-  document.addEventListener("click",hm);
-  s.q.push(()=>document.removeEventListener("click",hm));
+  const dismiss=e=>{if(!mn.contains(e.target)&&e.target!==more)hm()};
+  watch(document,"click",dismiss);
 
   if(o.history){
     const f=()=>a.open(decodeURI(location.pathname.slice(b.pathname.length))).catch(()=>{});
-    addEventListener("popstate",f);s.q.push(()=>removeEventListener("popstate",f));
+    watch(window,"popstate",f);
   }
 
   for(const p of o.plugins||[]){
@@ -596,11 +661,11 @@ export function mount(h,o={}){
 
 export function search(a){
   let n=0;
-  const off=a.add("command",{id:"search",label:"Search",menu:false,run:c=>{
+  const off=a.add("command",{id:"search",label:"Search",group:"folder",run:c=>{
     n++;
-    const s=c.selection.length===1&&c.selection[0].s===-1?c.selection[0].path:c.directory,
+    const s=c.directory,
       q=el("input",{type:"search",required:true,placeholder:"Name"}),
-      b=el("button",{type:"submit",textContent:"Start"}),
+      b=bt("Start",{type:"submit"}),
       f=el("input",{type:"checkbox",checked:true}),d=el("input",{type:"checkbox",checked:true}),
       m=el("div",`Search from: ${s}`),r=el("div",{className:"wfm-results"}),
       x=el("form",{className:"wfm-search"}),box=el("div");
@@ -624,7 +689,7 @@ export function search(a){
           if(o.s===-1)v.push(o.path);
           if(o.n.includes(t)&&(o.s===-1?d.checked:f.checked)){
             count++;
-            const g=el("button",{type:"button",textContent:o.path});
+            const g=bt(o.path);
             g.onclick=async()=>{await a.open(o.s===-1?o.path:o.path.slice(0,o.path.lastIndexOf("/")+1));a.ui.close()};
             r.append(g);
           }
