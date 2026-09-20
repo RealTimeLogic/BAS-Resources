@@ -76,7 +76,8 @@ local function mkstat(self)
    local r={}
    local x = h["last-modified"]
    if not x then x = h["expires"] end
-   r.mtime = x and ba.parsedate(x)
+   -- An invalid or missing date leaves mtime absent; epoch zero is valid.
+   if x then r.mtime = ba.parsedate(x) end
    x = h["content-length"]
    r.size = x and tonumber(x)
    return r

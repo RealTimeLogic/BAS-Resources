@@ -68,7 +68,7 @@ function M.createManager(options)
    local stopCount=0
    local installing=0
 
-   local function emit(code) safeCallback(notify,code) end
+   local function emit(...) safeCallback(notify,...) end
    local function ensureDirectories()
       if not fileIo:stat(basePath) and not fileIo:mkdir(basePath) or
          not fileIo:stat(servicesPath) and not fileIo:mkdir(servicesPath) then
@@ -533,7 +533,7 @@ function M.create(options)
       {challenge=challenge},false,false,false,nil,retryFirst
    local startAttempt
 
-   local function emit(code) safeCallback(notify,code) end
+   local function emit(...) safeCallback(notify,...) end
    local function retryable(problem)
       return problem and problem.temporary == true and problem.retryable ~= false
    end
@@ -594,6 +594,7 @@ function M.create(options)
       challenge:enroll(registration,function(state,enrollErr)
          if not state then return callback(cb,nil,enrollErr) end
          emit(11)
+         emit(13,state.name)
          local ok,reverseErr=activateReverse()
          if not ok then return callback(cb,nil,reverseErr) end
          startManager(state.name,cb)
@@ -603,7 +604,7 @@ function M.create(options)
    startAttempt=function(cb)
       local function done(value,err)
          starting=false
-         if err then emit(3) end
+         if err then emit(3,err.code) end
          if err then scheduleRetry(err)
          else cancelRetry() retryDelay=retryFirst end
          callback(cb,value,err)
@@ -615,6 +616,7 @@ function M.create(options)
       emit(1)
       if not challenge or not st then startManager(nil,done) return true end
       challenge:load(function(saved,loadErr)
+         if loadErr and loadErr.code == "sharktrust_identity_mismatch" then return enroll(done) end
          if loadErr then return done(nil,loadErr) end
          if not saved or saved.pending then return enroll(done) end
          emit(12)
@@ -629,7 +631,7 @@ function M.create(options)
                   resumeErr.code == "device_not_found") then return enroll(done) end
                if not result and retryable(resumeErr) then return done(nil,resumeErr) end
                local name=result and result.name or saved.name
-               if result then emit(13) end
+               if result then emit(13,name) end
                managerConfig(name)
                runManager(name,done,resumeErr)
             end)

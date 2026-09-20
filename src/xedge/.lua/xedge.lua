@@ -58,7 +58,9 @@ end
 
 local fakeTime=(function()
    local _,_,date=ba.version()
-   local tm=ba.parsedate("Mon, "..date:gsub("^(%w+)%s*(%w+)","%2 %1"))
+   -- Build dates need a two-digit day and GMT for HTTP date parsing.
+   local tm=assert(ba.parsedate("Mon, "..date:gsub("^(%w+)%s+(%d+)",
+      function(month,day) return sfmt("%02d %s",tonumber(day),month) end).." GMT"))
    xedge.compileTime=tm
    return function() tm=tm+1 return tm end
 end)()
@@ -730,9 +732,15 @@ local function acmeLog(err,message)
    xedge.elog({flush=err,ts=true,noTrace=true},"%s",message)
 end
 
-local function acmeNotify(code)
-   -- The embedded host logs only the documented numeric lifecycle code.
-   acmeLog(code == 3,"ACME event "..code)
+local function acmeNotify(code,msg)
+   local message="ACME event "..code
+   if code == 32 then
+      local record=mako.acme.challenge:status()
+      message=message..": TXT "..record.recordName.." = "..record.recordData
+   elseif (code == 3 or code == 13) and msg then
+      message=message..": "..msg
+   end
+   acmeLog(code == 3,message)
 end
 
 local function createAcme()

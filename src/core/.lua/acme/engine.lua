@@ -251,8 +251,8 @@ function M.create(options)
       if type(value) == "string" then
          local seconds=tonumber(value)
          if seconds then return math.max(0,seconds) end
-         local ok,date=pcall(ba.parsedate,value)
-         if ok and date then return math.max(0,date-now()) end
+         local date=ba.parsedate(value)
+         if date then return math.max(0,date-now()) end
       end
       return defaultSeconds or 3
    end

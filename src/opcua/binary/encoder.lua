@@ -298,6 +298,7 @@ end
 function enc:dateTime(v)
   if type(v) == "string" then
     v = ba.parsedate(v)
+    if v == nil then error(BadEncodingError) end
   end
 
   local shift = 0 -- shift in seconds from year 1601
