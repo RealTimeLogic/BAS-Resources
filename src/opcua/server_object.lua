@@ -26,8 +26,8 @@ function Srv:start(config, services)
 
   -- Server Status
   local status = {
-    StartTime = compat.gettime(),
-    CurrentTime = compat.gettime(),
+    StartTime = compat.timestamp(),
+    CurrentTime = compat.timestamp(),
     State = const.ServerState.Running,
     BuildInfo = {
       ProductUri = version.ProductUri,
@@ -35,7 +35,7 @@ function Srv:start(config, services)
       ProductName = version.ProductName,
       SoftwareVersion = version.Version,
       BuildNumber = version.BuildNumber,
-      BuildDate = compat.gettime(),
+      BuildDate = compat.timestamp(),
     },
     SecondsTillShutdown = 0,
     ShutdownReason = {Text=""},
@@ -67,7 +67,7 @@ function Srv:start(config, services)
   serverStatusNode.Attrs.Value = vServerStatus
   serverStatusNode:setValueCallback(
     function()
-      status.CurrentTime = compat.gettime()
+      status.CurrentTime = compat.timestamp()
       return vServerStatus
     end)
 
@@ -88,7 +88,7 @@ function Srv:start(config, services)
   -- Server_ServerStatus_StartTime
   editor:getNode("i=2257").Attrs.Value = {Type=VariantType.DateTime, Value=status.StartTime}
   -- Server_ServerStatus_CurrentTime
-  editor:getNode("i=2258").Attrs.Value = {Type=VariantType.DateTime, Value=compat.gettime()}
+  editor:getNode("i=2258").Attrs.Value = {Type=VariantType.DateTime, Value=compat.timestamp()}
 
   if dbgOn then traceD("services | Saving server status in address space") end
 
@@ -96,7 +96,7 @@ function Srv:start(config, services)
     function()
       return {
         Type=VariantType.DateTime,
-        Value=compat.gettime()
+        Value=compat.timestamp()
       }
     end)
 

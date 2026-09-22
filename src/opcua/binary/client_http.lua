@@ -249,7 +249,7 @@ function C:createRequest(type, request)
     RequestId = self.requestId,
     RequestHandle = self.requestHandle,
     RequestTimeout = 1000,
-    RequestCreatedAt = compat.gettime(),
+    RequestCreatedAt = compat.timestamp(),
     SessionAuthToken = self.sessionAuthToken,
   }
 

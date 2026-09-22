@@ -657,7 +657,7 @@ local function newScalarParser(value, tagname, isarray)
   elseif tagname == "ByteString" then
     return newByteStringValueParser(value, isarray)
   elseif tagname == "DateTime" then
-    return newNumberValueParser(value, VariantType.DateTime, isarray, compat.to_timestamp)
+    return newNumberValueParser(value, VariantType.DateTime, isarray, compat.timestamp)
   elseif tagname == "Boolean" then
     return newNumberValueParser(value, VariantType.Boolean, isarray, toboolean)
   elseif tagname == "Guid" then

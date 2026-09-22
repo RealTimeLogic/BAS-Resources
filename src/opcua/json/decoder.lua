@@ -124,7 +124,7 @@ function dec:dateTime()
     return nil
   end
 
-  return compat.to_timestamp(str)
+  return compat.timestamp(str)
 end
 
 function dec:string()

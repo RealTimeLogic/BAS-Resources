@@ -70,7 +70,7 @@ local compat = {
     http2sock = ba.socket.http2sock
   },
 
-  to_timestamp = function(str)
+  timestamp = function(str)
     if type(str) == "number" then
       return str
     end
@@ -81,33 +81,19 @@ local compat = {
     return t
   end,
 
-  gettime = function(str)
-    if type(str) == "number" then
-      return str
-    end
-    local dt = ba.datetime(str or "NOW"):ticks()
-    return dt
-  end,
-
-  to_datestring = function(ts)
+  datestring = function(ts)
     local secs = math.floor(ts)
-    local ms = math.floor(ts*1e6)
-    ms = math.floor(ms - secs * 1e6)
-    local dt = os.date("!%Y-%m-%dT%H:%M:%S", secs)
-    if ms == 0 then
-      return dt .. "Z"
-    else
-      local digits = 6
-      while ms % 10 == 0 do
-        ms = math.tointeger(ms / 10)
-        digits = digits - 1
-      end
-
-      ms = tostring(ms)
-      digits = digits - #ms
-      local zeroes = string.rep("0", digits)
-      return string.format("%s.%s%sZ", dt, zeroes, ms)
+    local us = math.floor((ts - secs) * 1e6 + 0.5)
+    if us == 1000000 then
+      secs = secs + 1
+      us = 0
     end
+    local dt = os.date("!%Y-%m-%dT%H:%M:%S", secs)
+    if us == 0 then
+      return dt .. "Z"
+    end
+    local fraction = string.format("%06d", us):gsub("0+$", "")
+    return dt .. "." .. fraction .. "Z"
   end,
 
   clock = ba.clock,

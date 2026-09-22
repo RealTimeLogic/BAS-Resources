@@ -185,7 +185,14 @@ local xparser = {
   end
 }
 
-local function to_timestamp(str)
+local function timestamp(str)
+  if str == nil or str == "NOW" then
+    return socket.gettime()
+  end
+  if type(str) == "number" then
+    return str
+  end
+
   local y, m, d, h, min, s, ms, tz_sign, tz_h, tz_m = string.gmatch(str, "(%d+)%-(%d+)%-(%d+)T(%d+):(%d+):(%d+)%.?(%d*)([Z%+%-]?)(%d*):?(%d*)")()
   if not y then
     error("invalid datetime")
@@ -225,29 +232,19 @@ local function to_timestamp(str)
   return t
 end
 
-local function to_datestring(ts)
+local function datestring(ts)
   local secs = math.floor(ts)
-  local ms = math.floor(ts*1e6)
-  ms = math.floor(ms - secs * 1e6)
-  local dt = os.date("!%Y-%m-%dT%H:%M:%S", secs)
-  if ms == 0 then
-    return dt .. "Z"
-  else
-    local digits = 6
-    while ms % 10 == 0 do
-      ms = math.tointeger(ms / 10)
-      digits = digits - 1
-    end
-
-    ms = tostring(ms)
-    digits = digits - #ms
-    local zeroes = string.rep("0", digits)
-    return string.format("%s.%s%sZ", dt, zeroes, ms)
+  local us = math.floor((ts - secs) * 1e6 + 0.5)
+  if us == 1000000 then
+    secs = secs + 1
+    us = 0
   end
-end
-
-local function gettime()
-  return socket.gettime()
+  local dt = os.date("!%Y-%m-%dT%H:%M:%S", secs)
+  if us == 0 then
+    return dt .. "Z"
+  end
+  local fraction = string.format("%06d", us):gsub("0+$", "")
+  return dt .. "." .. fraction .. "Z"
 end
 
 local json = require("cjson")
@@ -272,9 +269,8 @@ local compat = {
   },
 
   xml2table = xml2table,
-  to_datestring = to_datestring,
-  to_timestamp = to_timestamp,
-  gettime = gettime,
+  datestring = datestring,
+  timestamp = timestamp,
   clock = clock,
   sleep = sleep,
   bytearray = bytearray,

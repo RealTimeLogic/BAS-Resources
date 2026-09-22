@@ -131,7 +131,7 @@ function S.fillResponseParams(_, msg, statusCode)
   return {
     RequestId = msg.RequestId,
     RequestHandle = msg.Body.RequestHeader.RequestHandle,
-    RequestCreatedAt = compat.gettime(),
+    RequestCreatedAt = compat.timestamp(),
     ServiceResult = statusCode or Good
   }
 end

@@ -160,7 +160,7 @@ function S:processOpenSecureChannel(msg)
     Sertificate = self.config.sertificate,
     SertificateThumbprint = self.encoder.policy:getRemoteThumbprint(),
     RequestHandle = req.RequestHeader.RequestHandle,
-    RequestCreatedAt = compat.gettime(),
+    RequestCreatedAt = compat.timestamp(),
     ServiceResult = Good,
   }
 
@@ -172,7 +172,7 @@ function S:processOpenSecureChannel(msg)
   end
 
   local tokenId = genNextToken()
-  local createdAt = compat.gettime()
+  local createdAt = compat.timestamp()
   local expiresAt = createdAt + lifeTime / 1000
 
   self.tokens[tokenId] = {
@@ -323,7 +323,7 @@ function S.fillResponseParams(_, msg, statusCode)
     ChannelTokenId = msg.SecureHeader.TokenId,
     ChannelId = msg.ChannelId,
     RequestHandle = msg.Body.RequestHeader.RequestHandle,
-    RequestCreatedAt = compat.gettime(),
+    RequestCreatedAt = compat.timestamp(),
     ServiceResult = statusCode or Good
   }
 end
@@ -336,7 +336,7 @@ end
 
 function S:setToken(tokenId)
   local errOn = self.trace.errOn
-  local time = compat.gettime()
+  local time = compat.timestamp()
   self:cleanupExpredTokens(time)
 
   local token = self.tokens[tokenId]

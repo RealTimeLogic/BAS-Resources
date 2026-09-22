@@ -145,7 +145,7 @@ function enc:dateTime(v)
     error(BadEncodingError)
   end
 
-  local str = compat.to_datestring(v)
+  local str = compat.datestring(v)
   self:string(str)
 end
 

@@ -144,8 +144,8 @@ local function coExecRequest(self, request, callback)
 
       if dbgOn then traceD("client | coExecRequest waiting for response") end
 
-      local startTime = os.time()
-      while not resp and not err and (os.time() - startTime) < (request.RequestHeader.TimeoutHint*2/1000) do
+      local startTime = compat.timestamp()
+      while not resp and not err and (compat.timestamp() - startTime) < (request.RequestHeader.TimeoutHint*2/1000) do
         compat.sleep(0)
       end
       if dbgOn then traceD("client | coExecRequest response received") end
@@ -354,13 +354,13 @@ function C:processOpenSecureChannelResponse(response)
   self.services.enc:setTokenId(response.SecurityToken.TokenId)
 
   self.channelLifetime = response.SecurityToken.RevisedLifetime
-  local timeout = response.SecurityToken.RevisedLifetime * 0.75
-  self.channelRenewAfter = os.time() + timeout / 1000
+  local timeout = math.ceil(response.SecurityToken.RevisedLifetime * 0.75)
+  self.channelRenewAfter = compat.timestamp() + timeout / 1000
   if self.channelTimer == nil then
     self.channelTimer = compat.timer(function()
       if dbgOn then traceD("client | secure channel timer fired") end
-      local curTime = os.time()
-      local timeoutMs = (self.channelRenewAfter - curTime) * 1000
+      local curTime = compat.timestamp()
+      local timeoutMs = math.ceil((self.channelRenewAfter - curTime) * 1000)
       if timeoutMs > 0 then
         self.channelTimer:reset(timeoutMs)
         return
@@ -512,9 +512,9 @@ function C:checkSecureChannel()
   end
 
   local dbgOn = self.config.logging.services.dbgOn
-  local curTime = os.time()
+  local curTime = compat.timestamp()
   if self.channelRenewAfter and curTime < self.channelRenewAfter then
-    if dbgOn then traceD(fmt("client | secure channel not expired: curTime = %d, channelRenewAfter = %d", curTime, self.channelRenewAfter)) end
+    if dbgOn then traceD(fmt("client | secure channel not expired: curTime = %.9f, channelRenewAfter = %.9f", curTime, self.channelRenewAfter)) end
     return
   end
 

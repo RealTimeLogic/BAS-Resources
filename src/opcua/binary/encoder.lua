@@ -2,12 +2,11 @@ local StatusCode = require "opcua.status_codes"
 local nodeId = require("opcua.node_id")
 local tools = require("opcua.tools")
 local const = require("opcua.const")
+local compat = require("opcua.compat")
 local VariantType = const.VariantType
 
 local abs = math.abs
 local modf = math.modf
-local min = math.min
-local max = math.max
 local huge = math.huge
 local floor = math.floor
 local log = math.log
@@ -254,81 +253,19 @@ enc.sbyte = enc.int8
 enc.statusCode = enc.uint32
 enc.byteString = enc.string
 
-local function qwordToArr(v)
-  return {
-    v & 0xFF,
-    (v >> 8) & 0xFF,
-    (v >> 16) & 0xFF,
-    (v >> 24) & 0xFF,
-    (v >> 32) & 0xFF,
-    (v >> 40) & 0xFF,
-    (v >> 48) & 0xFF,
-    (v >> 56) & 0xFF,
-  }
-end
-
-local function arrMul(a, b, base) -- Operands containing rightmost digits at index 1
-  local p = #a
-  local q = #b
-  local tot = 0
-  local product = {}
-  for ri = 1,(p + q - 1) do
-    for bi = max(1, ri - p + 1),min(ri, q) do
-      local ai = ri - bi + 1
-      tot = tot + (a[ai] * b[bi])
-    end
-    product[ri] = tot % base
-    tot = floor(tot / base)
-  end
-  product[p+q] = tot % base                    -- Last digit of the result comes from last carry
-  return product
-end
-
-local function arrAdd(l, r)                  -- Operands containing rightmost digits at index 1
-  local c = 0
-  local sum = {}
-  for i = 1,8 do
-    c = l[i] + r[i] + c
-    sum[i] = c % 256
-    c = floor(c / 256)
-  end
-  return sum
-end
-
 function enc:dateTime(v)
+  if v == nil then
+    self:int64(0)
+    return
+  end
   if type(v) == "string" then
-    v = ba.parsedate(v)
-    if v == nil then error(BadEncodingError) end
+    v = compat.timestamp(v)
   end
 
-  local shift = 0 -- shift in seconds from year 1601
-  if v ~= nil then
-    shift = 11644473600 -- shift in seconds from year 1601
-  else
-    v = 0
-  end
-  local b,e = modf(v)
-  e = floor(e * 10000)
-  local ms = floor(e / 10)
-  e = e % 10
-  if e >= 5 then
-    ms = ms + 1
-  end
-
-  if ms == 1000 then
-    ms = 0
-    b = b + 1
-  end
-
-  local us = ms * 10000
-  local usarr = qwordToArr(us)
-  local shiftQ = qwordToArr(shift)
-  local secs = qwordToArr(b)
-  local secs1 = arrAdd(secs, shiftQ)
-  local ten7 = qwordToArr(10000000)
-  local tarr = arrMul(secs1, ten7, 256)
-  local res = arrAdd(tarr, usarr)
-  self:array(res)
+  local secs, fraction = modf(v)
+  local ms = floor(fraction * 1000 + 0.5)
+  -- Integer arithmetic preserves the 100 ns ticks since 1601 exactly.
+  self:int64((secs + 11644473600) * 10000000 + ms * 10000)
 end
 
 function enc:localizedText(v)
