@@ -3,6 +3,12 @@ local M={}
 local U=require"acme/_util"
 local errorTable,copy,safeCallback,resolveService,reject=U.err,U.copy,U.callback,U.resolveService,U.reject
 local problem,callback=errorTable,safeCallback
+local function identifiersKey(ids)
+   local values={}
+   for _,id in ipairs(ids or {}) do values[#values+1]=id.type..":"..id.value end
+   table.sort(values)
+   return table.concat(values,"\0")
+end
 
 local function fileStore(io,base)
    local path=base.."/sharktrust.json"
@@ -23,15 +29,51 @@ local function certificateExpiry(pem)
    if not body then return end
    local ok,info=pcall(ba.parsecert,ba.b64decode((body:gsub("%s",""))))
    local expires=ok and info and ba.parsecerttime(info.tzto)
-   return expires and expires ~= 0 and expires or nil
+   return expires and expires ~= 0 and expires or nil,ok and info and ba.parsecerttime(info.tzfrom)
+end
+
+-- Keep account identities with registration, outside the certificate cache.
+local function registrationStore(store)
+   local state
+   local function access(value,cb)
+      local called
+      local function done(result,err)
+         if called then return end
+         called=true
+         if err then err=errorTable(value and "storage_write_failed" or "storage_read_failed",
+            type(err)=="table" and err.message or tostring(err),{temporary=true}) end
+         safeCallback(cb,result,err)
+      end
+      local ok,err=pcall(value and store.save or store.load,value or done,value and done)
+      if not ok then done(nil,err) end
+   end
+   local function load(cb)
+      access(nil,function(value,err) state=copy(value or {}) cb(value,err) end)
+   end
+   return {
+      load=function(cb) load(function(value,err)
+         cb(value and (value.credential or not value.accounts) and value or nil,err)
+      end) end,
+      save=function(value,cb)
+         value.accounts=state and state.accounts
+         access(value,cb)
+      end,
+      account=function(id,value,cb)
+         if not value then return load(function(_,err) cb(state.accounts and state.accounts[id],err) end) end
+         state.accounts=state.accounts or {}
+         state.accounts[id]=copy(value)
+         access(state,cb)
+      end
+   }
 end
 
 local function validateConfig(config)
-   if type(config) ~= "table" or type(config.email) ~= "string" or config.email == "" or
+   if type(config) ~= "table" or not (config.service and config.service.sharkca) and
+      (type(config.email) ~= "string" or config.email == "") or
       type(config.domains) ~= "table" or type(config.domains[1]) ~= "string" then
       return nil,errorTable("invalid_configuration")
    end
-   if config.acceptTerms ~= true then return nil,errorTable("terms_not_accepted") end
+   if not (config.service and config.service.sharkca) and config.acceptTerms ~= true then return nil,errorTable("terms_not_accepted") end
    local service,problem=resolveService(config.service)
    if not service then return nil,problem end
    local result,seen={},{}
@@ -67,6 +109,7 @@ function M.createManager(options)
    local retryDelay=retryFirst
    local stopCount=0
    local installing=0
+   local pendingUpdates,drainUpdates={}
 
    local function emit(...) safeCallback(notify,...) end
    local function ensureDirectories()
@@ -91,7 +134,7 @@ function M.createManager(options)
          return nil,errorTable("invalid_saved_state")
       end
       profile=saved or {version=2,serviceId=service.serviceId,directoryUrl=service.directoryUrl,
-         account={email=config and config.email or ""},certificates={},updatedAt=now()}
+         account={email=config and config.email},certificates={},updatedAt=now()}
       profiles[service.serviceId]=profile
       return profile
    end
@@ -129,11 +172,13 @@ function M.createManager(options)
    end
 
    local function fallbackRenewal(record)
-      local expires=record.expiresAt or certificateExpiry(record.certificate)
+      local expires,issued=certificateExpiry(record.certificate)
+      expires=record.expiresAt or expires
       record.expiresAt=expires
       if not expires then record.renewAt,record.ariCheckAt=now(),nil return end
-      local jitter=math.floor((random()-.5)*math.min(86400,config.fallbackRenewBefore/4))
-      record.renewAt,record.ariCheckAt=math.max(now(),expires-config.fallbackRenewBefore+jitter),nil
+      local before=math.min(config.fallbackRenewBefore,math.max(0,expires-(issued or record.issuedAt or now()))/3)
+      local jitter=math.floor((random()-.5)*math.min(86400,before/4))
+      record.renewAt,record.ariCheckAt=math.max(now(),expires-before+jitter),nil
    end
 
    local function refreshRenewal(profile,domain,callback)
@@ -158,19 +203,28 @@ function M.createManager(options)
    local function issue(profile,domain,force,callback)
       if closed then return reject(callback,"manager_closed") end
       local old=profile.certificates[domain]
+      local ids=copy(config.identifiers)
+      local idKey=identifiersKey(ids)
       if not force and old and old.expiresAt and old.expiresAt > now() and old.renewAt and old.renewAt > now() then
          return safeCallback(callback,old)
       end
-      if profile.account.email ~= config.email then profile.account={email=config.email} end
+      if not config.service.sharkca and profile.account.email ~= config.email then profile.account={email=config.email} end
       local key=copy(config.key or {})
       if old and old.privateKey then key.privateKey=old.privateKey end
-      engine:certificate(config.service,profile.account,{domain=domain,acceptTerms=config.acceptTerms,
+      if config.service.sharkca and not key.privateKey then
+         local thumb,err=engine:prepareAccount(profile.account)
+         if not thumb then return safeCallback(callback,nil,err) end
+         key.privateKey,err=engine:createKey("device-"..thumb,key)
+         if not key.privateKey then return safeCallback(callback,nil,err) end
+      end
+      engine:certificate(config.service,profile.account,{domain=domain,identifiers=ids,acceptTerms=config.acceptTerms,
          challenge=config.challenge,key=key,timeout=config.timeout,dnsResolveTimeout=config.dnsResolveTimeout,
          replaces=old and old.ariId},function(result,problem)
          if not result then return safeCallback(callback,nil,problem) end
+         if idKey~=identifiersKey(config.identifiers) then return reject(callback,"identifiers_changed",nil,{temporary=true}) end
          profile.account=result.account
          local expires=result.expiresAt or certificateExpiry(result.certificate)
-         profile.certificates[domain]={domain=domain,privateKey=result.privateKey,certificate=result.certificate,
+         profile.certificates[domain]={domain=domain,identifiers=ids,privateKey=result.privateKey,certificate=result.certificate,
             expiresAt=expires,ariId=result.ariId,orderUrl=result.orderUrl,
             directoryUrl=result.directoryUrl,issuedAt=now()}
          refreshRenewal(profile,domain,function(_,renewProblem)
@@ -193,7 +247,8 @@ function M.createManager(options)
       local result={}
       for _,domain in ipairs(config.domains) do
          local record=profile.certificates[domain]
-         if not record or not record.expiresAt or record.expiresAt <= now() then result[#result+1]=domain end
+         if not record or not record.expiresAt or record.expiresAt <= now() or
+            identifiersKey(record.identifiers)~=identifiersKey(config.identifiers) then result[#result+1]=domain end
       end
       return result
    end
@@ -235,6 +290,7 @@ function M.createManager(options)
       busy=nil
       if problem then lastError=copy(problem) end
       safeCallback(callback,result,problem)
+      if drainUpdates then drainUpdates() end
    end
    local function cancelTimer()
       if timer then timer:cancel() timer=nil end
@@ -263,7 +319,8 @@ function M.createManager(options)
       retryAt=nil
       local renew,refresh,current,deferred={},{},now(),false
       for domain,record in pairs(activeProfile.certificates) do
-         if record.renewAt and record.renewAt <= current then renew[#renew+1]=domain
+         if record.renewAt and record.renewAt <= current or
+            identifiersKey(record.identifiers)~=identifiersKey(config.identifiers) then renew[#renew+1]=domain
          elseif record.ariCheckAt and record.ariCheckAt <= current then refresh[#refresh+1]=domain end
       end
       local function finish(problem)
@@ -280,6 +337,7 @@ function M.createManager(options)
             elseif deferred then retryAt=now()+3600
             else retryDelay,retryAt=retryFirst,nil end
             scheduleTimer()
+            drainUpdates()
          end)
       end
       local firstProblem
@@ -313,6 +371,64 @@ function M.createManager(options)
          end
          safeCallback(callback,{rebuilt=#domains,reused=#domains == 0,cleaned=changed})
       end)
+   end
+
+   drainUpdates=function()
+      if busy or #pendingUpdates==0 then return end
+      local waiting=pendingUpdates pendingUpdates={}
+      local function done(result,err)
+         for _,cb in ipairs(waiting) do safeCallback(cb,result,err) end
+      end
+      if closed then return done(nil,errorTable("manager_closed")) end
+      busy="identifiers"
+      prepare(activeProfile,function(result,err)
+         if not result then
+            retryAt=now()+(err and err.temporary and retryFirst or 21600)
+            scheduleTimer()
+            return leave(done,nil,err)
+         end
+         installProfile(activeProfile,function(ok,e)
+            scheduleTimer()
+            leave(done,ok and result or nil,e)
+         end)
+      end)
+   end
+
+   function manager:updateIdentifiers(ids,cb)
+      if closed or not activeProfile then return reject(cb,"manager_not_started") end
+      config.identifiers=copy(ids)
+      pendingUpdates[#pendingUpdates+1]=cb or function() end
+      drainUpdates()
+      return true
+   end
+
+   function manager:prepareAccount(service,cb)
+      run(function()
+         local ready,err=ensureDirectories()
+         if not ready then return safeCallback(cb,nil,err) end
+         local resolved,e=resolveService(service)
+         if not resolved then return safeCallback(cb,nil,e) end
+         local profile,err=loadProfile(resolved)
+         if not profile then return safeCallback(cb,nil,err) end
+         local function prepare(saved,err)
+            if err then return safeCallback(cb,nil,err) end
+            if not profile.account.key and saved then profile.account.key=copy(saved.key) end
+            if not profile.account.key then
+               profile.account.key,err=engine:createKey("account-"..ba.b64urlencode(ba.rndbs(18)),{type="ecc",curve="SECP256R1"})
+               if not profile.account.key then return safeCallback(cb,nil,err) end
+            end
+            local thumb,err=engine:prepareAccount(profile.account)
+            if not thumb then return safeCallback(cb,nil,err) end
+            local function finish(ok,e)
+               if ok then ok,e=saveProfile(profile) end
+               safeCallback(cb,ok and {directoryUrl=resolved.directoryUrl,keyThumbprint=thumb} or nil,e)
+            end
+            if options.accountStore then options.accountStore(resolved.serviceId,{key=profile.account.key},finish)
+            else finish(true) end
+         end
+         if options.accountStore then options.accountStore(resolved.serviceId,nil,prepare) else prepare() end
+      end)
+      return true
    end
 
    function manager:configure(value)
@@ -367,7 +483,7 @@ function M.createManager(options)
       local profile
       profile,problem=loadProfile(resolved)
       if not profile then config.service=previous return leave(callback,nil,problem) end
-      if profile.account.email ~= config.email then profile.account={email=config.email} end
+      if not config.service.sharkca and profile.account.email ~= config.email then profile.account={email=config.email} end
       prepare(profile,function(result,prepareProblem)
          if not result then config.service=previous return leave(callback,nil,prepareProblem) end
          commit(profile,function(committed,commitProblem)
@@ -469,6 +585,7 @@ function M.createManager(options)
       if installing > 0 then return nil,"busy" end
       closed,started=true,false
       cancelTimer()
+      drainUpdates()
       engine:close(function(_,problem) safeCallback(callback,not problem or nil,problem) end)
       return true
    end
@@ -491,33 +608,49 @@ function M.create(options)
    end
    if type(install) ~= "function" then return nil,problem"invalid_installer" end
    local config=options.config
-   if config.acceptTerms ~= true then return nil,problem"terms_not_accepted" end
-   local dnsConfig=config.challenge or {}
+   local private=config.sharkca
+   if private then
+      if type(private)~="table" or config.challenge or config.keyType and config.keyType~="ecc" or
+         type(config.domains)~="table" or #config.domains>1 or
+         config.domains[1]~=nil and (type(config.domains[1])~="string" or config.domains[1]=="") then
+         return nil,problem"invalid_sharkca_configuration"
+      end
+   elseif config.acceptTerms ~= true then return nil,problem"terms_not_accepted" end
+   local dnsConfig=private or config.challenge or {}
    local registration={name=config.domains[1],namePolicy=config.namePolicy or "increment",
       dns=dnsConfig.dns,info=config.info}
    local service={production=config.production ~= false,productionUrl=config.productionUrl,
       stagingUrl=config.stagingUrl,http=options.http}
    local key={type=config.keyType or "ecc",bits=config.bits,curve=config.curve}
-   local reverse=dnsConfig.reverse == true
+   local reverse=not private and dnsConfig.reverse == true
    local notify=options.notify
    local deps=options.dependencies or {}
    local timerFactory=deps.timer or function(action) return ba.timer(action) end
    local retryFirst,retryMax=deps.retryDelay or 30000,deps.retryMaxDelay or 300000
    local engine,err=require"acme/engine".create{tpm=options.tpm,dependencies=options.engineDependencies}
    if not engine then return nil,err end
-   local challenge,st
+   local challenge,st,store
    local function fail(problem)
       if challenge and challenge.close then challenge:close() elseif st then st:close() end
       engine:close()
       return nil,problem
    end
-   if dnsConfig.type == "dns-01" and dnsConfig.mode ~= "manual" then
+   if private or dnsConfig.type == "dns-01" and dnsConfig.mode ~= "manual" then
       local Dns=require"acme/dns"
+      if private and not dnsConfig.zoneKey and not dnsConfig.proof then
+         local embedded,e=Dns.identity()
+         if not embedded then return fail(e) end
+         dnsConfig=copy(embedded) dnsConfig.portalUrl=private.portalUrl or embedded.portalUrl
+      end
       st,err=Dns.createClient{portalUrl=dnsConfig.portalUrl,zoneKey=dnsConfig.zoneKey,
-         proof=dnsConfig.proof,http=options.http}
+         proof=dnsConfig.proof,http=options.http,profile=private and "sharkca-v1" or nil}
       if not st then return fail(err) end
-      challenge,err=Dns.createSharkTrust{client=st,
-         store=options.store or fileStore(fileIo,options.path or "acme"),
+      if private then
+         service={production=true,productionUrl=st:identity().portalUrl:gsub("/sharktrust%.lsp$","/acme/directory"),
+            sharkca=true,http=options.http}
+      end
+      store=registrationStore(options.store or fileStore(fileIo,options.path or "acme"))
+      challenge,err=Dns.createSharkTrust{client=st,store=store,
          propagationDelay=dnsConfig.propagationDelay,notify=options.notify,dependencies=options.dnsDependencies}
       if not challenge then return fail(err) end
    elseif dnsConfig.type == "dns-01" and dnsConfig.mode == "manual" then
@@ -527,11 +660,12 @@ function M.create(options)
    end
    local manager
    manager,err=M.createManager{io=fileIo,engine=engine,install=install,
-      notify=options.notify,renewAllowed=options.renewAllowed,path=options.path}
+      notify=options.notify,renewAllowed=options.renewAllowed,path=options.path,accountStore=store and store.account}
    if not manager then return fail(err) end
    local runtime,started,closed,starting,retryTimer,retryDelay=
       {challenge=challenge},false,false,false,nil,retryFirst
    local startAttempt
+   local lastStartError
 
    local function emit(...) safeCallback(notify,...) end
    local function retryable(problem)
@@ -555,9 +689,10 @@ function M.create(options)
       emit(4)
    end
 
-   local function managerConfig(domain)
+   local function managerConfig(domain,ids)
       local domains=domain and {domain} or config.domains
-      return manager:configure{email=config.email,domains=domains,acceptTerms=config.acceptTerms,
+      return manager:configure{email=not private and config.email or nil,domains=private and {"$device"} or domains,
+         identifiers=ids,acceptTerms=not private and config.acceptTerms or nil,
          challenge=challenge,service=service,key=key,cleanup=config.cleanup ~= false,
          timeout=config.timeout,dnsResolveTimeout=config.dnsResolveTimeout,
          fallbackRenewBefore=config.fallbackRenewBefore}
@@ -601,20 +736,7 @@ function M.create(options)
       end)
    end
 
-   startAttempt=function(cb)
-      local function done(value,err)
-         starting=false
-         if err then emit(3,err.code) end
-         if err then scheduleRetry(err)
-         else cancelRetry() retryDelay=retryFirst end
-         callback(cb,value,err)
-      end
-      if closed then return done(nil,problem"runtime_closed") end
-      if started then done{started=false} return true end
-      if starting then return callback(cb,nil,problem"operation_in_progress") end
-      starting=true
-      emit(1)
-      if not challenge or not st then startManager(nil,done) return true end
+   local function startRegistered(done)
       challenge:load(function(saved,loadErr)
          if loadErr and loadErr.code == "sharktrust_identity_mismatch" then return enroll(done) end
          if loadErr then return done(nil,loadErr) end
@@ -637,6 +759,63 @@ function M.create(options)
             end)
          end)
       end)
+   end
+
+   startAttempt=function(cb)
+      local function done(value,err)
+         starting=false
+         lastStartError=err
+         if err then emit(3,err.code) end
+         if err then scheduleRetry(err)
+         else cancelRetry() retryDelay=retryFirst end
+         callback(cb,value,err)
+      end
+      if closed then return done(nil,problem"runtime_closed") end
+      if started then done{started=false} return true end
+      if starting then return callback(cb,nil,problem"operation_in_progress") end
+      starting=true
+      emit(1)
+      if st then
+         if not private then
+            local ok,err=managerConfig()
+            if not ok then return done(nil,err) end
+         end
+         manager:prepareAccount(service,function(account,e)
+            if not account then return done(nil,e) end
+            if not private then return startRegistered(done) end
+            st:bindAccount(account,function(ok,err)
+               if not ok then return done(nil,err) end
+               local function ready(state,e)
+                  if not state then return done(nil,e) end
+                  emit(13,state.name or state.certificateIdentifiers[1].value)
+                  local ok,err=managerConfig(state.name,state.certificateIdentifiers)
+                  if not ok then return done(nil,err) end
+                  manager:load(function(_,e)
+                     if e then return done(nil,e) end
+                     runManager(state.name,done)
+                  end)
+               end
+               local function register()
+                  emit(10)
+                  challenge:enroll(registration,function(state,e)
+                     if state then emit(11) end
+                     ready(state,e)
+                  end)
+               end
+               challenge:load(function(saved,e)
+                  if e and e.code~="sharktrust_identity_mismatch" then return done(nil,e) end
+                  if not saved or saved.pending then return register() end
+                  emit(12)
+                  challenge:resume(function(state,e)
+                     if e and (e.status==401 or e.code=="device_not_found") then return register() end
+                     ready(state,e)
+                  end)
+               end)
+            end)
+         end)
+         return true
+      end
+      startManager(nil,done)
       return true
    end
    function runtime:start(cb)
@@ -648,6 +827,10 @@ function M.create(options)
    local function noSharkTrust(cb) return callback(cb,nil,problem"sharktrust_not_configured") end
    function runtime:isRegistered(cb)
       if not st then return noSharkTrust(cb) end
+      if private then return challenge:resume(function(result,err)
+         if not result then return callback(cb,nil,err) end
+         manager:updateIdentifiers(result.certificateIdentifiers,function(ok,e) callback(cb,ok and result or nil,e) end)
+      end) end
       return challenge:isRegistered(cb)
    end
    function runtime:isAvailable(name,cb)
@@ -656,17 +839,33 @@ function M.create(options)
    end
    function runtime:setIpAddress(ipAddress,cb)
       if not st then return noSharkTrust(cb) end
+      if private then
+         if not started then return reject(cb,"runtime_not_started") end
+         return challenge:setIpAddress(ipAddress,function(result,err)
+            if not result then return callback(cb,nil,err) end
+            manager:updateIdentifiers(result.certificateIdentifiers,function(ok,e) callback(cb,ok and result or nil,e) end)
+         end)
+      end
       return challenge:setIpAddress(ipAddress,cb)
    end
    function runtime:reverseConnection(enable)
+      if private then return nil,problem"sharkca_reverse_unavailable" end
       if not st then return nil,problem"sharktrust_not_configured" end
       reverse=enable and true or false
       return st:reverseConnection(enable)
    end
-   function runtime:switchService(service,cb) return manager:switchService(service,{rebuild=true},cb) end
-   function runtime:renew(domain,cb) return manager:renew(domain,{force=true},cb) end
+   function runtime:switchService(service,cb)
+      if private then return reject(cb,"sharkca_reconfigure_required") end
+      if st then return manager:prepareAccount(service,function(_,err)
+         if err then return callback(cb,nil,err) end
+         manager:switchService(service,{rebuild=true},cb)
+      end) end
+      return manager:switchService(service,{rebuild=true},cb)
+   end
+   function runtime:renew(domain,cb) return manager:renew(private and "$device" or domain,{force=true},cb) end
    function runtime:status()
       local value=manager:status()
+      value.lastError=copy(lastStartError or value.lastError)
       value.registration=challenge and challenge.status and challenge:status() or nil
       value.reverse=st and st:reverseStatus() or {enabled=false,connected=false,status=0,connections=0}
       value.starting,value.retryPending=starting,retryTimer ~= nil

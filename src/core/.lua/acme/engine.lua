@@ -161,16 +161,25 @@ local function keyFunctions(tpm,jwt)
          {key="rsa",bits=options.bits or 2048} or {key="ecc",curve=options.curve or "SECP384R1"}
       return ba.create.key(keyOptions)
    end
-   local function createCsr(key,domain)
+   local function createCsr(key,domain,identifiers)
       local dn,types,usage={commonname=domain},{"SSL_CLIENT","SSL_SERVER"},{"DIGITAL_SIGNATURE","KEY_ENCIPHERMENT"}
+      local san
+      if identifiers then
+         local names={}
+         for i,id in ipairs(identifiers) do names[i]=(id.type=="ip" and "IP:" or "")..id.value end
+         san=table.concat(names,";")
+         dn.commonname=identifiers[1].value
+      end
+      local method,handle=ba.create.csr,key
       if type(key) == "table" and key.provider == "tpm" then
-         local method=tpmMethod"createCsr"
+         method=tpmMethod"createCsr"
          if not method then return nil,errorTable("tpm_unavailable") end
          local ok,problem=restore(key)
          if not ok then return nil,problem end
-         return method(key.name,dn,types,usage)
+         handle=key.name
       end
-      return ba.create.csr(key,dn,types,usage)
+      if san then return method(handle,dn,san,types,usage) end
+      return method(handle,dn,types,usage)
    end
    return sign,params,createKey,createCsr
 end
@@ -208,7 +217,7 @@ end
 function M.create(options)
    options=options or {}
    local deps=options.dependencies or {}
-   local httpFactory=deps.httpFactory or function(httpOptions) return require"httpc".create(httpOptions) end
+   local httpFactory=deps.httpFactory or require"acme/http".create
    local run=deps.run or function(action) ba.thread.run(action) end
    local sleep=deps.sleep or ba.sleep
    local now=options.now or deps.now or os.time
@@ -355,12 +364,20 @@ function M.create(options)
       local canonical=string.format('{"crv":"P-256","kty":"EC","x":"%s","y":"%s"}',ba.b64urlencode(x),ba.b64urlencode(y))
       return ba.b64urlencode(ba.crypto.hash"sha256"(canonical)(true,"binary"))
    end
-   local function registerAccount(session,directory,account,acceptTerms)
-      if type(account.email) ~= "string" or account.email == "" then return nil,errorTable("invalid_account") end
+   -- The caller can save the key before binding it to an authenticated device.
+   function engine:prepareAccount(account)
       if not account.key then
          local key,keyErr=engine:createKey("$account",{type="ecc",curve="SECP256R1"})
          if not key then return nil,keyErr end
          account.key=key
+      end
+      return thumbprint(account)
+   end
+   local function registerAccount(session,directory,account,acceptTerms)
+      if not session.service.sharkca and (type(account.email) ~= "string" or account.email == "") then return nil,errorTable("invalid_account") end
+      if not account.key then
+         local prepared,keyErr=engine:prepareAccount(account)
+         if not prepared then return nil,keyErr end
       end
       if account.url then
          if account.directoryUrl ~= session.service.directoryUrl then
@@ -368,10 +385,12 @@ function M.create(options)
          end
          return account,nil
       end
-      if acceptTerms ~= true then return nil,errorTable("terms_not_accepted") end
-      local result,requestErr,response=session:signed(account,directory.newAccount,{
-         termsOfServiceAgreed=true,onlyReturnExisting=false,contact={"mailto:"..account.email}
-      },"newAccount",true)
+      local payload={onlyReturnExisting=false}
+      if not session.service.sharkca then
+         if acceptTerms ~= true then return nil,errorTable("terms_not_accepted") end
+         payload.termsOfServiceAgreed,payload.contact=true,{"mailto:"..account.email}
+      end
+      local result,requestErr,response=session:signed(account,directory.newAccount,payload,"newAccount",true)
       if not result then return nil,requestErr end
       local location=response.headers.location
       if type(location) ~= "string" or location == "" then return nil,errorTable("invalid_response") end
@@ -422,7 +441,7 @@ function M.create(options)
       if not directory then return nil,err end
       account,err=registerAccount(session,directory,account,request.acceptTerms)
       if not account then return nil,err end
-      local orderPayload={identifiers={{type="dns",value=request.domain}}}
+      local orderPayload={identifiers=request.identifiers or {{type="dns",value=request.domain}}}
       if request.replaces and directory.renewalInfo then orderPayload.replaces=request.replaces end
       local order,orderErr,orderResponse=session:signed(account,directory.newOrder,orderPayload,"newOrder",false)
       if not order and orderErr and orderErr.code == "account_does_not_exist" and not job.accountRetried then
@@ -433,47 +452,67 @@ function M.create(options)
       end
       if not order then return nil,orderErr end
       local orderUrl=orderResponse.headers.location
-      local authorizationUrl=type(order.authorizations) == "table" and order.authorizations[1]
       local finalizeUrl=order.finalize
-      if not validHttpsUrl(orderUrl) or not validHttpsUrl(authorizationUrl) or not validHttpsUrl(finalizeUrl) then
+      if not validHttpsUrl(orderUrl) or type(order.authorizations)~="table" or #order.authorizations==0 or not validHttpsUrl(finalizeUrl) then
          return nil,errorTable("invalid_response")
       end
-      local authorization,authorizationErr=session:signed(account,authorizationUrl,"","authorization",false)
-      if not authorization then return nil,authorizationErr end
-      local selected
-      local challengeType=request.challenge.type
-      for _,challenge in ipairs(authorization.challenges or {}) do if challenge.type == challengeType then selected=challenge break end end
-      if not selected or type(selected.token) ~= "string" or not validHttpsUrl(selected.url) then
-         return nil,errorTable("challenge_unavailable","The ACME server did not offer "..tostring(challengeType))
+      local expected=job.service.sharkca and {}
+      if expected then
+         for _,id in ipairs(request.identifiers) do expected[id.type..":"..id.value]=true end
       end
-      local accountThumbprint,thumbErr=thumbprint(account)
-      if not accountThumbprint then return nil,thumbErr end
-      local keyAuthorization=selected.token.."."..accountThumbprint
-      local context={domain=request.domain,token=selected.token,keyAuthorization=keyAuthorization,challengeUrl=selected.url}
-      if challengeType == "dns-01" then
-         local baseDomain=request.domain:find("^%*%.") and request.domain:sub(3) or request.domain
-         context.recordName="_acme-challenge."..baseDomain
-         context.recordData=ba.b64urlencode(ba.crypto.hash"sha256"(keyAuthorization)(true,"binary"))
-         context.dnsResolveTimeoutMs=math.floor((request.dnsResolveTimeout or 30)*1000)
-      else context.tokenPath="acme-challenge/"..selected.token end
-      job.challengeContext=context
-      local presented,presentErr=waitFor(job,function(callback) return request.challenge:present(context,callback) end)
-      if not presented then return nil,presentErr or errorTable("challenge_install_failed") end
-      job.challengePresented=true
-      local _,triggerErr=session:signed(account,selected.url,{},"challenge",false)
-      if triggerErr then return nil,triggerErr end
-      local valid,validationErr=poll(session,account,selected.url,"challenge",job)
-      if not valid then return nil,validationErr end
-      local cleaned,cleanupErr=waitFor(job,function(callback) return request.challenge:cleanup(context,callback) end)
-      job.challengePresented=false
-      if not cleaned then return nil,cleanupErr or errorTable("challenge_cleanup_failed") end
+      for _,authorizationUrl in ipairs(order.authorizations) do
+         if not validHttpsUrl(authorizationUrl) then return nil,errorTable("invalid_response") end
+         local authorization,authorizationErr=session:signed(account,authorizationUrl,"","authorization",false)
+         if not authorization then return nil,authorizationErr end
+         if expected then
+            local id=authorization.identifier or {}
+            local name=tostring(id.type)..":"..tostring(id.value)
+            if not expected[name] or authorization.wildcard or authorization.status~="valid" then
+               return nil,errorTable("invalid_authorization")
+            end
+            expected[name]=nil
+         end
+         if authorization.status~="valid" then
+            if authorization.status~="pending" then return nil,errorTable("invalid_response","Authorization is not pending or valid") end
+            local selected
+            local challengeType=request.challenge.type
+            for _,challenge in ipairs(authorization.challenges or {}) do if challenge.type == challengeType then selected=challenge break end end
+            if not selected or type(selected.token) ~= "string" or not validHttpsUrl(selected.url) then
+               return nil,errorTable("challenge_unavailable","The ACME server did not offer "..tostring(challengeType))
+            end
+            local accountThumbprint,thumbErr=thumbprint(account)
+            if not accountThumbprint then return nil,thumbErr end
+            local keyAuthorization=selected.token.."."..accountThumbprint
+            local domain=authorization.identifier and authorization.identifier.value or request.domain
+            if authorization.wildcard then domain="*."..domain end
+            local context={domain=domain,token=selected.token,keyAuthorization=keyAuthorization,challengeUrl=selected.url}
+            if challengeType == "dns-01" then
+               local baseDomain=domain:find("^%*%.") and domain:sub(3) or domain
+               context.recordName="_acme-challenge."..baseDomain
+               context.recordData=ba.b64urlencode(ba.crypto.hash"sha256"(keyAuthorization)(true,"binary"))
+               context.dnsResolveTimeoutMs=math.floor((request.dnsResolveTimeout or 30)*1000)
+            else context.tokenPath="acme-challenge/"..selected.token end
+            job.challengeContext=context
+            local presented,presentErr=waitFor(job,function(callback) return request.challenge:present(context,callback) end)
+            if not presented then return nil,presentErr or errorTable("challenge_install_failed") end
+            job.challengePresented=true
+            local _,triggerErr=session:signed(account,selected.url,{},"challenge",false)
+            if triggerErr then return nil,triggerErr end
+            local valid,validationErr=poll(session,account,selected.url,"challenge",job)
+            if not valid then return nil,validationErr end
+            local cleaned,cleanupErr=waitFor(job,function(callback) return request.challenge:cleanup(context,callback) end)
+            job.challengePresented=false
+            if not cleaned then return nil,cleanupErr or errorTable("challenge_cleanup_failed") end
+         end
+      end
       if job.cancelled then return nil,errorTable("cancelled") end
       local keyOptions=copy(request.key or {})
+      if expected and next(expected) then return nil,errorTable("invalid_authorization") end
       local certificateKey=keyOptions.privateKey
       if not certificateKey then certificateKey,err=engine:createKey(request.domain,keyOptions) if not certificateKey then return nil,err end end
       local csr
       loadKeys()
-      csr,err=createCsr(certificateKey,request.domain)
+      csr,err=createCsr(certificateKey,request.domain,request.identifiers)
       if not csr then return nil,err end
       local csrDer=pemBody(csr,"CERTIFICATE REQUEST") or pemBody(csr,"NEW CERTIFICATE REQUEST")
       if not csrDer then return nil,errorTable("csr_failed") end

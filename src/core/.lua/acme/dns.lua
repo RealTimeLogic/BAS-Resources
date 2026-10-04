@@ -39,19 +39,21 @@ function M.createClient(options)
    if not options then return nil,identityErr end
    local portalUrl,urlErr=normalizePortalUrl(options.portalUrl)
    if not portalUrl then return nil,urlErr end
+   if options.profile=="sharkca-v1" then
+      portalUrl=portalUrl:gsub("^(https://[^/]+)",function(host) return (host:lower():gsub(":443$","")) end)
+   end
    if not isHex(options.zoneKey,64) then return nil,errorTable("invalid_zone_key") end
    local zoneKey,proof=string.lower(options.zoneKey),options.proof
    if type(proof) ~= "function" then return nil,errorTable("invalid_proof_source") end
 
    local deps=options.dependencies or {}
-   local httpFactory=deps.httpFactory or function(httpOptions)
-      return require"httpc".create(httpOptions)
-   end
+   local httpFactory=deps.httpFactory or require"acme/http".create
    local reverseFactory=deps.reverse or ba.revcon
    local run=deps.run or function(action) ba.thread.run(action) end
    local jsonEncode,jsonDecode=deps.jsonEncode or encode,deps.jsonDecode or decode
    local httpOptions,reverseOptions=copy(options.http or {}),options.reverse
-   local credential
+   local credential,binding
+   local private=options.profile=="sharkca-v1"
    if options.credential ~= nil then
       if not isHex(options.credential,64) then return nil,errorTable("invalid_device_credential") end
       credential=string.lower(options.credential)
@@ -61,7 +63,7 @@ function M.createClient(options)
    if not identityOK or type(identityProof) ~= "string" or #identityProof ~= 32 then
       return nil,errorTable("proof_failed")
    end
-   local identity={portalUrl=portalUrl,
+   local identity={portalUrl=portalUrl,profile=options.profile,
       zoneIdentity=ba.b64urlencode(ba.crypto.hash"sha256"(zoneKey)(identityProof)(true,"binary"))}
    identityProof=nil
    local clients,closeCallbacks,client,active,closed={},{},{},0,false
@@ -93,9 +95,8 @@ function M.createClient(options)
       if not ok or type(signature) ~= "string" or #signature ~= 32 then
          return nil,errorTable("proof_failed")
       end
-      local op=copy(reverseOptions or {})
+      local op=require"acme/http".options(reverseOptions)
       op.url=portalUrl
-      if op.shark == nil and ba.sharkclient then op.shark=ba.sharkclient() end
       stopReverse()
       reverse=reverseFactory(op)
       reverse:token{Authorization="Bearer "..credential,
@@ -173,6 +174,7 @@ function M.createClient(options)
       selectedCredential=string.lower(selectedCredential)
       local body=copy(data or {})
       body.command=command
+      if private then body.profile,body.acmeAccount="sharkca-v1",binding end
       return post(body,{Authorization="Bearer "..selectedCredential},
          "SHARKTRUST-DEVICE\0"..selectedCredential.."\0")
    end
@@ -191,6 +193,42 @@ function M.createClient(options)
       return problem
    end
 
+   local function approved(result,address)
+      if not private then return result end
+      local account=result.acmeAccount or {}
+      local ids=result.certificateIdentifiers
+      if result.profile~="sharkca-v1" or not binding or account.directoryUrl~=binding.directoryUrl or
+         account.keyThumbprint~=binding.keyThumbprint or type(ids)~="table" or #ids<1 or #ids>2 or
+         type(result.registrationRevision)~="number" or result.registrationRevision<1 then
+         return nil,errorTable("invalid_sharkca_registration")
+      end
+      local seen={}
+      for _,id in ipairs(ids) do
+         if type(id)~="table" or seen[id.type] or
+            not (id.type=="dns" and type(result.name)=="string" and result.name:match("%.local$") and id.value==result.name or
+                 id.type=="ip" and id.value==address and ipv4(address)) then
+            return nil,errorTable("invalid_sharkca_identifiers")
+         end
+         seen[id.type]=true
+      end
+      if result.name and not seen.dns then return nil,errorTable("invalid_sharkca_identifiers") end
+      result.sockname=address -- Match the public enrollment status contract.
+      return result
+   end
+
+   function client:bindAccount(account,callback)
+      binding=copy(account)
+      return begin(callback,function()
+         local result,err=post({command="Capabilities"},{},"")
+         if not result then return nil,err end
+         local profile,directory=false,false
+         for _,v in ipairs(result.profiles or {}) do if v=="sharkca-v1" then profile=true end end
+         for _,v in ipairs(result.acmeDirectories or {}) do if v==binding.directoryUrl then directory=true end end
+         if not profile or not directory then return nil,errorTable("sharkca_profile_unavailable") end
+         return true
+      end)
+   end
+
    function client:isAvailable(name,callback)
       return begin(callback,function()
          local result,requestErr=zonePost({command="IsAvailable",name=name},"SHARKTRUST-AVAILABLE\0")
@@ -205,6 +243,7 @@ function M.createClient(options)
    function client:enroll(request,callback)
       local body={command="Register",name=request.name,namePolicy=request.namePolicy,
          dns=request.dns,info=request.info,credential=request.credential}
+      if private then body.profile,body.acmeAccount="sharkca-v1",binding end
       return begin(callback,function()
          local address,addressErr=networkAddress()
          if not address then return nil,addressErr end
@@ -213,13 +252,16 @@ function M.createClient(options)
          if not result then
             return nil,request.credential and requestErr or enrollmentError(requestErr)
          end
-         if type(result.deviceId) ~= "string" or type(result.name) ~= "string" or
+         if type(result.deviceId) ~= "string" or not private and type(result.name) ~= "string" or
             not isHex(result.credential,64) then
             return nil,errorTable("invalid_response")
          end
          if request.credential and result.credential ~= request.credential then
             return nil,errorTable("enrollment_credential_mismatch")
          end
+         local valid,err=approved(result,address)
+         if not valid then return nil,err end
+         if private and (request.name==nil)~=(result.name==nil) then return nil,errorTable("invalid_sharkca_identifiers") end
          credential=string.lower(result.credential)
          restartReverse()
          return result,nil
@@ -232,15 +274,20 @@ function M.createClient(options)
          if not result then return nil,requestErr end
          local address,addressErr=networkAddress()
          if not address then return nil,addressErr end
-         local _,updateErr=devicePost("SetIpAddress",{ipAddress=address})
+         local updated,updateErr=devicePost("SetIpAddress",{ipAddress=address})
          if updateErr then return nil,updateErr end
+         if private then return approved(updated,address) end
          result.sockname=address -- Local endpoint of the portal connection.
          return result
       end)
    end
 
    function client:setIpAddress(ipAddress,callback)
-      return begin(callback,function() return devicePost("SetIpAddress",{ipAddress=ipAddress}) end)
+      return begin(callback,function()
+         local result,err=devicePost("SetIpAddress",{ipAddress=ipAddress})
+         if not result then return nil,err end
+         return approved(result,ipAddress)
+      end)
    end
 
    function client:setAcmeRecord(request,callback)
@@ -302,14 +349,14 @@ end
 
 local function validState(state,identity)
    if type(state) ~= "table" or state.version ~= 2 then return nil,errorTable("invalid_saved_state") end
-   if state.portalUrl ~= identity.portalUrl or state.zoneIdentity ~= identity.zoneIdentity then
+   if state.portalUrl ~= identity.portalUrl or state.zoneIdentity ~= identity.zoneIdentity or state.profile~=identity.profile then
       return nil,errorTable("sharktrust_identity_mismatch")
    end
    if not isHex(state.credential,64) then return nil,errorTable("invalid_saved_state") end
    if state.pending then
       if state.pending ~= true or type(state.request) ~= "table" then return nil,errorTable("invalid_saved_state") end
-   elseif type(state.deviceId) ~= "string" or state.deviceId == "" or type(state.name) ~= "string" or
-      state.name == "" then return nil,errorTable("invalid_saved_state") end
+   elseif type(state.deviceId) ~= "string" or state.deviceId == "" or
+      not identity.profile and (type(state.name) ~= "string" or state.name == "") then return nil,errorTable("invalid_saved_state") end
    state=copy(state)
    state.credential=state.credential:lower()
    return state
@@ -386,9 +433,11 @@ function M.createSharkTrust(options)
       saveQueue[#saveQueue+1]={state=copy(value),callback=callback}
       saveNext()
    end
-   local function makeState(result,newIdentity)
+   local function makeState(result,newIdentity,credential)
       return {version=2,portalUrl=newIdentity.portalUrl,zoneIdentity=newIdentity.zoneIdentity,
-         deviceId=result.deviceId,name=result.name,credential=result.credential:lower(),updatedAt=now()}
+         profile=newIdentity.profile,certificateIdentifiers=result.certificateIdentifiers,
+         registrationRevision=result.registrationRevision,acmeAccount=result.acmeAccount,
+         deviceId=result.deviceId,name=result.name,credential=(result.credential or credential):lower(),updatedAt=now()}
    end
    local function enter(name,callback)
       if closed then return reject(callback,"adapter_closed") end
@@ -412,6 +461,7 @@ function M.createSharkTrust(options)
       if pendingState and not pendingState.pending then return saveState(pendingState,done) end
       if not saved or not saved.pending then
          saved={version=2,portalUrl=identity.portalUrl,zoneIdentity=identity.zoneIdentity,
+            profile=identity.profile,
             pending=true,request=copy(request),updatedAt=now(),
             credential=ba.rndbs(32):gsub(".",function(c) return string.format("%02x",string.byte(c)) end)}
       end
@@ -442,6 +492,11 @@ function M.createSharkTrust(options)
       withState(callback,function(saved)
          client:isRegistered(function(result,problem)
             if not result then return safeCallback(callback,nil,problem) end
+            if identity.profile then
+               return saveState(makeState(result,identity,saved.credential),function(stored,err)
+                  safeCallback(callback,stored and copy(result),err)
+               end)
+            end
             if result.name and result.name ~= saved.name then
                saved=copy(saved)
                saved.name,saved.updatedAt=result.name,now()
@@ -460,7 +515,17 @@ function M.createSharkTrust(options)
       return true
    end
    function adapter:isRegistered(callback) return deviceCall("isRegistered",nil,callback) end
-   function adapter:setIpAddress(ipAddress,callback) return deviceCall("setIpAddress",ipAddress,callback) end
+   function adapter:setIpAddress(ipAddress,callback)
+      if not identity.profile then return deviceCall("setIpAddress",ipAddress,callback) end
+      if not enter("setIpAddress",callback) then return end
+      withState(function(result,err) leave(callback,result,err) end,function(saved)
+         client:setIpAddress(ipAddress,function(result,err)
+            if not result then return leave(callback,nil,err) end
+            saveState(makeState(result,identity,saved.credential),function(value,e) leave(callback,value and copy(result),e) end)
+         end)
+      end)
+      return true
+   end
    function adapter:getWan(callback) return deviceCall("getWan",nil,callback) end
 
    function adapter:switchIdentity(value,switchOptions,callback)

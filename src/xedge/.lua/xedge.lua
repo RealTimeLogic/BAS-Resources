@@ -6,7 +6,7 @@ local tinsert=table.insert
 local dtraceback=debug and debug.traceback or function(e) return e end
 local jencode,jdecode=ba.json.encode,ba.json.decode
 local startAcmeDns -- func
-local acmeRuntime,acmeIo,acmeClockReady
+local acmeRuntime,acmeIo,acmeClockReady,acmeMdns,acmeMdnsName
 local xedgeEvent -- = _XedgeEvent
 local smtp -- smtp settings, a table, used by sendmail
 local authRealm="Xedge"
@@ -732,28 +732,58 @@ local function acmeLog(err,message)
    xedge.elog({flush=err,ts=true,noTrace=true},"%s",message)
 end
 
+local function acmeHttp(config)
+   if config.sharkca and config.caPem and #config.caPem > 0 then
+      local store=ba.create.certstore()
+      local count,err=store:addcert(config.caPem)
+      if not count or count<=0 or count==65535 then return nil,{code="invalid_ca_certificate",message=err or "Invalid portal CA certificate"} end
+      return {shark=ba.create.sharkssl(store)}
+   end
+end
+
+local function closeAcme(callback)
+   if acmeMdns then acmeMdns:close() acmeMdns,acmeMdnsName=nil,nil end
+   local runtime=acmeRuntime
+   acmeRuntime,xedge.acmeRuntime=nil,nil
+   if runtime then return runtime:close(callback) end
+   if callback then callback(true) end
+end
+
 local function acmeNotify(code,msg)
    local message="ACME event "..code
    if code == 32 then
-      local record=mako.acme.challenge:status()
+      local record=acmeRuntime.challenge:status()
       message=message..": TXT "..record.recordName.." = "..record.recordData
    elseif (code == 3 or code == 13) and msg then
       message=message..": "..msg
    end
-   acmeLog(code == 3,message)
+   local err=code == 3
+   if code == 13 and xcfg.acme.sharkca and xcfg.acme.name ~= "" and
+      (not acmeMdns or acmeMdnsName ~= msg) then
+      if acmeMdns then acmeMdns:close() end
+      local problem
+      acmeMdns,problem=ba.createmdns(msg:sub(1,-7))
+      acmeMdnsName=msg
+      if not acmeMdns then err=true message=message.."; mDNS failed: "..problem end
+   end
+   acmeLog(err,message)
 end
 
 local function createAcme()
    if not acmeIo or not xcfg.acme then return end
    local config=xcfg.acme
+   if config.sharkca and not ba.createmdns then return nil,{code="mdns_unavailable"} end
+   local http,problem=acmeHttp(config)
+   if problem then return nil,problem end
    local identity,portal=acmeIdentity(config)
    if not identity then return nil,{code="sharktrust_not_configured"} end
    identity.type,identity.reverse="dns-01",config.revcon == true
+   local options={email=config.email,domains={config.name ~= "" and config.name or nil},acceptTerms=true,
+      production=config.production,productionUrl=config.productionUrl,stagingUrl=config.stagingUrl,
+      namePolicy="exact",info=config.info or "Xedge"}
+   options[config.sharkca and "sharkca" or "challenge"]=identity
    local runtime,err=Acme.create{
-      io=acmeIo,
-      config={email=config.email,domains={config.name},acceptTerms=true,
-         production=config.production,productionUrl=config.productionUrl,stagingUrl=config.stagingUrl,
-         namePolicy="exact",info=config.info or "Xedge",challenge=identity},
+      io=acmeIo,http=http,config=options,
       store={
          load=function(cb) cb(config.state) end,
          save=function(state,cb)
@@ -772,12 +802,17 @@ local function createAcme()
    return runtime
 end
 
+local function startAcme(callback)
+   local runtime,err=createAcme()
+   if runtime then return runtime:start(callback) end
+   err=err or {code="acme_not_configured"}
+   acmeLog(true,"Cannot configure: "..(err.message or err.code))
+   if callback then callback(nil,err) end
+end
+
 startAcmeDns=function()
    acmeClockReady=true
-   if acmeRuntime or not xcfg.acme then return end
-   local runtime,err=createAcme()
-   if not runtime then acmeLog(true,"Cannot configure: "..(err and (err.message or err.code) or "unknown")) return end
-   runtime:start()
+   if not acmeRuntime and xcfg.acme then startAcme() end
 end
 
 local installAuth -- function is: installOrSetAuth() or setdb()
@@ -962,16 +997,18 @@ end
 
 local function acmeSettings(data)
    local current=xcfg.acme or {}
+   local private=data.sharkca == true or data.sharkca == "true"
    local manual=data.manualIdentity == true or data.manualIdentity == "true"
    local portal,key,secret=data.portalUrl or current.portalUrl,
       data.zoneKey and #data.zoneKey > 0 and data.zoneKey or current.zoneKey,
       data.secret and #data.secret > 0 and data.secret or current.secret
    local production=current.production
    if data.staging ~= nil then production=not (data.staging == true or data.staging == "true") end
-   local same=manual == (current.manualIdentity and true or false) and portal == current.portalUrl and
-      key == current.zoneKey and secret == current.secret
-   return {email=data.email or current.email,name=data.name or current.name,
-      revcon=data.revcon == true or data.revcon == "true",production=production,
+   local same=private == (current.sharkca and true or false) and manual == (current.manualIdentity and true or false) and portal == current.portalUrl and
+      key == current.zoneKey and secret == current.secret and (data.name or current.name) == current.name
+   return {email=data.email or current.email,name=data.name or current.name,sharkca=private,
+      caPem=private and (data.caPem or current.caPem) or nil,
+      revcon=not private and (data.revcon == true or data.revcon == "true"),production=production,
       productionUrl=current.productionUrl,stagingUrl=current.stagingUrl,state=same and current.state or nil,
       manualIdentity=manual,portalUrl=portal,zoneKey=key,secret=secret}
 end
@@ -987,11 +1024,16 @@ local function acmeResponse(data)
       xedge.portal or current and current.portalUrl or xedge.compiledPortal or ""
    data.compiledPortal,data.compiledIdentity=xedge.compiledPortal or "",xedge.compiledPortal and true or false
    data.manualIdentity=current and current.manualIdentity and true or false
+   data.sharkcaAvailable=ba.createmdns and true or false
+   data.sharkca=current and current.sharkca or false
+   data.caPem=current and current.caPem or ""
+   data.name=data.name or current and current.name
    data.staging=current and current.production == false or false
    data.revcon=xcfg.revcon and true or false
    data.reverseStatus=status and status.reverse or
       {enabled=data.revcon,connected=false,status=0,connections=0}
    data.certificateRetrying=status and status.retryPending or false
+   data.nameUnavailable=status and status.lastError and status.lastError.code == "name_unavailable" or false
    local busy=status and (status.starting or status.retryPending or status.operation)
    data.certificateWorking=(not acmeClockReady or busy) and true or false
    data.certificateReady=ready and not data.certificateWorking
@@ -1031,8 +1073,12 @@ local acmeCmd={
    end,
    available=function(_,data,response)
       local send=deferredJson(response)
-      local identity=acmeIdentity(acmeSettings(data))
+      local config=acmeSettings(data)
+      local identity=acmeIdentity(config)
       if not identity then return send{err="SharkTrust is not configured"} end
+      local http,problem=acmeHttp(config)
+      if problem then return send{err=problem.message or problem.code} end
+      identity.http,identity.profile=http,config.sharkca and "sharkca-v1" or nil
       local client,err=Dns.createClient(identity)
       if not client then return send{err=err.message or err.code} end
       client:isAvailable(data.name,function(result,problem)
@@ -1044,37 +1090,28 @@ local acmeCmd={
    auto=function(cmd,data,response)
       local send=deferredJson(response)
       local config=acmeSettings(data)
-      if type(config.email) ~= "string" or type(config.name) ~= "string" then send{err="Invalid settings"} return end
+      if type(config.name) ~= "string" or config.sharkca and not ba.createmdns or
+         not config.sharkca and type(config.email) ~= "string" then send{err="Invalid settings"} return end
+      local _,problem=acmeHttp(config)
+      if problem then send{err=problem.message or problem.code} return end
       xcfg.acme,xcfg.revcon=config,config.revcon
       if not saveCfg() then send{err="Cannot save ACME settings"} return end
-      local function launch()
-         local runtime,err=createAcme()
-         if not runtime then
-            local message=err and (err.message or err.code) or "Cannot configure ACME"
-            acmeLog(true,"Cannot configure: "..message)
-            send{err=message}
-            return
-         end
-         runtime:start(function(_,problem)
-            if problem and runtime:status().retryPending then
-               send{ok=true,pending=true}
+      closeAcme(function(_,err)
+         if err then acmeLog(true,"ACME cleanup: "..(err.message or err.code)) end
+         if not acmeClockReady then send{ok=true,pending=true} return end
+         startAcme(function(_,problem)
+            if problem and acmeRuntime and acmeRuntime:status().retryPending then
+               send{ok=true,pending=true,nameUnavailable=problem.code == "name_unavailable"}
             else
                send(problem and {err=problem.message or problem.code} or {ok=true})
             end
          end)
-      end
-      if acmeRuntime then
-         local old=acmeRuntime
-         acmeRuntime,xedge.acmeRuntime=nil,nil
-         old:close(function(_,err)
-            if err then acmeLog(true,"ACME cleanup: "..(err.message or err.code)) end
-            if acmeClockReady then launch() else send{ok=true,pending=true} end
-         end)
-      elseif acmeClockReady then launch() else send{ok=true,pending=true} end
+      end)
    end
 }
 
 function xedge.revcon(enable)
+   if xcfg.acme and xcfg.acme.sharkca then return nil,{code="sharkca_reverse_unavailable"} end
    xcfg.revcon=enable and true or false
    if xcfg.acme then xcfg.acme.revcon=xcfg.revcon end
    saveCfg()
@@ -1526,11 +1563,7 @@ end
 
 local function onunload()
    if sso then sso.close() end
-   if acmeRuntime then
-      local runtime=acmeRuntime
-      acmeRuntime,xedge.acmeRuntime=nil,nil
-      runtime:close()
-   end
+   closeAcme()
    for name,app in pairs(apps) do if(app.running) then stopApp(name) end end
 end
 

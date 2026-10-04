@@ -2,7 +2,7 @@
 
 This client obtains, installs, and renews Transport Layer Security (TLS) certificates using the Automatic Certificate Management Environment (ACME) protocol. Mako Server and Xedge supply configuration, writable storage, and host lifecycle hooks. The shared Lua implementation manages certificate issuance and renewal.
 
-This specification defines the five-module implementation in `src/core/.lua/acme`, its control flow, persistent state, and lifecycle responsibilities. Detailed public contracts are defined in the [API guide](../doc/acme-client-public-api.md).
+This specification defines the six-module implementation in `src/core/.lua/acme`, its control flow, persistent state, and lifecycle responsibilities. See the BAS ACME reference for public contracts and [HTTP trust configuration](acme-http.md) for private CA imports.
 
 See also [ACME Token Generator Design](acme-tokengen.md)
 
@@ -10,6 +10,7 @@ See also [ACME Token Generator Design](acme-tokengen.md)
 
 | Module | Responsibility |
 | --- | --- |
+| [http.lua](../src/core/.lua/acme/http.lua) | Shared HTTP factory and certificate-store selection. Supplies the same trust defaults to ACME, SharkTrust requests and reverse connections; explicit connection contexts override the default. |
 | [runtime.lua](../src/core/.lua/acme/runtime.lua) | Composes the client through `create()`. Also contains the certificate manager exposed by `createManager()`: configuration, stored service profiles, certificate installation, renewal dates, timers, retries, and service switching. The runtime owns startup retry; the manager owns scheduled renewal retry. |
 | [engine.lua](../src/core/.lua/acme/engine.lua) | Executes ACME transactions: directory discovery, account registration, signed requests, orders, challenge validation, certificate requests/downloads, revocation, and ACME Renewal Information (ARI). Serializes certificate jobs and manages software or Trusted Platform Module (TPM) keys. Contains the HTTP-01 challenge adapter. |
 | [dns.lua](../src/core/.lua/acme/dns.lua) | Contains three related components. `createClient()` implements authenticated SharkTrust portal operations and optional reverse connections. `createSharkTrust()` adds persisted registration and automatic DNS-01 challenge handling. `createManual()` waits for an operator to publish a DNS record. `identity()` obtains the portal identity/proof configuration. |
@@ -47,6 +48,13 @@ The engine knows the narrow challenge interface: a type plus `present()` and `cl
 Each configured domain has its own certificate record and issuance job. This code creates a single-domain order for each job, rather than combining the configured domains into one multi-domain order. In the normal SharkTrust runtime path, the portal-assigned name becomes the manager's domain list.
 
 ## Startup and saved state
+
+Mako's startup adapter requires `ba.createmdns` for named SharkCA configurations.
+On registration event 13, it creates a responder using the assigned `.local`
+name without the suffix. Repeated notifications reuse the responder; a changed
+assignment replaces it. Mako closes it on shutdown. IP-only SharkCA and public-CA
+configurations do not create a responder. This ownership stays in `src/mako/.config`;
+the shared ACME runtime does not depend on mDNS. Local setup failures are logged.
 
 `Runtime.create()` constructs the engine, selected challenge adapter, and manager. It does not start certificate work. `runtime:start()` activates the startup flow.
 
@@ -128,6 +136,20 @@ sequenceDiagram
 ```
 
 A Certificate Signing Request (CSR) binds the requested name to the certificate key. ACME requests are signed with the account key and a server nonce. The engine retries a bad nonce once within the signed request. If an order reports that the account no longer exists, it registers again and retries that order once.
+
+The low-level engine also accepts an optional `request.identifiers` array of `{type="dns"|"ip", value=string}` tables and generates matching typed CSR SANs. Without it, the existing single-DNS-name behavior is unchanged. It visits every authorization; already-valid authorizations skip the challenge exchange. `request.domain` remains the stable key/job label when explicit identifiers are supplied.
+
+`engine:prepareAccount(account)` creates or restores the P-256 account key in the caller's table and returns its public JWK thumbprint synchronously. A custom integration must save that table before enrollment; the method performs no networking or persistence.
+
+## SharkCA private enrollment
+
+SharkTrust Private CA issues private ECC certificates for a device's `.local` name, local IPv4 address, or both. It uses the existing enrollment proof and standard ACME account signatures without publishing DNS records. Mako selects it with `acme.sharkca`; direct runtime callers use `config.sharkca`. Neither email nor terms acceptance is used or sent. The Mako and Lua ACME references in BAS document the configuration.
+
+The runtime derives the ACME directory from the selected portal, persists a distinct account key, and verifies `sharkca-v1` capabilities before enrolling or resuming. Registration binds the account thumbprint and directory to the permitted identifiers. Returned profile, account association and identifiers are checked before persistence/issuance. The engine requires already-valid authorizations covering exactly those identifiers; it does not fall back to DNS or HTTP challenges. Missing explicit credentials use the compiled identity, with an optional portal-address override.
+
+The manager uses one stable `$device` record and its saved key for named and IP-only certificates. `setIpAddress()` and `isRegistered()` persist the portal's current identifiers and queue replacement when they change. Manager jobs remain serialized; a result whose identifiers were superseded cannot replace the current record. Queued updates resume after the active operation completes. Replacement failures retain the installed certificate and schedule retry. The host must retry a portal update rejected as busy or failed before acknowledgement. An old IP certificate does not validate a new address.
+
+Mako's optional `caFile` imports PEM roots from home I/O through `acme/http.setCertStore()`. Omission retains normal bundled trust, suitable for a portal with a publicly trusted HTTPS certificate. Supplied roots replace shared ACME trust. This trust setting is independent of the private root that browsers need for device certificates. Xedge's Use SharkCA option is exposed only when ba.createmdns is present. The administrator selects the mode independently of embedded or custom credentials. Its optional PEM root is saved in Xedge configuration and passed as a per-runtime HTTP context, without changing global ACME trust or other HTTP clients. Xedge owns its named registration's mDNS responder and closes it when reconfiguring or unloading; IP-only registration does not create one.
 
 Certificate jobs use coroutines so challenge adapters can complete asynchronously. The automatic DNS adapter sets the TXT record through the portal, waits for its propagation delay (30 seconds by default), then completes `present()`. The manual adapter waits until the operator calls `continue()`; there is no automatic publication or deadline for that wait.
 
@@ -234,3 +256,28 @@ completes:
 ## Verification Reference
 
 Deployment records, test coverage, and validation limitations are maintained separately in [ACME retry test results](ACME-retry-test-results.md).
+
+### Short-lived certificate renewal
+
+When server renewal information is unavailable, the fallback lead time is the
+smaller of the configured `fallbackRenewBefore` (22 days by default) and one
+third of the certificate validity period. Random variation uses the capped
+lead time. The original certificate validity dates keep this calculation
+stable across checks and restarts. A six-day certificate renews at roughly
+four days; a 90-day certificate retains the ordinary 22-day lead time.
+
+### Account recovery after certificate-cache deletion
+
+SharkTrustX and SharkCA use the same registration-store wrapper in the shared
+runtime. It retains account keys or TPM descriptors by service ID before
+contacting the portal. The DNS adapter still owns device-registration updates;
+the wrapper carries the accounts table through those writes. Public staging
+and production identities remain separate. Xedge's existing store callbacks
+persist the complete state in encrypted `xcfg.bin`; Mako's default store uses
+`acme/sharktrust.json`. No new Xedge-specific persistence branch is required.
+
+An existing service profile supplies the identity on the first updated startup.
+Subsequent deletion of that profile restores its account key from registration
+storage, then obtains a new certificate. The portal's account-binding check is
+unchanged. An account descriptor lost before this migration still requires
+separate recovery. Keep the registration store when clearing certificate state.

@@ -1185,6 +1185,14 @@ const certificateFormObj = [
 	el:"input",
 	type: "checkbox",
 	class: "switch",
+	label: "SetCertSharkCA",
+	name: "Use SharkCA",
+	description: "Use a private zone CA for a local device name or IP address. Select the mode matching your embedded or custom portal credentials."
+    },
+    {
+	el:"input",
+	type: "checkbox",
+	class: "switch",
 	label: "SetCertManualIdentity",
 	name: "Custom Portal Credentials",
 	description: "Advanced: override the compiled tokengen identity. The portal URL, zone key, and secret are saved in Xedge's encrypted configuration."
@@ -1210,8 +1218,8 @@ const certificateFormObj = [
 	type: "text",
 	readonly: "true",
 	label: "SetCertPortal",
-	name: "SharkTrustX Portal",
-	description: "The online SharkTrustX portal manages proof of ownership for Let's Encrypt, and controls remote access via the Reverse Connection if enabled."
+	name: "Portal",
+	description: "HTTPS address of the selected SharkTrustX or SharkCA portal."
     },
     {
 	el: "input",
@@ -1228,6 +1236,13 @@ const certificateFormObj = [
 	name: "Zone Secret",
 	description: "Required when this device does not include a generated tokengen security module",
 	placeholder: "Enter the 64-character zone secret"
+    },
+    {
+	el: "textarea",
+	label: "SetCertCaPem",
+	name: "Portal CA certificate (optional PEM)",
+	description: "For private portal HTTPS, paste the verified Portal HTTPS CA root. Leave blank for Let's Encrypt or another already trusted issuer. This is separate from the zone CA used for device certificates.",
+	rows: "5"
     },
     {
 	el: "input",
@@ -1250,7 +1265,7 @@ const certificateFormObj = [
 	type: "text",
 	label: "SetCertName",
 	name: "Name",
-	description: "Set a server name. The fully qualified name will be name.portal-domain-name",
+	description: "Enter a host label without a domain suffix. SharkCA adds .local; leave blank for an IP-only SharkCA certificate. Public certificates use name.portal-domain-name.",
 	placeholder: "Enter the name you wish to use for your server",
     },
     {
@@ -1496,7 +1511,7 @@ function ideCfg(e) {
 		diaHide();
 		if(!rsp) return;
 		if(undefined == rsp.isreg) {
-		    alert(`Cannot connect to SharkTrustX portal ${rsp.portal}`);
+		    alert(`Cannot connect to portal ${rsp.portal}`);
 		    return;
 		}
 	let elems={},statusTimer,autoPending=false,autoRequest=false,formBusy=false;
@@ -1504,8 +1519,11 @@ function ideCfg(e) {
 	    ()=>clearInterval(statusTimer));
 	elems.SetCertStatus.setAttribute("role","status");
 	elems.SetCertStatus.setAttribute("aria-live","polite");
-	let connectionError=rsp.connectionError ?
-	    `Cannot connect to ${rsp.portal}: ${rsp.connectionError}` : "";
+	function connectionProblem(value) {
+	    return value.nameUnavailable ? "The name is in use. Please select another name." :
+		value.connectionError ? `Cannot connect to ${value.portal}: ${value.connectionError}` : "";
+	}
+	let connectionError=connectionProblem(rsp);
 	function working(active,message) {
 	    formBusy=active;
 	    elems.SetCertSave.disabled=active;
@@ -1520,6 +1538,8 @@ function ideCfg(e) {
 	    if(value.wan !== undefined) elems.SetCertWan.value=value.wan || "";
 	    if(value.connectionError || undefined == value.isreg)
 		state="red",text="Disconnected";
+	    else if(value.sharkca)
+		state=value.isreg ? "green" : "red",text=value.isreg ? "SharkCA portal connected" : "Not registered";
 	    else if(reverse.enabled)
 		state=reverse.connected ? "green" : "red",
 		text=reverse.connected ? "Reverse connection connected" : "Reverse connection disconnected";
@@ -1531,13 +1551,13 @@ function ideCfg(e) {
 	statusTimer=setInterval(()=>sendAcmeCmd("isreg",value=>{
 	    if(!value || !elems.SetCertConnection.isConnected) return;
 	    connectionStatus(value);
-	    connectionError=value.connectionError ?
-		`Cannot connect to ${value.portal}: ${value.connectionError}` : "";
+	    connectionError=connectionProblem(value);
 	    if(autoPending) {
-		if(!autoRequest && value.certificateReady) closeEditor(editorId);
+		if(!autoRequest && value.nameUnavailable) autoPending=false,working(false);
+		else if(!autoRequest && value.certificateReady) closeEditor(editorId);
 		else if(autoRequest || value.certificateWorking)
 		    working(true,value.certificateRetrying ?
-			"A temporary network problem occurred. Certificate management is retrying in the background..." :
+			"Certificate management is retrying in the background..." :
 			"Certificate management is working in the background. This can take a few minutes...");
 		else {
 		    autoPending=false;
@@ -1548,7 +1568,7 @@ function ideCfg(e) {
 	    else if(!formBusy) working(false);
 	}),10000);
 	working(false);
-		if(!rsp.name) {
+		if(rsp.name === undefined) {
 		    sendCmd("getmac",(rsp)=>{
 			if(rsp.ok) {
 			    elems.SetCertName.value=rsp.mac.slice(-6)
@@ -1558,13 +1578,27 @@ function ideCfg(e) {
 		elems.SetCertIp.value=rsp.sockname || "";
 		elems.SetCertWan.value=rsp.wan || "";
 		let compiled=!!rsp.compiledIdentity;
-		elems.SetCertManualIdentity.parentElement.hidden=!compiled;
+		function showField(e,visible) {
+		    let display=visible ? "" : "none";
+		    if(e.type==="checkbox") e.closest(".frow").style.display=display;
+		    else e.style.display=e.previousElementSibling.style.display=display;
+		}
+		showField(elems.SetCertSharkCA,!!rsp.sharkcaAvailable);
+		elems.SetCertSharkCA.checked=!!rsp.sharkca;
+		elems.SetCertCaPem.value=rsp.caPem || "";
+		function serviceMode() {
+		    let privateCA=elems.SetCertSharkCA.checked;
+		    for(let e of [elems.SetCertEmail,elems.SetCertStaging,elems.SetCertRevcon]) showField(e,!privateCA);
+		    showField(elems.SetCertCaPem,privateCA);
+		    elems.SetCertName.readOnly=!!rsp.isreg && privateCA===!!rsp.sharkca;
+		}
+		elems.SetCertSharkCA.onchange=serviceMode;
+		serviceMode();
+		showField(elems.SetCertManualIdentity,compiled);
 		elems.SetCertManualIdentity.checked=!!rsp.manualIdentity || !compiled;
 		function identityMode() {
 		    let manual=elems.SetCertManualIdentity.checked || !compiled;
-		    let display=manual ? "" : "none";
-		    for(let e of [elems.SetCertPortal,elems.SetCertZoneKey,elems.SetCertSecret])
-			e.style.display=e.previousElementSibling.style.display=display;
+		    for(let e of [elems.SetCertPortal,elems.SetCertZoneKey,elems.SetCertSecret]) showField(e,manual);
 		    elems.SetCertPortal.readOnly=!manual;
 		    if(!manual) elems.SetCertPortal.value=rsp.compiledPortal || rsp.portal || "";
 		    else if(rsp.manualIdentity) elems.SetCertPortal.value=rsp.portal || "";
@@ -1590,8 +1624,10 @@ function ideCfg(e) {
 		    let key=elems.SetCertZoneKey.value.trim(),secret=elems.SetCertSecret.value.trim();
 		    let credentials=rsp.manualIdentity && elems.SetCertPortal.value.trim()==rsp.portal && !key && !secret ||
 			(/^[0-9a-f]{64}$/i.test(key) && /^[0-9a-f]{64}$/i.test(secret));
-		    if(/^\w+([\.-]?\w+)*@\w+([\.-]?\w+)*(\.\w{2,3})+$/.test(email) &&
-		       name.length > 2 && /^[a-zA-Z0-9]+$/.test(name) && (!manual ||
+		    let valid=elems.SetCertSharkCA.checked ?
+			(!name || name.length<=63 && /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/i.test(name)) :
+			(/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) && name.length>2 && /^[a-zA-Z0-9]+$/.test(name));
+		    if(valid && (!manual ||
 		       (/^https:\/\//i.test(portalUrl()) && credentials)))
 			return true;
 		    alert("Invalid settings");
@@ -1599,7 +1635,10 @@ function ideCfg(e) {
 		};
 		function settings() {
 		  let manual=elems.SetCertManualIdentity.checked || !compiled;
-		  return {email:email,name:name,revcon:elems.SetCertRevcon.checked,
+		  let privateCA=elems.SetCertSharkCA.checked;
+		  return {email:privateCA ? undefined : email,name:name,sharkca:privateCA,
+		      caPem:privateCA ? elems.SetCertCaPem.value.trim() : undefined,
+		      revcon:!privateCA && elems.SetCertRevcon.checked,
 		      staging:elems.SetCertStaging.checked,manualIdentity:manual,
 		      portalUrl:manual ? portalUrl() : undefined,
 		      zoneKey:manual ? elems.SetCertZoneKey.value.trim() : undefined,
@@ -1610,33 +1649,27 @@ function ideCfg(e) {
 		  working(true,"Applying settings and requesting a certificate. This can take a few minutes. The dialog will close when finished.");
 		  sendAcmeCmd("auto",(rsp)=>{
 		      autoRequest=false;
-		      if(rsp && !rsp.pending) closeEditor(editorId);
+		      if(rsp && rsp.nameUnavailable) connectionError=connectionProblem(rsp),autoPending=false,working(false);
+		      else if(rsp && !rsp.pending) closeEditor(editorId);
 		      else if(!rsp) autoPending=false,working(false);
 		  },d);
 		};
-		if(rsp.isreg) {
-		    elems.SetCertName.readOnly=true;
-		    if(rsp.email)
-			elems.SetCertEmail.value=rsp.email,elems.SetCertEmail.readOnly=true;
-		    elems.SetCertSave.onclick=()=>{if(validate()) sendAuto(settings());};
-		}
-		else
-		{
-		    elems.SetCertSave.onclick=()=>{
-			if(validate()) {
-			    let d=settings();
-			    working(true,"Checking whether the device name is available...");
-			    sendAcmeCmd("available",(rsp)=>{
-				if(!rsp) return working(false);
-				if(rsp.available) sendAuto(d);
-				else {
-				    working(false);
-				    alert(`${name} is in use. Please select another name.`);
-				}
-			    },d);
+		if(rsp.isreg && rsp.email)
+		    elems.SetCertEmail.value=rsp.email,elems.SetCertEmail.readOnly=true;
+		elems.SetCertSave.onclick=()=>{
+		    if(!validate()) return;
+		    let d=settings();
+		    if(rsp.isreg || d.sharkca && !d.name) return sendAuto(d);
+		    working(true,"Checking whether the device name is available...");
+		    sendAcmeCmd("available",(rsp)=>{
+			if(!rsp) return working(false);
+			if(rsp.available) sendAuto(d);
+			else {
+			    working(false);
+			    alert(`${name} is in use. Please select another name.`);
 			}
-		    };
-		}
+		    },d);
+		};
 	    });
 	});
 	add("SMTP Server",()=>{

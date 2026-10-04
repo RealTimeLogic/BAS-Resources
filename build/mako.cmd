@@ -47,7 +47,7 @@ echo OPC-UA inclusion skipped.
 goto ContinueAfterOPCUA
 
 :ContinueAfterOPCUA
-for %%i in (.lua\acme\runtime.lua .lua\acme\dns.lua .lua\acme\_server.lua) do (
+for %%i in (.lua\acme\runtime.lua .lua\acme\dns.lua .lua\acme\http.lua .lua\acme\_server.lua) do (
    if not exist "%%i" (
       echo Required ACME module %%i was not packaged.
       goto BuildFailed

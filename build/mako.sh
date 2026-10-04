@@ -38,7 +38,7 @@ else
     echo "Excluding OPCUA"
 fi
 
-for required in .lua/acme/runtime.lua .lua/acme/dns.lua .lua/acme/_server.lua; do
+for required in .lua/acme/runtime.lua .lua/acme/dns.lua .lua/acme/http.lua .lua/acme/_server.lua; do
     if [ ! -f "$required" ]; then
         echo "Required ACME module $required was not packaged."
         exit 1
