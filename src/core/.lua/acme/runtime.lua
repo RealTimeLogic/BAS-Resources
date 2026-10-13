@@ -120,14 +120,10 @@ function M.createManager(options)
       return true
    end
 
-   local function readJson(path) return U.readJson(fileIo,path) end
-   local function writeJson(path,value) return U.writeJson(fileIo,path,value) end
-
-   local function profilePath(id) return servicesPath.."/"..id..".json" end
    local function loadProfile(service)
       local profile=profiles[service.serviceId]
       if profile then return profile end
-      local saved,exists=readJson(profilePath(service.serviceId))
+      local saved,exists=U.readJson(fileIo,servicesPath.."/"..service.serviceId..".json")
       if exists and (type(saved) ~= "table" or saved.version ~= 2 or
          saved.serviceId ~= service.serviceId or saved.directoryUrl ~= service.directoryUrl or
          type(saved.account) ~= "table" or type(saved.certificates) ~= "table") then
@@ -140,7 +136,7 @@ function M.createManager(options)
    end
    local function saveProfile(profile)
       profile.updatedAt=now()
-      return writeJson(profilePath(profile.serviceId),profile)
+      return U.writeJson(fileIo,servicesPath.."/"..profile.serviceId..".json",profile)
    end
 
    local function certificateList(profile)
@@ -172,31 +168,36 @@ function M.createManager(options)
    end
 
    local function fallbackRenewal(record)
-      local expires,issued=certificateExpiry(record.certificate)
-      expires=record.expiresAt or expires
-      record.expiresAt=expires
-      if not expires then record.renewAt,record.ariCheckAt=now(),nil return end
-      local before=math.min(config.fallbackRenewBefore,math.max(0,expires-(issued or record.issuedAt or now()))/3)
-      local jitter=math.floor((random()-.5)*math.min(86400,before/4))
-      record.renewAt,record.ariCheckAt=math.max(now(),expires-before+jitter),nil
+      if not record.fallbackAt then
+         local expires,issued=certificateExpiry(record.certificate)
+         expires=record.expiresAt or expires or now()
+         record.expiresAt=expires
+         local before=math.min(config.fallbackRenewBefore,math.max(0,expires-(issued or record.issuedAt or now()))/3)
+         record.fallbackAt=expires-before+math.floor((random()-.5)*math.min(86400,before/4))
+      end
+      record.renewAt,record.ariCheckAt=math.max(now(),math.min(record.renewAt or math.huge,record.fallbackAt)),nil
    end
 
    local function refreshRenewal(profile,domain,callback)
       local record=profile.certificates[domain]
       if not record then return reject(callback,"certificate_not_found") end
-      local function save() local ok,problem=saveProfile(profile) safeCallback(callback,ok,problem) end
-      if not record.ariId then fallbackRenewal(record) return save() end
+      if not record.ariId or (record.expiresAt or 0)<=now() then
+         fallbackRenewal(record) return safeCallback(callback,saveProfile(profile))
+      end
       engine:renewalInfo(config.service,{certificate=record.certificate,ariId=record.ariId},function(info,problem)
-         if info and info.suggestedWindow then
+         if info and info.suggestedWindow and info.suggestedWindow["end"]<=record.expiresAt then
             local first,last=info.suggestedWindow.start,info.suggestedWindow["end"]
-            record.renewAt=math.max(now(),math.floor(first+random()*(last-first)))
+            if record.windowStart~=first or record.windowEnd~=last then
+               record.renewAt=math.max(now(),math.floor(first+random()*(last-first)))
+               record.windowStart,record.windowEnd=first,last
+            end
             record.ariCheckAt=now()+math.max(60,math.min(86400,info.retryAfter or 21600))
             record.explanationUrl,record.ariError=info.explanationUrl,nil
          else
             fallbackRenewal(record)
             record.ariCheckAt,record.ariError=now()+21600,problem and problem.code or "ari_unavailable"
          end
-         save()
+         safeCallback(callback,saveProfile(profile))
       end)
    end
 
@@ -266,7 +267,7 @@ function M.createManager(options)
       local previous=activeProfile
       installProfile(profile,function(installed,problem)
          if not installed then return safeCallback(callback,nil,problem) end
-         local ok,saveProblem=writeJson(activePath,{version=2,serviceId=profile.serviceId,
+         local ok,saveProblem=U.writeJson(fileIo,activePath,{version=2,serviceId=profile.serviceId,
             directoryUrl=profile.directoryUrl,updatedAt=now()})
          if not ok then
             return installProfile(previous or {certificates={}},function(restored,restoreProblem)
@@ -298,16 +299,13 @@ function M.createManager(options)
    local function scheduleTimer()
       cancelTimer()
       if not started or not activeProfile then return end
-      local nextTime=retryAt
-      if not nextTime then
+      local nextTime=retryAt or math.huge
+      if not retryAt then
          for _,record in pairs(activeProfile.certificates) do
-            local candidate=record.renewAt
-            if candidate and (not nextTime or candidate < nextTime) then nextTime=candidate end
-            candidate=record.ariCheckAt
-            if candidate and (not nextTime or candidate < nextTime) then nextTime=candidate end
+            nextTime=math.min(nextTime,record.renewAt or math.huge,record.ariCheckAt or math.huge,record.expiresAt or math.huge)
          end
       end
-      if not nextTime then return end
+      if nextTime==math.huge then return end
       timer=timerFactory(function() timer=nil scheduledCheck() return false end)
       -- Long renewal delays need another due-date check before they expire.
       timer:set(math.min(4294967295,math.max(1000,math.floor((nextTime-now())*1000))),true)
@@ -319,7 +317,7 @@ function M.createManager(options)
       retryAt=nil
       local renew,refresh,current,deferred={},{},now(),false
       for domain,record in pairs(activeProfile.certificates) do
-         if record.renewAt and record.renewAt <= current or
+         if (record.expiresAt or 0)<=current or record.renewAt and record.renewAt <= current or
             identifiersKey(record.identifiers)~=identifiersKey(config.identifiers) then renew[#renew+1]=domain
          elseif record.ariCheckAt and record.ariCheckAt <= current then refresh[#refresh+1]=domain end
       end
@@ -341,23 +339,19 @@ function M.createManager(options)
          end)
       end
       local firstProblem
-      local function continueWith(done)
-         return function(_,problem)
-            firstProblem=firstProblem or problem
-            done(true)
-         end
-      end
-      -- A failing domain must not prevent other due certificates from renewing.
-      each(refresh,function(domain,done)
-         refreshRenewal(activeProfile,domain,continueWith(done))
-      end,function()
-         each(renew,function(domain,done)
+      -- Drain due renewals before background checks, even after a domain fails.
+      local function advance(_,problem)
+         firstProblem=firstProblem or problem
+         local domain=table.remove(renew)
+         if domain then
             local record=activeProfile.certificates[domain]
             if not renewAllowed or renewAllowed(domain,record.expiresAt) ~= false then
-               issue(activeProfile,domain,true,continueWith(done))
-            else deferred=true done(true) end
-         end,function() finish(firstProblem) end)
-      end)
+               issue(activeProfile,domain,true,advance)
+            else deferred=true advance() end
+         elseif #refresh>0 then refreshRenewal(activeProfile,table.remove(refresh),advance)
+         else finish(firstProblem) end
+      end
+      advance()
    end
 
    local function prepare(profile,callback)
@@ -447,7 +441,7 @@ function M.createManager(options)
       run(function()
          local ready,problem=ensureDirectories()
          if not ready then return safeCallback(callback,nil,problem) end
-         local active,exists=readJson(activePath)
+         local active,exists=U.readJson(fileIo,activePath)
          if not active then
             if exists then return reject(callback,"invalid_saved_state") end
             loaded=true

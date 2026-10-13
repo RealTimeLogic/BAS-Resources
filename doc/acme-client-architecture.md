@@ -157,9 +157,13 @@ The engine cleans up challenges after validation and on failure/cancellation pat
 
 ## Renewal scheduling
 
-When ARI provides a suggested window, the manager chooses a random renewal time within it. It schedules another ARI check using the server's retry interval, clamped to 60 seconds through one day. Without usable ARI, it calculates renewal from expiry: by default 22 days before expiration with a small random offset. If an ARI request fails, it uses that fallback and schedules another ARI check six hours later. If no certificate expiry can be determined, renewal is due immediately.
+When ARI provides a suggested window ending no later than certificate expiration, the manager chooses a random renewal time within it. The saved selection stays unchanged across checks and restarts until the CA changes the window. A selected time in the past is due immediately. Another ARI check uses the server's retry interval, clamped to 60 seconds through one day.
 
-One timer covers the active profile. It selects the earliest renewal or ARI check unless a retry delay is already pending. Long delays are split by capping the timer duration and checking the due dates again when it fires.
+Without usable ARI, the manager calculates a lifetime-aware fallback with a small random offset, as described below. It saves that fallback once per certificate. An ARI failure selects the earlier of the existing renewal time and the fallback, then schedules another ARI check six hours later. Expired certificates, or certificates whose expiry cannot be determined, are due immediately and are not sent to ARI.
+
+The certificate record retains optional numeric `fallbackAt`, `windowStart` and `windowEnd` fields in Unix seconds. Older records acquire these fields when needed; no state version change is required. Replacement certificates start with new scheduling metadata.
+
+One timer covers the active profile. It selects the earliest renewal, expiration or ARI check unless a retry delay is already pending. Long delays are split by capping the timer duration and checking the due dates again when it fires. Each scheduled pass processes due renewals before background ARI refreshes; a failed domain does not prevent another due domain from proceeding.
 
 ```mermaid
 flowchart TD
@@ -167,9 +171,9 @@ flowchart TD
     C --> B{"Manager busy or inactive?"}
     B -->|Yes| S["scheduleTimer()"]
     B -->|No| D["Collect due renewals and ARI refreshes"]
-    D --> A["each(refresh): refreshRenewal()"]
-    A --> R["each(renew): renewAllowed() then issue()"]
-    R --> F["finish(): installProfile()"]
+    D --> R["Due renewals: renewAllowed() then issue()"]
+    R --> A["Background checks: refreshRenewal()"]
+    A --> F["finish(): installProfile()"]
     F --> E{"Outcome"}
     E -->|Temporary and retryable| X["retryAt: 30s doubling to 300s"]
     E -->|Other reported error| Y["retryAt: 6 hours"]
@@ -224,7 +228,8 @@ Scheduled renewal uses these retry intervals: 30 seconds increasing
 to five minutes for temporary, retryable errors; six hours for other reported
 errors; one hour when renewal policy defers issuance. A failed domain does not
 end the scheduled pass: other due domains are processed before installation
-and rescheduling. ARI failure selects expiry-based renewal.
+and rescheduling. ARI failure uses expiry-based renewal only when it is earlier
+than the already selected time.
 
 ### Lifecycle Boundaries
 
@@ -253,17 +258,16 @@ completes:
 - [Mako startup](../src/mako/.config) and [Xedge lifecycle](../src/xedge/.lua/xedge.lua): runtime construction, startup, and shutdown.
 - [Integration architecture guide](../doc/acme-client-architecture.md): additional packaging and integration context.
 
-## Verification Reference
-
-Deployment records, test coverage, and validation limitations are maintained separately in [ACME retry test results](ACME-retry-test-results.md).
+## Certificate lifetime and account recovery
 
 ### Short-lived certificate renewal
 
 When server renewal information is unavailable, the fallback lead time is the
 smaller of the configured `fallbackRenewBefore` (22 days by default) and one
 third of the certificate validity period. Random variation uses the capped
-lead time. The original certificate validity dates keep this calculation
-stable across checks and restarts. A six-day certificate renews at roughly
+lead time and is selected once. The saved fallback uses the original
+certificate validity dates and stays stable across checks and restarts.
+A six-day certificate renews at roughly
 four days; a 90-day certificate retains the ordinary 22-day lead time.
 
 ### Account recovery after certificate-cache deletion
