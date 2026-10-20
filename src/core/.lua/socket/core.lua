@@ -160,11 +160,19 @@ function ix:gettimeout()
    return self.timeout or G.math.maxinteger
 end
 
-function ix:receive(pattern, prefix)
+function ix:receive(pattern, prefix, maxsize)
    if not self.s then return nil,"closed",prefix or "" end
    local d,e,t
    local recData=self.recData
    pattern = pattern or "l"
+   if maxsize ~= nil then
+      G.assert((pattern == "l" or pattern == "*l") and
+               type(maxsize) == "number" and maxsize >= 1 and
+               maxsize % 1 == 0, "Invalid line receive maxsize")
+      local n = prefix and #prefix or 0
+      G.assert(n < maxsize, "prefix length >= maxsize")
+      maxsize = maxsize - n
+   end
    if pattern == "a" or pattern == "*a" then
       t={}
       if prefix then tinsert(t,prefix) end
@@ -182,6 +190,17 @@ function ix:receive(pattern, prefix)
       while true do
 	 if recData then
 	    local x,y = recData:find("\r?\n",self.recDataIx)
+	    if maxsize then
+	       local n = (x or (#recData + 1)) - self.recDataIx
+	       -- A trailing CR may be the first half of a split CRLF.
+	       if not x and recData:sub(-1) == "\r" then n = n - 1 end
+	       if n > maxsize then
+		  local last = self.recDataIx + maxsize
+		  local partial = recData:sub(self.recDataIx, last - 1)
+		  self.recDataIx = last
+		  return nil,"oversized",(prefix or "")..partial
+	       end
+	    end
 	    if x then
 	       recData=recData:sub(self.recDataIx, x-1)
 	       if self.recDataIx >= #self.recData then

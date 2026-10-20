@@ -16,6 +16,8 @@ local _ENV={}
 -- Program constants
 -----------------------------------------------------------------------------
 TIMEOUT = 60
+MAXLINE = 8192
+MAXREPLY = 65536
 
 -----------------------------------------------------------------------------
 -- Implementation
@@ -23,14 +25,21 @@ TIMEOUT = 60
 -- gets server reply (works for SMTP and FTP)
 local function get_reply(c)
     local code, current, sep
-    local line, err = c:receive()
+    local budget = MAXREPLY
+    local function recvline()
+        if budget <= 0 then return nil, "oversized" end
+        local line, err = c:receive("*l", nil, base.math.min(budget, MAXLINE))
+        if line then budget = budget - #line end
+        return line, err
+    end
+    local line, err = recvline()
     local reply = line
     if err then return nil, err end
     code, sep = socket.skip(2, string.find(line, "^(%d%d%d)(.?)"))
     if not code then return nil, "invalid server reply" end
     if sep == "-" then -- reply is multiline
 	repeat
-	    line, err = c:receive()
+	    line, err = recvline()
 	    if err then return nil, err end
 	    current, sep = socket.skip(2, string.find(line, "^(%d%d%d)(.?)"))
 	    reply = reply .. "\n" .. line
