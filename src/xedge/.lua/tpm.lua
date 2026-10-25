@@ -17,7 +17,7 @@ local function setuser(ju,db,name,pwd)
 end
 
 
-return function(gpkey,upkey)
+local function initializeTPM(gpkey,upkey)
    assert(nil==ba.tpm)
    local keys={}
    local function makeKey(kname,op)
@@ -94,9 +94,26 @@ return function(gpkey,upkey)
       }
    end
    ba.tpm=t
-   return function(op,certdata)
-      local n=op.keyname
-      if not tpmHaskey(n) then tpmCreatekey(n,op) end
-      return tpmSharkcert(n,certdata)
+end
+
+-- Collect C-supplied secrets; true ends the feed, nil retains the legacy fallback.
+local gklist,uklist,tins={},{},table.insert
+return function(x,u)
+   if type(x)=="string" then
+      tins(uklist,x)
+      if not u then tins(gklist,x) end
+      return
    end
+   if not x then
+      tins(gklist,"X")
+      uklist=gklist
+   end
+   local ghf,uhf=ba.crypto.hash(maxHash),ba.crypto.hash(maxHash)
+   assert(#gklist > 0 and #uklist > 0)
+   for _,k in ipairs(gklist) do ghf(k) end
+   for _,k in ipairs(uklist) do uhf(k) end
+   local gpkey=ghf(true)
+   initializeTPM(gpkey,uhf(true))
+   gklist,uklist=nil,nil
+   return gpkey -- Preserve the existing configuration encryption key.
 end

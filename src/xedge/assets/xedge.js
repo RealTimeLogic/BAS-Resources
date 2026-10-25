@@ -1164,7 +1164,11 @@ const authenticationFormObj = [
 const certificateFormObj = [
     {
 	el:"h2",
-	html:"Auto Certificate Management <a href='https://youtu.be/COOSMDw07bo' target='_blank'><div class='tooltip'>?<span>Video Tutorial: Automatically Manage Trusted Certificates using BAS and SharktrustX</span></div></a>"
+	html:"Automatic TLS Certificates <a href='https://youtu.be/COOSMDw07bo' target='_blank'><div class='tooltip'>?<span>Video Tutorial: Automatically Manage Trusted Certificates using BAS and SharkTrustX</span></div></a>"
+    },
+    {
+	el:"p",
+	html:"Automatically obtain and renew certificates using ACME. Use SharkTrustX with a compatible ACME certificate authority (Let's Encrypt by default), or SharkCA for private certificates. For other ACME servers, see the <a href='https://realtimelogic.com/ba/doc/en/lua/acme.html#runtime_config' target='_blank'>ACME configuration guide</a>."
     },
     {
 	el:"div",
@@ -1182,12 +1186,26 @@ const certificateFormObj = [
 	html:""
     },
     {
+	el:"div",id:"SetCertNetwork",class:"certificate-network",html:"",
+	children:[
+	    {el:"p",html:"<b>Network information</b> <small>Detected automatically</small>"},
+	    {el:"p",id:"SetCertIpRow",class:"certificate-network-row",html:"",children:[
+		{el:"span",html:'Local IP address <span class="tooltip" tabindex="0" aria-label="Local IP address help">?<span>Automatically detected from the device\'s connection to the portal. This address cannot be changed here.</span></span>'},
+		{el:"span",html:"",children:[{el:"span",id:"SetCertIp",html:""},{el:"small",id:"SetCertIpStale",html:"Last known"}]}
+	    ]},
+	    {el:"p",id:"SetCertWanRow",class:"certificate-network-row",html:"",children:[
+		{el:"span",html:'IP address seen by portal <span class="tooltip" tabindex="0" aria-label="Portal IP address help">?<span>Automatically reported by the portal. With an Internet-hosted portal, this is usually your router\'s or VPN\'s public IP address. This address cannot be changed here.</span></span>'},
+		{el:"span",html:"",children:[{el:"span",id:"SetCertWan",html:""},{el:"small",id:"SetCertWanStale",html:"Last known"}]}
+	    ]}
+	]
+    },
+    {
 	el:"input",
 	type: "checkbox",
 	class: "switch",
 	label: "SetCertSharkCA",
 	name: "Use SharkCA",
-	description: "Use a private zone CA for a local device name or IP address. Select the mode matching your embedded or custom portal credentials."
+	description: "Issue private certificates for a local device name or IP address. Connecting computers must trust the zone's CA. Use credentials from your SharkCA portal."
     },
     {
 	el:"input",
@@ -1196,22 +1214,6 @@ const certificateFormObj = [
 	label: "SetCertManualIdentity",
 	name: "Custom Portal Credentials",
 	description: "Advanced: override the compiled tokengen identity. The portal URL, zone key, and secret are saved in Xedge's encrypted configuration."
-    },
-    {
-	el: "input",
-	type: "text",
-	readonly: "true",
-	label: "SetCertIp",
-	name: "Local IP Address",
-	description: "The local IP address identifies your device on your local network"
-    },
-    {
-	el: "input",
-	type: "text",
-	readonly: "true",
-	label: "SetCertWan",
-	name: "Public IP Address",
-	description: "The public (WAN) IP address identifies your network on the public Internet"
     },
     {
 	el: "input",
@@ -1249,7 +1251,7 @@ const certificateFormObj = [
 	type: "email",
 	label: "SetCertEmail",
 	name: "Email",
-	description: "The Let's Encrypt CA service requires a valid email address",
+	description: "Contact email for the selected ACME service. Not used by SharkCA.",
 	placeholder: "Enter your email address",
     },
     {
@@ -1257,8 +1259,8 @@ const certificateFormObj = [
 	type: "checkbox",
 	class: "switch",
 	label: "SetCertStaging",
-	name: "Let's Encrypt Staging",
-	description: "Use the staging ACME service for development and testing. Staging certificates are not publicly trusted."
+	name: "ACME Staging",
+	description: "Use the configured ACME staging service for testing (Let's Encrypt by default). Staging certificates are not publicly trusted. Not used by SharkCA."
     },
     {
 	el: "input",
@@ -1505,7 +1507,7 @@ function ideCfg(e) {
 		});
 	    });
 	});
-	add("TLS Certificate",()=>{
+	add("Automatic TLS Certificates",()=>{
 	    diaShow(e).replaceChildren(el('p',{text:"Waiting for online server..."}));
 	    sendAcmeCmd("isreg",(rsp)=>{
 		diaHide();
@@ -1515,7 +1517,7 @@ function ideCfg(e) {
 		    return;
 		}
 	let elems={},statusTimer,autoPending=false,autoRequest=false,formBusy=false;
-	let editorId=createEditor(" Certificate",null,null,mkForm(certificateFormObj,elems),
+	let editorId=createEditor(" TLS Certificates",null,null,mkForm(certificateFormObj,elems),
 	    ()=>clearInterval(statusTimer));
 	elems.SetCertStatus.setAttribute("role","status");
 	elems.SetCertStatus.setAttribute("aria-live","polite");
@@ -1534,8 +1536,16 @@ function ideCfg(e) {
 	}
 	function connectionStatus(value) {
 	    let reverse=value.reverseStatus || {},state,text;
-	    if(value.sockname !== undefined) elems.SetCertIp.value=value.sockname || "";
-	    if(value.wan !== undefined) elems.SetCertWan.value=value.wan || "";
+	    // Retain reported addresses when a later check cannot confirm them.
+	    for(let [id,key] of [["SetCertIp","sockname"],["SetCertWan","wan"]]) {
+		let e=elems[id],current=value[key];
+		if(current !== undefined && current !== null) e.dataset.address=current;
+		let address=e.dataset.address || "";
+		elems[id+"Row"].hidden=!address;
+		e.textContent=address;
+		elems[id+"Stale"].hidden=!(address && (!current || value.connectionError || !value.isreg));
+	    }
+	    elems.SetCertNetwork.hidden=elems.SetCertIpRow.hidden && elems.SetCertWanRow.hidden;
 	    if(value.connectionError || undefined == value.isreg)
 		state="red",text="Disconnected";
 	    else if(value.sharkca)
@@ -1549,8 +1559,9 @@ function ideCfg(e) {
 	}
 	connectionStatus(rsp);
 	statusTimer=setInterval(()=>sendAcmeCmd("isreg",value=>{
-	    if(!value || !elems.SetCertConnection.isConnected) return;
-	    connectionStatus(value);
+	    if(!elems.SetCertConnection.isConnected) return;
+	    connectionStatus(value || {});
+	    if(!value) return;
 	    connectionError=connectionProblem(value);
 	    if(autoPending) {
 		if(!autoRequest && value.nameUnavailable) autoPending=false,working(false);
@@ -1575,8 +1586,6 @@ function ideCfg(e) {
 			}
 		    });
 		}
-		elems.SetCertIp.value=rsp.sockname || "";
-		elems.SetCertWan.value=rsp.wan || "";
 		let compiled=!!rsp.compiledIdentity;
 		function showField(e,visible) {
 		    let display=visible ? "" : "none";

@@ -1,0 +1,2 @@
+set SHARKSSL_PSA_CONSUMER=1
+Xedge.cmd

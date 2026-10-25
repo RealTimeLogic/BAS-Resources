@@ -54,6 +54,37 @@ For unattended Windows builds, set `MinifyMakoZip=yes|no` for `mako.cmd` or
 value skips C-array generation). These are Windows batch options; consult the
 shell scripts for their supported environment variables.
 
+### PSA resources
+
+The default is softTPM. For standalone PSA Xedge, set environment variable
+`SHARKSSL_PSA_CONSUMER=1` before running `Xedge.cmd` or `Xedge.sh`. The builder
+replaces staged `.lua/tpm.lua` with Mako's `psatpm.lua`; unset or `0` keeps
+the softTPM. `.config` loads the same path in both builds without runtime
+backend selection.
+
+Match the package to a native build compiled with `SHARKSSL_PSA_CONSUMER=1`
+and linked to the target's PSA provider. The environment option above only
+selects resources; it does not configure the C compiler, include paths,
+provider libraries, or persistent storage. Follow the generic
+[PSA integration guide](https://realtimelogic.com/ba/doc/en/C/reference/html/PSAIntegration.html) for those requirements and OEM root
+provisioning. The provider must support standard SP 800-108 counter HMAC-SHA-256
+and direct AES-256-GCM key output from the two persistent roots. Choose a shared
+family global root for transferable data, or two independent device-specific
+roots. Existing PBKDF2-root stores require data recovery or a deliberate reset
+before switching. The standard native makefiles do not provide a universal
+provider-selection command.
+
+The Mako builders always package `.lua/psatpm.lua`. PSA Mako loads it from
+`.openports`; non-PSA Mako retains its existing softTPM startup. PSA Mako and
+standalone Xedge exclude embedded softTPM secrets and stop if PSA roots cannot
+be initialized. Do not pair PSA resources with a non-PSA executable, or the
+softTPM standalone package with a PSA executable.
+
+`XedgeMako.cmd` and `XedgeMako.sh` build an application that inherits Mako's
+initialized TPM and listeners. It must not initialize the PSA dispatcher a
+second time. Neither package embeds production root values; provisioning and
+key-store retention are platform responsibilities.
+
 ---
 
 ### 1. **Include OPC-UA Support?**

@@ -403,6 +403,7 @@ local function connect2url(_,opt,callback)
       if ok then
 	 callback(ba.socket.http2sock(http))
       else
+	 http:close() -- Release the failed connection before scheduling a retry.
 	 callback(nil,err,msg)
       end
    end)

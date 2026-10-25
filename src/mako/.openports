@@ -1,5 +1,11 @@
+local iovm=ba.openio"vm"
+if type(ba.psa)=="function" then
+   local initialize,err=iovm:dofile".lua/psatpm.lua"
+   if not initialize then error("PSA TPM: "..err) end
+   initialize()
+end
 if 1==#mako.argv and "-"~=mako.argv[1]:sub(1,1) then return end
-local iovm,fmt,rw=ba.openio("vm"),string.format,require"rwfile"
+local fmt,rw=string.format,require"rwfile"
 
 local function print(msg) tracep(false,5,msg) end
 
@@ -111,12 +117,44 @@ local function findAndLoadCert(loadCert,certf,keyf)
       end
    end
    if not cert then
-      print(fmt("Error: %s not found",certf))
+      local msg=fmt("Error: %s not found",certf)
+      err=err or msg
+      print(msg)
    end
+end
+
+-- Default TPM identity: reuse the named key and renew its public certificate
+-- at startup. Configured identities bypass this default.
+local function selfsigned(shark)
+   local t,name=ba.tpm,"mako-default"
+   if not t then return nil,"TPM unavailable; TLS is not enabled" end
+   local ok,err
+   if not t.haskey(name) then
+      ok,err=t.createkey(name,{curve="SECP256R1"})
+      if not ok then return nil,err end
+   end
+   local csr
+   csr,err=t.createcsr(name,{commonname="localhost"},"localhost;IP:127.0.0.1",{},{})
+   if not csr then return nil,err end
+   -- The CSR and its names were generated locally above.
+   local function approve() return true end
+   local now=os.time()
+   local serial=string.unpack(">I8",ba.rndbs(8))&0x7fffffffffffffff
+   if serial==0 then serial=1 end
+   local cert
+   cert,err=t.createcertificate(name,csr,os.date("!*t",now-60),
+      os.date("!*t",now+365*86400),serial,{profile="tlsServerSelfSigned",approveSANs=approve})
+   if not cert then return nil,err end
+   cert,err=t.sharkcert(name,cert)
+   if not cert then return nil,err end
+   ok,err=shark:addcert(cert)
+   if not ok then return nil,err end
+   return shark
 end
 
 -- Make shark object and set certificates as per config 'conf' (cf) file
 local function mkshark(cf, usebuiltin, keys, certs)
+   err=nil
    local store
    if cf.certstore then
       store = ba.create.certstore()
@@ -141,7 +179,9 @@ local function mkshark(cf, usebuiltin, keys, certs)
       local function loadCert(xio,certf,keyf)
 	 local cert,op
 	 if not xio:stat(keyf) then return end
-	 cert,err=ba.create.sharkcert(xio,certf,keyf,"sharkssl")
+	 if ba.create.sharkcert then
+	    cert,err=ba.create.sharkcert(xio,certf,keyf,"sharkssl")
+	 end
 	 if not cert then
 	    local certd=rw.file(xio,certf)
 	    op,err=rw.json(xio,keyf)
@@ -180,19 +220,9 @@ local function mkshark(cf, usebuiltin, keys, certs)
 	 end
       end
    elseif usebuiltin then
-      err="No certs found"
-      local certfmt=".certificate/%s.%s"
-      for fn in iovm:files".certificate" do
-	 local name,ext = fn:match"([^%.]+)%.(.+)"
-	 if ext == "key" then
-	    local cert
-	    cert,err=ba.create.sharkcert(
-	       iovm, fmt(certfmt,name,"pem"), fmt(certfmt,name,"key", "sharkssl"))
-	    if not cert then break end
-	    print(fmt("Loading certificate %s",name))
-	    shrk:addcert(cert)
-	 end
-      end
+      if err then return nil,err end
+      if cf.keyfile or cf.certfile then return nil,"Both keyfile and certfile are required" end
+      return selfsigned(shrk)
    else
       err="No Cert"
    end
@@ -225,7 +255,7 @@ if sport ~= 0 then
       printListenPort(ba.slcon6 or ba.slcon, sport)
       mako.sslport=sport
    else
-      print(fmt("Cannot open certificate or private key: %s.", err))
+      print(fmt("Warning: cannot open certificate or private key: %s.", err))
       print"SSL not enabled."
    end
 end

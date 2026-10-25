@@ -1,42 +1,54 @@
 ## Securing Xedge: Standalone and Mako Server Versions
 
-The [Xedge development environment](https://realtimelogic.com/ba/doc/en/Xedge.html) can be built either as a **standalone version** or as a **Mako Server application**. Each version requires specific configurations to ensure optimal security. This guide outlines the steps needed to safeguard both versions effectively.
+[Xedge](https://realtimelogic.com/ba/doc/en/Xedge.html) can run as standalone
+firmware or as a Mako Server application. Both use the host's named-key TPM
+API: softTPM by default, or a compatible PSA Crypto provider in custom builds.
+Key protection depends on correct platform setup, root custody, and application
+access control. Start with the
+[native security settings](https://realtimelogic.com/ba/examples/xedge/readme.html#security)
+and [PSA integration guide](https://realtimelogic.com/ba/doc/en/C/reference/html/PSAIntegration.html).
 
-### Standalone Version Security
+### Standalone configuration
 
-The standalone version of Xedge is secure as long as the [C code is properly configured](https://realtimelogic.com/ba/examples/xedge/readme.html#security).
+The build selects `.lua/tpm.lua`; PSA packages replace it with Mako's
+`psatpm.lua`. `.config` does not select a backend at runtime.
 
-### Mako Server Version Security
+PSA firmware must supply `int xedgeInitPsa(void)`. Xedge calls this platform
+hook before resource verification and Lua creation; return `0` on success or
+a nonzero error to stop startup. See the
+[hook contract](https://realtimelogic.com/ba/doc/en/C/reference/html/PSAHowItWorks.html#psa-xedge-init).
+Rebuild the host and resources together. During debugger restarts, `.config`
+closes Xedge's listeners before Lua teardown; the provider and key store stay open.
 
-The Mako Server version uses a public secret, which you may consider encrypting to enhance security. To safeguard Xedge when using the Mako Server version, perform the following steps:
+Standalone Xedge deliberately uses a global key for AES-GCM encryption of
+`xcfg.bin`, allowing configuration transfer within an OEM product trust domain.
+softTPM retains `SHA256(gpkey)`. PSA uses
+`SHA256(ba.tpm.globalkey("xedge.config",64))`. The OEM must securely provision
+the same global root value and matching derivation settings on participating
+devices. A common numeric root ID alone does not produce a common key.
 
-1. Start by reading [Signed and Encrypted ZIP files](https://realtimelogic.com/ba/doc/en/C/reference/html/SignEncZip.html) to understand the process.
-2. **Modify the Secret**
-  - Open BAS-Resources/src/xedge/.preload in a text editor.
-  - Change the secret to a new, unique value to enhance security.
-3. **Build xedge.zip**
-  - Use the standard build script: BAS-Resources/build/XedgeMako.[cmd | sh].
-  - This script creates `Xedge.zip`. Deploy it with the matching `mako.zip`; the application uses the host's shared ACME modules.
-4. **Generate a Password**
-  - Run the binpwd2str command-line tool to create a password.
-  - This password will be used to encrypt the secret file.
-5. **Encrypt the Secret File in xedge.zip**
-  - Replace the .preload file in xedge.zip with an AES-encrypted version using the generated cleartext password.
-  - Ensure that no other files in the ZIP archive are encrypted.
-6. **Embed the Password into Mako Server**
-  - Embed the binary version of the password into the Mako Server as explained on the [Mako Server page](https://realtimelogic.com/ba/examples/MakoServer/readme.html#security).
-  - This allows the server to decrypt and access the encrypted secret file at runtime.
-7. **Create an ECC Key Pair**
-  - Generate an ECC public/private key pair following the [Signed and Encrypted ZIP files](https://realtimelogic.com/ba/doc/en/C/reference/html/SignEncZip.html) page instructions.
-  - This key pair will be used to sign the ZIP files and verify their integrity.
-8. **Sign the ZIP Files**
-  - Use the private key to sign both xedge.zip and mako.zip.
-  - Signing ensures that the files have not been tampered with.
-9. **Embed the Public Key into Mako Server C Code**
-  - Embed the public key into the Mako Server's C code as instructed on the [Mako Server page](https://realtimelogic.com/ba/examples/MakoServer/readme.html#security). This allows the server to verify the signatures of the ZIP files at runtime.
-  - Compile the Mako Server C code
+With two independently generated device-specific PSA roots, the same Lua code
+makes configuration device-specific. An OEM may also customize the call to
+`uniquekey`. Changing roots, moving from the older PSA PBKDF2 derivation, or
+switching softTPM/PSA requires a controlled migration or
+configuration reset; no automatic software-decryption fallback is supplied.
+Retain PSA signing keys separately: copying `xcfg.bin` does not transfer them.
 
+### Xedge hosted in Mako
 
+Build with `BAS-Resources/build/XedgeMako.cmd` or `XedgeMako.sh`, and use the
+matching `mako.zip`. Xedge inherits Mako's TPM, listeners, and shared modules.
+Its configuration key is derived with `ba.tpm.uniquekey(secret,64)` and SHA-256.
+The `.preload` value named `secret` is a derivation label; it does not replace
+the protected device root. Configuration remains device-bound with either
+backend, assuming distinct device roots.
+
+Protect code integrity with
+[signed packages](https://realtimelogic.com/ba/doc/en/C/reference/html/SignEncZip.html)
+and the native verification settings. Encrypting a derivation label is not a
+substitute for protecting the root or controlling which Lua code may request
+derivations. Keep the original device identity and derivation label through
+updates when retaining encrypted configuration.
 
 ## Xedge internal data structure:
 ```

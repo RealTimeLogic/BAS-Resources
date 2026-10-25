@@ -40,15 +40,13 @@ The Barracuda App Server's resource files. See the [build directory](build/READM
     - .config - the Mako Server's core logic
     - .openports - Logic for opening the server's listening ports
     - noapp.shtml - sent to browser when no apps are loaded
-    - .certificate - Default certificate used by Mako Server
-        - MakoServer.key
-        - MakoServer.pem
     - .lua
         - asyncresp.lua
         - loadconf.lua
         - log.lua
         - noapp.lua
         - rwfile.lua
+        - psatpm.lua - Shared PSA TPM implementation; selected at build time for standalone Xedge
         - seed.lua
         - sqlutil.lua
 
@@ -57,14 +55,12 @@ The Barracuda App Server's resource files. See the [build directory](build/READM
     - .preload -- Xedge for Mako Server
     - index.html
     - README.md
-    - .certificate
-        - device_RSA_2048.key
-        - device_RSA_2048.pem
     - .lua
         - 404.html
         - intro.html
         - ms-sso.lua
         - rwfile.lua
+        - tpm.lua - Default softTPM startup and named-key API; replaced in PSA packages
         - xedge.lua
     - assets
         - tree.css
@@ -80,6 +76,33 @@ The Barracuda App Server's resource files. See the [build directory](build/READM
 
 
 ## Documents
+
+### TPM and default TLS identity
+
+Mako and standalone Xedge use [softTPM](https://realtimelogic.com/ba/doc/en/SoftTPM.html)
+by default. Custom builds can use protected persistent keys through
+[PSA Crypto](https://realtimelogic.com/ba/doc/en/C/reference/html/PSAIntegration.html) while retaining the
+[Lua TPM API](https://realtimelogic.com/ba/doc/en/lua/auxlua.html#TPM).
+See [build-time resource selection](build/README.md#psa-resources).
+Trusted PSA initialization sets `ba.psa=true` before validating the roots;
+missing or incompatible roots are fatal, without a softTPM fallback.
+
+Both hosts generate their default self-signed certificate using a named TPM
+key. There are no bundled Mako/Xedge default private keys or leaf certificates.
+Configured certificates and ACME remain supported; clients must explicitly
+trust a self-signed identity. Keep the shared core `.certificate/cacert.shark`:
+it is a CA trust store for outbound TLS, not a default server identity.
+
+Standalone Xedge deliberately encrypts `xcfg.bin` with a global configuration
+key so devices in the same OEM trust domain can share configuration. PSA uses
+`SHA256(ba.tpm.globalkey("xedge.config",64))`; the OEM must provision the same
+global root value and match derivation settings on those devices. Choosing two
+independent device-specific roots keeps the same Lua code but makes the file
+device-specific. The softTPM
+formula remains unchanged. Xedge hosted in Mako keeps its device-bound
+`uniquekey` policy. See [provisioning and migration](https://realtimelogic.com/ba/doc/en/C/reference/html/PSAIntegration.html#psa-xedge-config).
+Copying configuration never substitutes for retaining the PSA signing keys.
+
 
 [doc](doc/)
 

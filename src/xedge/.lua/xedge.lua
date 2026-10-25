@@ -397,7 +397,7 @@ end
 
 
 local function manageXLuaFile(pn,app) -- start/restart an xx.xlua file
-   if pn:find(".DAV/", 1, true) then return end -- skip
+   if pn:find(".DAV/", 1, true) then return true end -- Skipping metadata is not a load failure.
    local env=app.envs[pn]
    if env then runOnUnload(pn,env,app.env) end
    env=setmetatable({},{__index=app.env})

@@ -15,7 +15,7 @@ See also [ACME Token Generator Design](acme-tokengen.md)
 | [engine.lua](../src/core/.lua/acme/engine.lua) | Executes ACME transactions: directory discovery, account registration, signed requests, orders, challenge validation, certificate requests/downloads, revocation, and ACME Renewal Information (ARI). Serializes certificate jobs and manages software or Trusted Platform Module (TPM) keys. Contains the HTTP-01 challenge adapter. |
 | [dns.lua](../src/core/.lua/acme/dns.lua) | Contains three related components. `createClient()` implements authenticated SharkTrust portal operations and optional reverse connections. `createSharkTrust()` adds persisted registration and automatic DNS-01 challenge handling. `createManual()` waits for an operator to publish a DNS record. `identity()` obtains the portal identity/proof configuration. |
 | [_util.lua](../src/core/.lua/acme/_util.lua) | Private shared functions for trusted HTTP requests, error classification, protected callback invocation, service identity, table copying, and JSON file replacement/recovery. It reports transport errors; it does not schedule retries itself. |
-| [_server.lua](../src/core/.lua/acme/_server.lua) | Private default certificate installer. Converts certificate/key records into SharkSSL certificates, builds a server TLS context, and updates existing IPv4/IPv6 HTTPS listeners. Restores TPM keys when needed. Custom hosts can supply their own installer. |
+| [_server.lua](../src/core/.lua/acme/_server.lua) | Private default certificate installer. Converts certificate/key records into SharkSSL certificates, builds a server TLS context, and updates existing IPv4/IPv6 HTTPS listeners. Resolves named TPM keys before installation. Custom hosts can supply their own installer. |
 
 ## Module Interactions
 
@@ -99,7 +99,32 @@ Default state is stored beneath the selected writable I/O root:
 
 `_util.writeJson()` writes a temporary file and replaces the main file using a backup. `_util.readJson()` can recover from that backup. This is file replacement/recovery logic, not a database transaction across all state files and listener updates.
 
-Software keys are stored with the profile. TPM keys are represented by descriptors that allow restoration before signing, creating a certificate signing request, or installing a certificate. The account uses an ECC P-256 key; certificate keys support ECC and RSA. Existing certificate keys are reused on renewal.
+Software keys are stored with the profile. TPM descriptors retain a key name
+and creation options, not private-key material. softTPM can recreate its key
+from the original secrets, name, and options. PSA instead locates a randomly
+generated persistent key in the provider; the descriptor cannot recover an
+erased key. The engine currently calls `createkey` when restoring a descriptor
+whose key is absent. With PSA, this can create a different identity, requiring
+explicit recovery or re-enrollment rather than transparent account restoration.
+Retain provider storage together with profiles and registration state.
+
+The account uses ECC P-256. Certificate keys support ECC, or software RSA when
+the native PEM key APIs are enabled. PSA builds must use ECC (P-256 or P-384).
+Existing certificate keys are reused on renewal. See the
+[TPM integration guide](https://realtimelogic.com/ba/doc/en/C/reference/html/PSAIntegration.html#psa-persistence).
+
+Standalone Xedge stores registration and settings in AES-GCM-encrypted
+`xcfg.bin`. Its configuration key remains global by design: softTPM uses
+`SHA256(gpkey)`, while PSA uses
+`SHA256(ba.tpm.globalkey("xedge.config",64))`. Sharing the file between PSA
+devices requires the same OEM-provisioned global root value and matching
+derivation settings. Provisioning two independent device-specific roots keeps
+the same Lua code but makes configuration device-specific. An OEM can also
+choose `uniquekey`; Xedge hosted in Mako already uses that policy. Switching
+backends or moving from the older PSA PBKDF2 profile to SP 800-108 requires
+configuration migration or reset; there is no
+software-decryption fallback. A copied configuration does not transfer PSA
+signing keys.
 
 ## Issuing or renewing a certificate
 

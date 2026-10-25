@@ -23,6 +23,10 @@ shopt -s dotglob
 
 cp -R ../../src/core/* . || exit 1
 cp -R ../../src/xedge/* . || exit 1
+# Select the TPM at build time, matching the native consumer setting.
+if [ "$SHARKSSL_PSA_CONSUMER" = "1" ]; then
+    cp ../../src/mako/.lua/psatpm.lua .lua/tpm.lua || exit 1
+fi
 
 for required in .lua/acme/runtime.lua .lua/acme/dns.lua .lua/acme/http.lua .lua/acme/_server.lua; do
     if [ ! -f "$required" ]; then
