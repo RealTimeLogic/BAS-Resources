@@ -24,8 +24,8 @@ throws, the previous context remains selected.
 Add all root certificates before passing the store. Assembly makes the store
 immutable. To change the roots, construct a new store and call the setter again.
 The supplied roots **replace** the default set; they are not merged with
-`cacert.shark`. Supply all required private/public roots when several services
-share this configuration. Importing a root on the PC does not configure an
+the host's default CA store. Supply all required private/public roots when
+several services share this configuration. Importing a root on the PC does not configure an
 embedded device's HTTP client.
 
 Existing HTTP clients and established reverse connections keep their existing

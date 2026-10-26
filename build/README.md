@@ -26,8 +26,6 @@ The following is a list of required and optional tools the build
 scripts use. Make sure the following tools are available in your
 system's PATH.
 
-- **curl and SharkSSLParseCAList:** Required by the standalone Xedge builder
-  for certificate-store generation. The Windows script checks both at startup.
 - **zip:** Required for the build scripts to package resources into a
   zip file.
 - **bin2c:** The
@@ -43,14 +41,14 @@ system's PATH.
 
 ## Build Script Options
 
-The standalone Xedge builder prompts for OPC UA, the certificate store, and
-minification. The Mako and Xedge-on-Mako builders prompt for minification; they
+The standalone Xedge builder prompts for OPC UA and minification.
+The Mako and Xedge-on-Mako builders prompt for minification; they
 do not offer all standalone options. The Mako package includes the OPC UA Lua
 resources. Native support still depends on the executable.
 
 For unattended Windows builds, set `MinifyMakoZip=yes|no` for `mako.cmd` or
 `MinifyXedgeZip=yes|no` for either Xedge builder. `Xedge.cmd` also accepts
-`IncludeOpcUa=yes|no`, `XedgeCaStore=large|small`, and `NO_BIN2C` (any nonempty
+`IncludeOpcUa=yes|no` and `NO_BIN2C` (any nonempty
 value skips C-array generation). These are Windows batch options; consult the
 shell scripts for their supported environment variables.
 
@@ -97,19 +95,28 @@ key-store retention are platform responsibilities.
 
 ---
 
-### 2. **Use Large 'cacert.shark' or Create a Minimal Certificate Store?**
+### Standalone Xedge CA certificates
 
-- **What It Does**: Determines the certificate store used for validating TLS server certificates.
-- **Options**:
-  - **Large 'cacert.shark'**: Includes the [Curl CA bundle](https://curl.se/docs/sslcerts.html) with a comprehensive set of root certificates.
-  - **Minimal Version**: Creates a much smaller certificate store with only the most common root certificates. This option is ideal for embedded systems with limited memory.
- **Details**:
- - For a list of root certificates included in the minimal version, refer to the build script.
- - If you're new to certificate stores, see the [Certificates for Embedded Systems](https://realtimelogic.com/articles/Certificate-Management-for-Embedded-Systems) tutorial for a quick overview.
+Compile both BAS and the standalone Xedge host with `USE_EMBEDDED_CACERT`.
+This requirement applies to softTPM and PSA builds. The builders omit
+`.certificate/cacert.shark` from `Xedge.zip` and `XedgeZip.c`; they do not
+download or generate a CA bundle. `XedgeCaStore` is no longer a build option.
+
+The default TLS client uses the constant array in BAS `inc/cacert.h`. To update
+it, use the full SDK's `mkEmbeddedCaCert.cmd` or `mkEmbeddedCaCert.sh` and rebuild
+the firmware. For a smaller or private set of roots, generate a header with
+`SharkSSLParseCAList your-roots.pem > cacert.h` and place it on the BAS include
+path. These tools are needed only when changing the CA header. Changing the
+root set changes which issuers the default client trusts.
+
+Release the rebuilt native host and its resources together. Older hosts built
+without embedded CA support require the CA file and cannot use the new standalone
+package. Mako retains its own trust configuration and shared core CA file;
+Xedge-on-Mako uses the Mako host's resources.
 
 ---
 
-### 3. **Minify JavaScript and CSS Files?**
+### 2. **Minify JavaScript and CSS Files?**
 
 - **What It Does**: Removes whitespace and compresses JavaScript (JS) and Cascading Style Sheets (CSS) files, reducing their size for optimized performance.
 - **Requirement**: This option requires **Node.js** and **npm** to be installed on your system.

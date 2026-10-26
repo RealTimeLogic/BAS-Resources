@@ -4,7 +4,7 @@ script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd) || exit 1
 cd "$script_dir" || exit 1
 export PATH="$script_dir/../tools/linux:$PATH"
 chmod +x ../tools/linux/*
-executables="zip curl SharkSSLParseCAList bin2c"
+executables="zip bin2c"
 for i in $executables; do
     if ! command -v $i &> /dev/null; then
         echo "$i not found in the path."
@@ -51,26 +51,8 @@ else
     echo "Excluding OPCUA"
 fi
 
-if [ -n "$XedgeCaStore" ]; then
-    userResponse=${XedgeCaStore:0:1}
-else
-    read -p "Do you want to use the large cacert.shark or do you want to create a new with minimal certs: large/small (l/s)? " userResponse
-fi
-if [ "$userResponse" = "s" ]; then
-    cd .certificate || exit 1
-    rm cacert.shark || exit 1
-    curl https://letsencrypt.org/certs/isrgrootx1.pem > cacert.pem
-    curl https://letsencrypt.org/certs/isrg-root-x2.pem >> cacert.pem
-    curl https://letsencrypt.org/certs/trustid-x3-root.pem.txt >> cacert.pem
-    curl https://cacerts.digicert.com/DigiCertGlobalRootCA.crt.pem >> cacert.pem
-    curl https://cacerts.digicert.com/DigiCertHighAssuranceEVRootCA.crt.pem >> cacert.pem
-    curl https://cacerts.digicert.com/DigiCertTrustedRootG4.crt.pem >> cacert.pem
-    curl https://www.entrust.com/get-support/ssl-certificate-support/root-certificate-downloads/entrust_net_certification_authority_2048.pem >> cacert.pem
-    curl https://secure.globalsign.com/cacert/Root-R1.crt.pem >> cacert.pem
-    SharkSSLParseCAList -b cacert.shark cacert.pem
-    rm cacert.pem
-    cd ..
-fi
+# Standalone Xedge uses the CA array compiled into BAS.
+rm -f .certificate/cacert.shark || exit 1
 
 rm -f README.md .preload .gitignore
 

@@ -90,8 +90,11 @@ missing or incompatible roots are fatal, without a softTPM fallback.
 Both hosts generate their default self-signed certificate using a named TPM
 key. There are no bundled Mako/Xedge default private keys or leaf certificates.
 Configured certificates and ACME remain supported; clients must explicitly
-trust a self-signed identity. Keep the shared core `.certificate/cacert.shark`:
-it is a CA trust store for outbound TLS, not a default server identity.
+trust a self-signed identity. The shared core `.certificate/cacert.shark` remains
+the outbound TLS trust store for file-based hosts such as Mako. Standalone
+Xedge omits this file and requires BAS and Xedge to be compiled with
+`USE_EMBEDDED_CACERT`, using `inc/cacert.h`. Xedge-on-Mako uses Mako's trust
+configuration. These trust roots are separate from the default server identity.
 
 Standalone Xedge deliberately encrypts `xcfg.bin` with a global configuration
 key so devices in the same OEM trust domain can share configuration. PSA uses

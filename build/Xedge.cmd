@@ -2,13 +2,13 @@
 setlocal
 pushd "%~dp0" || exit /b 1
 
-where /q SharkSSLParseCAList.exe
+where /q zip.exe
 if ERRORLEVEL 1 (
    echo Adding ..\tools\windows to path.
    set "PATH=%~dp0..\tools\windows;%PATH%"
 )
 
-for %%i in (zip.exe curl.exe SharkSSLParseCAList.exe bin2c.exe) do (
+for %%i in (zip.exe bin2c.exe) do (
    where /q %%i
    if ERRORLEVEL 1 (
       echo %%i not found in the path.
@@ -54,31 +54,9 @@ goto ContinueAfterOPCUA
 echo OPC-UA inclusion skipped.
 
 :ContinueAfterOPCUA
-if /i "%XedgeCaStore%"=="large" goto LargeCerts
-if /i "%XedgeCaStore%"=="small" goto SmallCerts
-choice /C LS /M "Do you want to use the large cacert.shark or create a new with minimal certs: large/small (l/s)? "
-if errorlevel 2 goto SmallCerts
-
-:LargeCerts
-echo Using large CA certificate list (cacert.shark)
-goto ContinueAfterCerts
-
-:SmallCerts
-cd .certificate || goto BuildFailed
-if exist cacert.shark del /q cacert.shark
-curl.exe -fL https://letsencrypt.org/certs/isrgrootx1.pem > cacert.pem || goto BuildFailed
-curl.exe -fL https://letsencrypt.org/certs/isrg-root-x2.pem >> cacert.pem || goto BuildFailed
-curl.exe -fL https://letsencrypt.org/certs/trustid-x3-root.pem.txt >> cacert.pem || goto BuildFailed
-curl.exe -fL https://cacerts.digicert.com/DigiCertGlobalRootCA.crt.pem >> cacert.pem || goto BuildFailed
-curl.exe -fL https://cacerts.digicert.com/DigiCertHighAssuranceEVRootCA.crt.pem >> cacert.pem || goto BuildFailed
-curl.exe -fL https://cacerts.digicert.com/DigiCertTrustedRootG4.crt.pem >> cacert.pem || goto BuildFailed
-curl.exe -fL https://www.entrust.com/get-support/ssl-certificate-support/root-certificate-downloads/entrust_net_certification_authority_2048.pem >> cacert.pem || goto BuildFailed
-curl.exe -fL https://secure.globalsign.com/cacert/Root-R1.crt.pem >> cacert.pem || goto BuildFailed
-SharkSSLParseCAList.exe -b cacert.shark cacert.pem || goto BuildFailed
-del /q cacert.pem
-cd .. || goto BuildFailed
-
-:ContinueAfterCerts
+rem Standalone Xedge uses the CA array compiled into BAS.
+if exist ".certificate\cacert.shark" del /q ".certificate\cacert.shark"
+if exist ".certificate\cacert.shark" goto BuildFailed
 del /q README.md .preload .gitignore
 
 if exist "..\..\..\lua-protobuf" (
