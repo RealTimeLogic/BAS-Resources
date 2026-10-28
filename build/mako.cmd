@@ -25,8 +25,8 @@ cd MakoBuild || goto BuildFailed
 xcopy ..\..\src\core . /eq || goto BuildFailed
 xcopy ..\..\src\mako . /eq || goto BuildFailed
 
-if defined USE_OPCUA (
-   if "%USE_OPCUA%" == "1" (
+if defined BA_ENABLE_LUA_OPCUA (
+   if "%BA_ENABLE_LUA_OPCUA%" == "1" (
       goto YesOPCUA
    ) else (
       goto NoOPCUA

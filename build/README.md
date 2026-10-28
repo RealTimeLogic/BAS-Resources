@@ -88,7 +88,7 @@ key-store retention are platform responsibilities.
 ### 1. **Include OPC-UA Support?**
 
 - **What It Does**: Includes the OPC-UA protocol stack, implemented in Lua, in the final ZIP file.
-- **Requirement**: The Barracuda App Server C library **must be built with** the option 'USE_OPCUA=1' for OPC-UA functionality to work.
+- **Requirement**: The Barracuda App Server C library **must be built with** the option 'BA_ENABLE_LUA_OPCUA=1' for OPC-UA functionality to work.
 - **How to Select**:
   - Enter **Y** to include OPC-UA support.
   - Enter **N** to exclude it.
@@ -97,7 +97,7 @@ key-store retention are platform responsibilities.
 
 ### Standalone Xedge CA certificates
 
-Compile both BAS and the standalone Xedge host with `USE_EMBEDDED_CACERT`.
+Compile both BAS and the standalone Xedge host with `BA_ENABLE_EMBEDDED_CA`.
 This requirement applies to softTPM and PSA builds. The builders omit
 `.certificate/cacert.shark` from `Xedge.zip` and `XedgeZip.c`; they do not
 download or generate a CA bundle. `XedgeCaStore` is no longer a build option.

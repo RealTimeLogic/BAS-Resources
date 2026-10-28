@@ -20,13 +20,13 @@ shopt -s dotglob
 cp -R ../../src/core/* . || exit 1
 cp -R ../../src/mako/* . || exit 1
 
-# USE_OPCUA=2 - include only C-part
-# USE_OPCUA=1 - include C and LUA parts
+# BA_ENABLE_LUA_OPCUA=2 - include only C-part
+# BA_ENABLE_LUA_OPCUA=1 - include C and LUA parts
 if [ -n "${OPCUA_ROOT}" ]; then
-    USE_OPCUA=2
+    BA_ENABLE_LUA_OPCUA=2
 fi
 
-if [ -z "$USE_OPCUA" ] || [ "$USE_OPCUA" == "1" ]; then
+if [ -z "$BA_ENABLE_LUA_OPCUA" ] || [ "$BA_ENABLE_LUA_OPCUA" == "1" ]; then
     if [ -z "${OPCUA_ROOT}" ] ; then
         OPCUA_SRC_ROOT="../../src"
     else

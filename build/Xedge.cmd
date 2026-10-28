@@ -33,8 +33,8 @@ for %%i in (.lua\acme\runtime.lua .lua\acme\dns.lua .lua\acme\http.lua .lua\acme
    )
 )
 
-if defined USE_OPCUA (
-   if "%USE_OPCUA%" == "1" (
+if defined BA_ENABLE_LUA_OPCUA (
+   if "%BA_ENABLE_LUA_OPCUA%" == "1" (
       goto YesOPCUA
    ) else (
       goto NoOPCUA

@@ -93,7 +93,7 @@ Configured certificates and ACME remain supported; clients must explicitly
 trust a self-signed identity. The shared core `.certificate/cacert.shark` remains
 the outbound TLS trust store for file-based hosts such as Mako. Standalone
 Xedge omits this file and requires BAS and Xedge to be compiled with
-`USE_EMBEDDED_CACERT`, using `inc/cacert.h`. Xedge-on-Mako uses Mako's trust
+`BA_ENABLE_EMBEDDED_CA=1`, using `inc/cacert.h`. Xedge-on-Mako uses Mako's trust
 configuration. These trust roots are separate from the default server identity.
 
 Standalone Xedge deliberately encrypts `xcfg.bin` with a global configuration

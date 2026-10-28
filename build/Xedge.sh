@@ -35,16 +35,16 @@ for required in .lua/acme/runtime.lua .lua/acme/dns.lua .lua/acme/http.lua .lua/
     fi
 done
 
-if [ -z "$USE_OPCUA" ] ; then
+if [ -z "$BA_ENABLE_LUA_OPCUA" ] ; then
     read -p "Do you want to include OPC-UA (y/n)? " userResponse
     if [ "$userResponse" = "y" ] ; then
-        USE_OPCUA=1
+        BA_ENABLE_LUA_OPCUA=1
     else
-        USE_OPCUA=0
+        BA_ENABLE_LUA_OPCUA=0
     fi
 fi
 
-if [ "$USE_OPCUA" != "0" ] ; then
+if [ "$BA_ENABLE_LUA_OPCUA" != "0" ] ; then
     echo "Including OPCUA"
     cp -R ../../src/opcua .lua/ || exit 1
 else
