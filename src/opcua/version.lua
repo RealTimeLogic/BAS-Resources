@@ -4,6 +4,6 @@ return {
   ProductName = "RealTimeLogic OPCUA",
   ApplicationName = "RealTimeLogic OPCUA",
   ManufacturerName = "RealTimeLogic",
-  Version = "0.14.0",
-  BuildNumber = "143"
+  Version = "0.15.1",
+  BuildNumber = "148"
 }

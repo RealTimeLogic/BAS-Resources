@@ -48,6 +48,10 @@ local ua = {
   ServerState = const.ServerState,
   TranportProfileUri = const.TranportProfileUri,
   ServerProfile = const.ServerProfile,
+  TimestampsToReturn = const.TimestampsToReturn,
+  MonitoringMode = const.MonitoringMode,
+  DataChangeTrigger = const.DataChangeTrigger,
+  DeadbandType = const.DeadbandType,
 
   VariableAttributesMask = const.VariableAttributesMask,
   ObjectAttributesMask = const.ObjectAttributesMask,

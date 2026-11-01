@@ -270,6 +270,24 @@ function S:processMessage()
       self:processRequest(msg, Msg.WRITE_RESPONSE,       self.services.write, "Write")
     elseif i == Msg.CREATE_SUBSCRIPTION_REQUEST then
       self:processRequest(msg, Msg.CREATE_SUBSCRIPTION_RESPONSE, self.services.createSubscription, "CreateSubscription")
+    elseif i == Msg.MODIFY_SUBSCRIPTION_REQUEST then
+      self:processRequest(msg, Msg.MODIFY_SUBSCRIPTION_RESPONSE, self.services.modifySubscription, "ModifySubscription")
+    elseif i == Msg.DELETE_SUBSCRIPTIONS_REQUEST then
+      self:processRequest(msg, Msg.DELETE_SUBSCRIPTIONS_RESPONSE, self.services.deleteSubscriptions, "DeleteSubscriptions")
+    elseif i == Msg.SET_PUBLISHING_MODE_REQUEST then
+      self:processRequest(msg, Msg.SET_PUBLISHING_MODE_RESPONSE, self.services.setPublishingMode, "SetPublishingMode")
+    elseif i == Msg.CREATE_MONITORED_ITEMS_REQUEST then
+      self:processRequest(msg, Msg.CREATE_MONITORED_ITEMS_RESPONSE, self.services.createMonitoredItems, "CreateMonitoredItems")
+    elseif i == Msg.MODIFY_MONITORED_ITEMS_REQUEST then
+      self:processRequest(msg, Msg.MODIFY_MONITORED_ITEMS_RESPONSE, self.services.modifyMonitoredItems, "ModifyMonitoredItems")
+    elseif i == Msg.SET_MONITORING_MODE_REQUEST then
+      self:processRequest(msg, Msg.SET_MONITORING_MODE_RESPONSE, self.services.setMonitoringMode, "SetMonitoringMode")
+    elseif i == Msg.DELETE_MONITORED_ITEMS_REQUEST then
+      self:processRequest(msg, Msg.DELETE_MONITORED_ITEMS_RESPONSE, self.services.deleteMonitoredItems, "DeleteMonitoredItems")
+    elseif i == Msg.PUBLISH_REQUEST then
+      self:processPublish(msg)
+    elseif i == Msg.REPUBLISH_REQUEST then
+      self:processRequest(msg, Msg.REPUBLISH_RESPONSE, self.services.republish, "Republish")
     elseif i == Msg.TRANSLATE_BROWSE_PATHS_TO_NODE_IdS_REQUEST then
       self:processRequest(msg, Msg.TRANSLATE_BROWSE_PATHS_TO_NODE_IdS_RESPONSE, self.services.translateBrowsePaths, "TranslateBrowsePathsToNodeIds")
     elseif i == Msg.ADD_NODES_REQUEST then
@@ -286,6 +304,27 @@ function S:processMessage()
   else
     if errOn then traceE(fmt("%s Received message for closed secure channel.", self.logId)) end
     error(BadSecureChannelClosed)
+  end
+end
+
+-- Publish responses are deferred until a notification or keep-alive is ready.
+-- Unlike processRequest, this function passes a response callback to the
+-- service instead of encoding a response as soon as the service returns.
+function S:processPublish(msg)
+  local function respond(result, code)
+    if code then
+      return self:responseServiceFault(msg, code)
+    end
+    local response = self.encoder:createResponse(Msg.PUBLISH_RESPONSE,
+      self:fillResponseParams(msg, Good), result)
+    self.encoder:message(response)
+  end
+  local ok, err = pcall(self.setToken, self, msg.SecureHeader.TokenId)
+  if ok then
+    ok, err = pcall(self.services.publish, self.services, msg.Body, self, respond)
+  end
+  if not ok then
+    self:responseServiceFault(msg, err)
   end
 end
 

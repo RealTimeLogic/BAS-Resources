@@ -174,6 +174,7 @@ function C:createPublisher()
   local publisher = {
     dataSets = {},
     fields = {}, -- all fields
+    hooks = {},
   }
 
   self.publisher = publisher
@@ -228,7 +229,8 @@ function C:createDataset(fields, classId)
     dataSet.indexes[i] = field
 
     if field.nodeId and self.uaServer then
-      self.uaServer:setWriteHook(field.nodeId, writeHook)
+      local id = self.uaServer:addWriteHook(field.nodeId, writeHook)
+      self.publisher.hooks[#self.publisher.hooks + 1] = {nodeId = field.nodeId, id = id}
     end
   end
 
@@ -350,6 +352,12 @@ end
 
 function C:close()
   self:stopPublishing()
+  if self.uaServer and self.publisher then
+    for _, hook in ipairs(self.publisher.hooks) do
+      self.uaServer:removeWriteHook(hook.nodeId, hook.id)
+    end
+    self.publisher.hooks = {}
+  end
   if self.server then
     self.server:close()
     self.server = nil

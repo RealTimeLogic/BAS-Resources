@@ -141,6 +141,14 @@ function S:setWriteHook(nodeId, callback)
   return self.services:setWriteHook(nodeId, callback)
 end
 
+function S:addWriteHook(nodeId, callback)
+  return self.services:addWriteHook(nodeId, callback)
+end
+
+function S:removeWriteHook(nodeId, id)
+  return self.services:removeWriteHook(nodeId, id)
+end
+
 function S:loadModels(modelSources)
   self.model:loadModels(modelSources)
   self.model:commit()

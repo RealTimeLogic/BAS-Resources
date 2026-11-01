@@ -191,6 +191,7 @@ local function coDispatchResp(self, resp, err)
 
   local callback = self.requests[resp.ResponseHeader.RequestHandle]
   if callback then
+    self.requests[resp.ResponseHeader.RequestHandle] = nil
     if resp.ResponseHeader.ServiceResult ~= 0 then
       return callback(nil, resp.ResponseHeader.ServiceResult)
     else
@@ -353,6 +354,7 @@ function C:processOpenSecureChannelResponse(response)
   self.services.enc:setChannelId(response.SecurityToken.ChannelId)
   self.services.enc:setTokenId(response.SecurityToken.TokenId)
 
+  if infOn then traceI(fmt("client | revised channel channel timeout %d ms", response.SecurityToken.RevisedLifetime)) end
   self.channelLifetime = response.SecurityToken.RevisedLifetime
   local timeout = math.ceil(response.SecurityToken.RevisedLifetime * 0.75)
   self.channelRenewAfter = compat.timestamp() + timeout / 1000
@@ -954,6 +956,80 @@ function C:createSubscription(sub, callback)
   request, err = self.services:createRequest(MessageId.CREATE_SUBSCRIPTION_REQUEST, sub)
   if err then return nil, err end
   return self:execRequest(request, callback)
+end
+
+local function subscriptionRequest(self, typeId, params, callback)
+  if not self:connected() then
+    return nil, BadNotConnected
+  end
+  local _, err = self:checkSecureChannel()
+  if err then
+    return nil, err
+  end
+  if typeId == MessageId.CREATE_MONITORED_ITEMS_REQUEST then
+    for _, item in ipairs(params.ItemsToCreate or {}) do
+      local node = item.ItemToMonitor
+      node.IndexRange = node.IndexRange or ""
+      node.DataEncoding = node.DataEncoding or {ns = 0}
+      local p = item.RequestedParameters
+      p.Filter = p.Filter or {TypeId = "i=0"}
+    end
+  elseif typeId == MessageId.MODIFY_MONITORED_ITEMS_REQUEST then
+    for _, item in ipairs(params.ItemsToModify or {}) do
+      local p = item.RequestedParameters
+      p.Filter = p.Filter or {TypeId = "i=0"}
+    end
+  end
+  local request
+  request, err = self.services:createRequest(typeId, params)
+  if err then
+    return nil, err
+  end
+  if params and params.TimeoutHint then
+    request.RequestHeader.TimeoutHint = params.TimeoutHint
+  end
+  return self:execRequest(request, callback)
+end
+
+function C:modifySubscription(params, callback)
+  return subscriptionRequest(self, MessageId.MODIFY_SUBSCRIPTION_REQUEST, params, callback)
+end
+
+function C:deleteSubscriptions(subscriptionIds, callback)
+  if type(subscriptionIds) == "number" then
+    subscriptionIds = {subscriptionIds}
+  end
+
+  local params = {SubscriptionIds = subscriptionIds}
+  return subscriptionRequest(self, MessageId.DELETE_SUBSCRIPTIONS_REQUEST, params, callback)
+end
+
+function C:setPublishingMode(params, callback)
+  return subscriptionRequest(self, MessageId.SET_PUBLISHING_MODE_REQUEST, params, callback)
+end
+
+function C:createMonitoredItems(params, callback)
+  return subscriptionRequest(self, MessageId.CREATE_MONITORED_ITEMS_REQUEST, params, callback)
+end
+
+function C:modifyMonitoredItems(params, callback)
+  return subscriptionRequest(self, MessageId.MODIFY_MONITORED_ITEMS_REQUEST, params, callback)
+end
+
+function C:setMonitoringMode(params, callback)
+  return subscriptionRequest(self, MessageId.SET_MONITORING_MODE_REQUEST, params, callback)
+end
+
+function C:deleteMonitoredItems(params, callback)
+  return subscriptionRequest(self, MessageId.DELETE_MONITORED_ITEMS_REQUEST, params, callback)
+end
+
+function C:publish(params, callback)
+  return subscriptionRequest(self, MessageId.PUBLISH_REQUEST, params, callback)
+end
+
+function C:republish(params, callback)
+  return subscriptionRequest(self, MessageId.REPUBLISH_REQUEST, params, callback)
 end
 
 function C:translateBrowsePaths(browsePaths, callback)

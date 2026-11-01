@@ -33,7 +33,6 @@ local BadNothingToDo = s.BadNothingToDo
 local BadNoMatch = s.BadNoMatch
 local BadParentNodeIdInvalid = s.BadParentNodeIdInvalid
 local BadTypeDefinitionInvalid = s.BadTypeDefinitionInvalid
-local BadServiceUnsupported = s.BadServiceUnsupported
 local BadInternalError = s.BadInternalError
 local BadUserAccessDenied = s.BadUserAccessDenied
 local BadIdentityTokenRejected = s.BadIdentityTokenRejected
@@ -69,6 +68,9 @@ function Svc:closeSecureChannel(_, channel)
   if dbgOn then traceD(fmt("Services:closeSecureChannel(ch:%s)", channel.channelId)) end
 
   local channelId = channel.channelId
+  if self.subscriptions then
+    self.subscriptions:cancelChannel(channel)
+  end
   local session = self.sessions[channelId]
   if session then
     session.channelId = nil
@@ -226,6 +228,9 @@ function Svc:createSession(req, channel)
     nonce = policy:genNonce(32),
     sessionExpirationTime = curTime + sessionTimeoutSecs,
     sessionTimeoutSecs = sessionTimeoutSecs,
+    subscriptions = {},
+    subscriptionCount = 0,
+    publishRequests = {},
   }
 
   local resp = {}
@@ -458,6 +463,9 @@ function Svc:closeSession(req, channel)
   if infOn then traceI("Services:closeSession()") end
 
   local session = self:getSession(req, channel)
+  if req.DeleteSubscriptions ~= false and self.subscriptions then
+    self.subscriptions:deleteSession(session)
+  end
   if session.channelId ~= nil then
     self.sessions[session.channelId] = nil
   end
@@ -658,6 +666,27 @@ function Svc:translateBrowsePaths(req, channel)
   return {Results=results}
 end
 
+function Svc:readValue(r)
+  local node = self.nodeset[r.NodeId]
+  if node == nil then
+    return {StatusCode = BadNodeIdUnknown}
+  end
+  local val
+  if r.AttributeId == AttributeId.Value and
+      node.Attrs.NodeClass == const.NodeClass.Variable and node.Attrs.NodeCallback then
+    val = node.Attrs.NodeCallback(r.NodeId)
+    if not tools.dataValueValid(val) then
+      val = {StatusCode = BadInternalError}
+    end
+  else
+    val = node:getDataValue(r.AttributeId)
+  end
+  if val.StatusCode == nil then
+    val.StatusCode = Good
+  end
+  return val
+end
+
 function Svc:read(req, channel)
   local dbgOn = self.trace.dbgOn
   local infOn = self.trace.infOn
@@ -675,25 +704,14 @@ function Svc:read(req, channel)
 
   local results = {}
   for _, r in ipairs(req.NodesToRead) do
-    local val = {}
+    local val
     local node = self.nodeset[r.NodeId]
     if node == nil then
       if dbgOn then traceD(fmt("Services:Read(%s) | Unknown node id %s", sessionId, r.NodeId)) end
-      val.StatusCode = BadNodeIdUnknown
+      val = {StatusCode = BadNodeIdUnknown}
     else
       if dbgOn then traceD(fmt("Services:Read(%s) | Node id '%s' attribute %d ", sessionId, r.NodeId, r.AttributeId)) end
-      if r.AttributeId == AttributeId.Value and node.Attrs.NodeClass == const.NodeClass.Variable and node.Attrs.NodeCallback then
-        if dbgOn then traceD(fmt("Services:Read(%s) | reading value node '%s' from custom source", sessionId, r.NodeId)) end
-        val = node.Attrs.NodeCallback(r.NodeId)
-        if not tools.dataValueValid(val) then
-          val = { StatusCode = const.StatusCode.BadInternalError }
-        end
-      else
-        val = node:getDataValue(r.AttributeId)
-      end
-      if val.StatusCode == nil then
-        val.StatusCode = s.Good
-      end
+      val = self:readValue(r)
     end
 
     if dbgOn and val.StatusCode ~= Good then
@@ -968,15 +986,54 @@ end
 
 function Svc:createSubscription(req, channel)
   local infOn = self.trace.infOn
-  local errOn = self.trace.errOn
   if infOn then traceI("Services:createSubscription |") end
 
   local session = self:checkSession(req, channel)
-  local sessionId = session.sessionId
+  return self:getSubscriptionManager():createSubscription(session, req)
+end
 
-  if errOn then traceE(fmt("Services:createSubscription(%s) | Subsriptions unsupported", sessionId)) end
+function Svc:getSubscriptionManager()
+  if not self.subscriptions then
+    self.subscriptions = require("opcua.subscriptions.init").new(self, self.config)
+    self.subscriptions:start()
+  end
+  return self.subscriptions
+end
 
-  error(BadServiceUnsupported)
+function Svc:modifySubscription(req, channel)
+  return self:getSubscriptionManager():modifySubscription(self:checkSession(req, channel), req)
+end
+
+function Svc:deleteSubscriptions(req, channel)
+  return self:getSubscriptionManager():deleteSubscriptions(self:checkSession(req, channel), req.SubscriptionIds)
+end
+
+function Svc:setPublishingMode(req, channel)
+  return self:getSubscriptionManager():setPublishingMode(self:checkSession(req, channel), req)
+end
+
+function Svc:createMonitoredItems(req, channel)
+  return self:getSubscriptionManager():createMonitoredItems(self:checkSession(req, channel), req)
+end
+
+function Svc:modifyMonitoredItems(req, channel)
+  return self:getSubscriptionManager():modifyMonitoredItems(self:checkSession(req, channel), req)
+end
+
+function Svc:setMonitoringMode(req, channel)
+  return self:getSubscriptionManager():setMonitoringMode(self:checkSession(req, channel), req)
+end
+
+function Svc:deleteMonitoredItems(req, channel)
+  return self:getSubscriptionManager():deleteMonitoredItems(self:checkSession(req, channel), req)
+end
+
+function Svc:publish(req, channel, respond)
+  return self:getSubscriptionManager():publish(self:checkSession(req, channel), req, respond, channel)
+end
+
+function Svc:republish(req, channel)
+  return self:getSubscriptionManager():republish(self:checkSession(req, channel), req)
 end
 
 function Svc:callMethod(method)
@@ -1098,22 +1155,53 @@ function Svc:setValueCallback(nodeId, func)
   if dbgOn then traceD(fmt("Source callback for nodeId '%s' was set", nodeId)) end
 end
 
+function Svc:addWriteHook(nodeId, func)
+  if type(func) ~= "function" then
+    error(BadInvalidArgument)
+  end
+  local nodeHooks = self.hooks[nodeId] or {}
+  nodeHooks.listeners = nodeHooks.listeners or {}
+  self.nextHookId = (self.nextHookId or 0) + 1
+  nodeHooks.listeners[self.nextHookId] = func
+  self.hooks[nodeId] = nodeHooks
+  return self.nextHookId
+end
+
 function Svc:setWriteHook(nodeId, func)
   local dbgOn = self.trace.dbgOn
   if dbgOn then traceD(fmt("Setting write hook for node '%s'", nodeId)) end
-  if type(func) ~= 'function' then
+  if type(func) ~= "function" then
     error(BadInvalidArgument)
   end
 
-  local nodeHooks = self.hooks[nodeId] or {}
-  nodeHooks.onWrite = func
-  self.hooks[nodeId] = nodeHooks
+  local nodeHooks = self.hooks[nodeId]
+  if nodeHooks and nodeHooks.compatibilityId then
+    self:removeWriteHook(nodeId, nodeHooks.compatibilityId)
+  end
+
+  local id = self:addWriteHook(nodeId, func)
+  self.hooks[nodeId].compatibilityId = id
   if dbgOn then traceD(fmt("Write hook for nodeId '%s' was set", nodeId)) end
+  return id
+end
+
+function Svc:removeWriteHook(nodeId, id)
+  local hooks = self.hooks[nodeId]
+  if not hooks or not hooks.listeners then
+    return
+  end
+  hooks.listeners[id] = nil
+  if hooks.compatibilityId == id then
+    hooks.compatibilityId = nil
+  end
+  if next(hooks.listeners) == nil then
+    self.hooks[nodeId] = nil
+  end
 end
 
 function Svc:callWriteHook(nodeId, attributeId, value)
   local hooks = self.hooks[nodeId]
-  if not (hooks and hooks.onWrite) then
+  if not hooks then
     return
   end
 
@@ -1122,9 +1210,12 @@ function Svc:callWriteHook(nodeId, attributeId, value)
 
   if dbgOn then traceD(fmt("Services:Write | calling write hook for node '%s'", nodeId)) end
   -- IMO failing of a hook should not be a fatal error
-  local ok, err = pcall(hooks.onWrite, nodeId, attributeId, tools.copy(value))
-  if not ok and errOn then
-    traceE(fmt("Services:Write | write hook for node '%s' failed: %s", nodeId, err))
+  local function call(func)
+    local ok, err = pcall(func, nodeId, attributeId, tools.copy(value))
+    if not ok and errOn then traceE(fmt("Services:Write | write hook for node '%s' failed: %s", nodeId, err)) end
+  end
+  for _, func in pairs(hooks.listeners) do
+    call(func)
   end
 end
 
@@ -1203,6 +1294,9 @@ function Svc:cleanupSessions()
     local sessionTimeout = session.sessionExpirationTime - time
     if dbgOn then traceD(fmt("Services:cleanupSessions | session '%s' timeout '%s' secs.", session.sessionId, sessionTimeout)) end
     if sessionTimeout < 0 then
+      if self.subscriptions and self.sessions[session.authenticationToken] then
+        self.subscriptions:deleteSession(session)
+      end
       self.sessions[channelId] = nil
       if infOn then traceI(fmt("Services:cleanupSessions | Deleting expired session '%s' for channel", session.sessionId, session.channelId)) end
     else
@@ -1231,6 +1325,9 @@ function Svc:startSessionCleanup()
 end
 
 function Svc:shutdown()
+  if self.subscriptions then
+    self.subscriptions:shutdown()
+  end
   local timer = self.sessionTimer
   self.sessionTimer = nil
   if timer then
