@@ -28,7 +28,7 @@ if [ "$SHARKSSL_PSA_CONSUMER" = "1" ]; then
     cp ../../src/mako/.lua/psatpm.lua .lua/tpm.lua || exit 1
 fi
 
-for required in .lua/acme/runtime.lua .lua/acme/dns.lua .lua/acme/http.lua .lua/acme/_server.lua; do
+for required in .lua/seed.lua .lua/acme/runtime.lua .lua/acme/dns.lua .lua/acme/http.lua .lua/acme/_server.lua; do
     if [ ! -f "$required" ]; then
         echo "Required ACME module $required was not packaged."
         exit 1

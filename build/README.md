@@ -140,3 +140,18 @@ Xedge-on-Mako uses the Mako host's resources.
 ### Notes
 - Refer to the build script source for advanced customization to tweak configurations further.
 - Ensure you meet all dependencies (like **zip**) before running the scripts.
+
+## Random-generator startup
+
+The shared `src/core/.lua/seed.lua` owns the optional Internet reseed job and is
+included once in both Mako and standalone Xedge packages. There is no Mako
+overlay copy. C initializes the generator before Lua exists. Mako assumes a
+valid clock and starts the job during configuration; standalone Xedge waits
+until `(os.time()+86400) > xedge.compileTime` or an SNTP event. This is the ACME
+one-day clock tolerance. Xedge hosted in Mako inherits Mako's job.
+
+Downloads keep HTTPS certificate validation enabled. Public beacon data and
+clock timing are supplemental input, not a replacement for platform entropy.
+Failures are nonfatal and `require"seed".seed()` can request a later retry;
+overlapping requests are rejected and host teardown closes the worker. PSA
+hosts use their provider and skip this job.

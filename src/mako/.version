@@ -1,4 +1,4 @@
-local min=5855
+local min=6770
 --local max=
 return min,max
 

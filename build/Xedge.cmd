@@ -26,7 +26,7 @@ rem Select the TPM at build time, matching the native consumer setting.
 if "%SHARKSSL_PSA_CONSUMER%"=="1" (
    copy /y ..\..\src\mako\.lua\psatpm.lua .lua\tpm.lua >nul || goto BuildFailed
 )
-for %%i in (.lua\acme\runtime.lua .lua\acme\dns.lua .lua\acme\http.lua .lua\acme\_server.lua) do (
+for %%i in (.lua\seed.lua .lua\acme\runtime.lua .lua\acme\dns.lua .lua\acme\http.lua .lua\acme\_server.lua) do (
    if not exist "%%i" (
       echo Required ACME module %%i was not packaged.
       goto BuildFailed
